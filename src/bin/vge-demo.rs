@@ -1,15 +1,16 @@
-//! Live vector demo.
+//! Live vector demo — terminal windows **and** Linux TTY frame buffer.
 //!
-//! **Direct TTY / screen (Linux frame buffer — assembly stores into video RAM):**
 //! ```text
+//! # Any terminal emulator (Ghostty, Kitty, xterm, …) — default:
+//! cargo run --release --bin vge-demo
+//!
+//! # Force half-block / ascii / kitty present:
+//! VGE_TERM=half cargo run --release --bin vge-demo
+//! VGE_TERM=ascii cargo run --release --bin vge-demo
+//!
+//! # Direct video RAM (Linux VT / TTY glass):
 //! cargo run --release --bin vge-demo -- --fb
-//! VGE_PRESENT=fb cargo run --release --bin vge-demo
-//! ```
-//! Use a real virtual console (Ctrl+Alt+F3) for a clean TTY path.
-//!
-//! **Terminal emulator present (Kitty / half-block / ASCII):**
-//! ```text
-//! cargo run --release --bin vge-demo -- --term
+//! # Prefer: Ctrl+Alt+F3 → login → vge-demo --fb
 //! ```
 //!
 //! Quit: `q` / Esc / Ctrl+C.
@@ -28,6 +29,7 @@ use vge::{Color, Surface, Xform, AMBER, BLACK, CYAN, GREEN, GREEN_DIM, RED, WHIT
 
 static RUNNING: AtomicBool = AtomicBool::new(true);
 
+/// Draw target without `dyn` (avoids fat-pointer footguns with the asm FFI).
 trait Canvas {
     fn width(&self) -> u32;
     fn height(&self) -> u32;
@@ -116,15 +118,18 @@ fn select_mode() -> PresentMode {
         .unwrap_or_default()
         .to_ascii_lowercase();
 
+    // Explicit always wins.
     if flag_term {
         return PresentMode::Terminal(detect_backend());
     }
     if flag_fb || env == "fb" || env == "framebuffer" || env == "tty" {
         return PresentMode::Framebuffer;
     }
+    // Auto FB only on a real Linux virtual console — never inside pts/GUI terminals.
     if is_linux_vt() && fb_available() {
         return PresentMode::Framebuffer;
     }
+    // Ghostty / Kitty / xterm / every emulator → terminal present path.
     PresentMode::Terminal(detect_backend())
 }
 
@@ -151,13 +156,11 @@ fn is_linux_vt() -> bool {
             if libc::ttyname_r(libc::STDIN_FILENO, buf.as_mut_ptr(), buf.len()) == 0 {
                 let name = std::ffi::CStr::from_ptr(buf.as_ptr());
                 if let Ok(s) = name.to_str() {
-                    if s.starts_with("/dev/tty")
-                        && s.as_bytes()
-                            .get(8)
-                            .map(|c| c.is_ascii_digit())
-                            .unwrap_or(false)
-                    {
-                        return true;
+                    // /dev/tty1 … /dev/tty63 — not /dev/ttys000 or /dev/pts/N
+                    if let Some(rest) = s.strip_prefix("/dev/tty") {
+                        if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) {
+                            return true;
+                        }
                     }
                 }
             }
@@ -175,9 +178,10 @@ fn run_framebuffer() -> io::Result<()> {
             e.kind(),
             format!(
                 "open framebuffer failed: {e}\n\
-                 Need RW on /dev/fb0 (or VGE_FB). On a desktop, switch to a VT:\n\
-                   Ctrl+Alt+F3  →  login  →  vge-demo --fb\n\
-                 Add your user to the device group if open fails."
+                 Need RW on /dev/fb0 (or VGE_FB).\n\
+                 For a clean TTY path: Ctrl+Alt+F3 → login → vge-demo --fb\n\
+                 Inside Ghostty/Kitty/xterm use default (no --fb):\n\
+                   cargo run --release --bin vge-demo"
             ),
         )
     })?;
@@ -189,7 +193,7 @@ fn run_framebuffer() -> io::Result<()> {
         fb.stride(),
         vge::using_assembly()
     );
-    eprintln!("Assembly draws into mmap'd /dev/fb0. Quit: q / Ctrl+C");
+    eprintln!("Assembly stores into mmap'd /dev/fb0. Quit: q / Ctrl+C");
 
     let start = Instant::now();
     let mut frame: u64 = 0;
@@ -202,7 +206,7 @@ fn run_framebuffer() -> io::Result<()> {
             break;
         }
         let t = start.elapsed().as_secs_f32();
-        // No present step: pixels are already on the scanout buffer.
+        // Monomorphized — no dyn. Pixels already on the glass.
         draw_scene(&mut fb, t, fps, 3);
         frame += 1;
         fps_count += 1;
@@ -227,13 +231,19 @@ fn run_framebuffer() -> io::Result<()> {
 fn run_framebuffer() -> io::Result<()> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
-        "direct framebuffer present is Linux-only",
+        "direct framebuffer present is Linux-only; use default terminal mode",
     ))
 }
 
 fn run_terminal(backend: TermBackend) -> io::Result<()> {
     let (w, h) = suggested_surface_size(backend);
     let mut surf = Surface::new(w, h);
+
+    eprintln!(
+        "VGE terminal · backend={backend:?} · surface={w}x{h} · asm={}",
+        vge::using_assembly()
+    );
+    eprintln!("Quit: q / Esc / Ctrl+C");
 
     enter_fullscreen()?;
     let start = Instant::now();
@@ -271,13 +281,13 @@ fn run_terminal(backend: TermBackend) -> io::Result<()> {
     leave_fullscreen()?;
     let _ = writeln!(
         io::stderr(),
-        "vge-demo term done · backend={backend:?} · surface={w}x{h} · asm={} · frames={frame}",
-        vge::using_assembly()
+        "vge-demo term done · backend={backend:?} · frames={frame}"
     );
     result
 }
 
-fn draw_scene(c: &mut dyn Canvas, t: f32, fps: u32, backend_code: i32) {
+/// Generic monomorphized draw — `C: Canvas`, never `dyn Canvas`.
+fn draw_scene<C: Canvas + ?Sized>(c: &mut C, t: f32, fps: u32, backend_code: i32) {
     let w = c.width() as i32;
     let h = c.height() as i32;
     let cx = w / 2;
@@ -300,7 +310,7 @@ fn draw_scene(c: &mut dyn Canvas, t: f32, fps: u32, backend_code: i32) {
     let rot = Xform::identity()
         .translate(cx as f32, cy as f32)
         .rotate(t * 1.2)
-        .translate(-cx as f32, -cy as f32);
+        .translate(-(cx as f32), -(cy as f32));
     for i in 0..6 {
         let a = i as f32 * PI / 3.0;
         let x1 = cx as f32 + arm * a.cos();
@@ -317,7 +327,7 @@ fn draw_scene(c: &mut dyn Canvas, t: f32, fps: u32, backend_code: i32) {
     let ladder = Xform::identity()
         .translate(cx as f32, cy as f32)
         .rotate_deg(roll)
-        .translate(-cx as f32, -cy as f32);
+        .translate(-(cx as f32), -(cy as f32));
     for step in -3..=3 {
         if step == 0 {
             continue;
@@ -386,6 +396,10 @@ fn poll_quit() -> io::Result<bool> {
     #[cfg(unix)]
     {
         unsafe {
+            // Do not read a non-tty pipe (cargo/IDE) as if it were keys.
+            if libc::isatty(libc::STDIN_FILENO) == 0 {
+                return Ok(false);
+            }
             let mut fds = libc::pollfd {
                 fd: libc::STDIN_FILENO,
                 events: libc::POLLIN,
@@ -415,9 +429,12 @@ fn poll_quit() -> io::Result<bool> {
 fn install_sigint() {
     #[cfg(unix)]
     unsafe {
-        extern "C" fn on_sigint(_: i32) {
+        extern "C" fn on_sigint(_: libc::c_int) {
             RUNNING.store(false, Ordering::Relaxed);
         }
-        libc::signal(libc::SIGINT, on_sigint as *const () as usize);
+        // libc::sighandler_t is a pointer-sized integer on this target.
+        #[allow(unknown_lints, function_casts_as_integer)]
+        let handler = on_sigint as *const () as libc::sighandler_t;
+        libc::signal(libc::SIGINT, handler);
     }
 }

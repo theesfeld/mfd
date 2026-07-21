@@ -24,37 +24,32 @@ A display layer (window, Kitty protocol, framebuffer) only needs the pixel buffe
 vge = { git = "https://github.com/theesfeld/vge" }
 ```
 
-## Demo — draw on the glass
+## Demo — every terminal + TTY
 
-### Direct screen (Linux TTY / frame buffer)
+Same engine (assembly geometry → pixels). Present path depends on the host:
 
-Assembly Bresenham stores **into video RAM** via `mmap(/dev/fb0)`.  
-No escape codes. No character cells. Pixels on the scanout buffer.
-
-```bash
-# Prefer a real virtual console (clean TTY path):
-#   Ctrl+Alt+F3 → login → then:
-cargo run --release --bin vge-demo -- --fb
-# or:
-VGE_PRESENT=fb cargo run --release --bin vge-demo
-```
-
-Needs RW on `/dev/fb0` (override with `VGE_FB`). This host maps 32-bit XRGB (`0x00RRGGBB`) so the asm hot path writes dwords straight into the map.
-
-### Terminal emulator present
-
-When you are inside Ghostty/Kitty/xterm (not the Linux VT), use the protocol / cell present path:
+### Terminal window (default) — Ghostty, Kitty, xterm, …
 
 ```bash
-cargo run --release --bin vge-demo -- --term
+cargo run --release --bin vge-demo
 ```
 
-| `VGE_TERM` | Path |
-|------------|------|
-| (auto) | Kitty graphics when Ghostty/Kitty/WezTerm is detected; else half-block |
-| `kitty` | RGB pixels via Kitty graphics protocol |
-| `half` | Unicode half-block + truecolor |
+| `VGE_TERM` | Present |
+|------------|---------|
+| (auto) | Kitty graphics on Ghostty/Kitty/WezTerm; else half-block truecolor |
+| `kitty` | RGB pixels via Kitty protocol |
+| `half` | Half-block truecolor (wide TTY/emulator support) |
 | `ascii` | Density chars for dumb hosts |
+
+### Direct glass (Linux VT / frame buffer)
+
+```bash
+# Real virtual console recommended:
+#   Ctrl+Alt+F3 → login →
+cargo run --release --bin vge-demo -- --fb
+```
+
+Assembly stores into `mmap(/dev/fb0)` video RAM. Needs RW on the FB device.
 
 Quit: `q`, Esc, or Ctrl+C.
 

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `vge-demo --fb` release segfault: do not use `dyn Canvas` with the asm FFI path (monomorphize)
+- Terminal default for emulators (Ghostty/Kitty/xterm); FB only on real VT or `--fb`
+- `poll_quit` ignores non-tty stdin (cargo pipes)
+
 ### Added
 
 - True vector engine: geometry lights individual pixels (no sprite/bitmap draw path)

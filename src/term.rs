@@ -49,10 +49,14 @@ pub fn detect_backend() -> TermBackend {
     let term = std::env::var("TERM")
         .unwrap_or_default()
         .to_ascii_lowercase();
+    let colorterm = std::env::var("COLORTERM")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
 
     if std::env::var_os("KITTY_WINDOW_ID").is_some()
         || std::env::var_os("WEZTERM_EXECUTABLE").is_some()
         || std::env::var_os("WEZTERM_PANE").is_some()
+        || std::env::var_os("GHOSTTY_RESOURCES_DIR").is_some()
         || prog.contains("ghostty")
         || prog.contains("kitty")
         || prog.contains("wezterm")
@@ -62,15 +66,20 @@ pub fn detect_backend() -> TermBackend {
         return TermBackend::Kitty;
     }
 
-    // Linux console / bare tty often still do Unicode + color.
+    // Truecolor terminals (most modern emulators): half-block path.
+    if colorterm.contains("truecolor") || colorterm.contains("24bit") {
+        return TermBackend::HalfBlock;
+    }
+
+    // Linux console / bare host often still do Unicode + color.
     if term == "dumb" || term.is_empty() {
-        // Prefer half-block if stdout is a tty; ascii only when forced dumb.
         if atty_stdout() {
             return TermBackend::HalfBlock;
         }
         return TermBackend::Ascii;
     }
 
+    // xterm, rxvt, alacritty, foot, konsole, … → half-block truecolor.
     TermBackend::HalfBlock
 }
 
