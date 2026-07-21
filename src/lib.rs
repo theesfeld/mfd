@@ -10,6 +10,7 @@
 
 #![allow(non_camel_case_types)]
 
+pub mod effects;
 #[cfg(target_os = "linux")]
 pub mod fb;
 pub mod frame;

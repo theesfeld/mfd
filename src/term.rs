@@ -1,32 +1,77 @@
-//! Present a VGE pixel surface **in the terminal**.
+//! Present a VGE pixel surface in the terminal.
 //!
-//! The engine still lights individual pixels. This module only maps that
-//! pixel buffer to whatever the host can show:
+//! # Speed rule
 //!
-//! 1. **Kitty** graphics protocol — true RGB pixels (Ghostty, Kitty, WezTerm, …)
-//! 2. **Half-block** truecolor — 2 vertical pixels per cell (most terminals + many TTYs)
-//! 3. **ASCII** density — last resort for dumb / mono TTY
+//! The **raster** path is near-instant. The **present** path is the bottleneck
+//! (Kitty base64, half-block ANSI). This module:
 //!
-//! Force with env: `VGE_TERM=kitty|half|ascii`
+//! - builds output in one buffer, one write
+//! - caps default pixel density so present stays fast
+//! - supports a **viewport** (cell rectangle) so vectors sit on top of text
+//!
+//! Force backend: `VGE_TERM=kitty|half|ascii`  
+//! Cap pixels: `VGE_MAX_W`, `VGE_MAX_H` (defaults 960×540)
 
 use crate::{Color, Surface};
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-static KITTY_ID: AtomicU32 = AtomicU32::new(1);
+static KITTY_ID: AtomicU32 = AtomicU32::new(42);
 
 /// How to put engine pixels on a terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TermBackend {
-    /// Kitty graphics protocol (real pixel image placement).
+    /// Kitty graphics protocol (Ghostty, Kitty, WezTerm, …).
     Kitty,
-    /// Unicode half-block + 24-bit ANSI (works widely, including many TTYs).
+    /// Unicode half-block + 24-bit ANSI.
     HalfBlock,
-    /// ASCII density (dumb terminal / no Unicode).
+    /// ASCII density (dumb host).
     Ascii,
 }
 
-/// Detect a workable backend. Prefer real pixels when the host supports them.
+/// Cell rectangle for overlay placement (1-based row/col for CSI CUP).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Viewport {
+    /// Left cell (0-based).
+    pub col: u16,
+    /// Top cell (0-based).
+    pub row: u16,
+    /// Width in cells.
+    pub cols: u16,
+    /// Height in cells.
+    pub rows: u16,
+}
+
+impl Viewport {
+    pub fn full_terminal() -> Self {
+        let (c, r) = terminal_cells();
+        Self {
+            col: 0,
+            row: 0,
+            cols: c.max(1),
+            rows: r.saturating_sub(1).max(1),
+        }
+    }
+
+    /// Centered box using a fraction of the terminal (e.g. 0.7 = 70%).
+    pub fn centered_frac(frac_w: f32, frac_h: f32) -> Self {
+        let (tc, tr) = terminal_cells();
+        let cols = ((tc as f32) * frac_w.clamp(0.1, 1.0)) as u16;
+        let rows = ((tr as f32) * frac_h.clamp(0.1, 1.0)) as u16;
+        let cols = cols.max(10).min(tc);
+        let rows = rows.max(4).min(tr.saturating_sub(1).max(1));
+        let col = tc.saturating_sub(cols) / 2;
+        let row = tr.saturating_sub(rows) / 2;
+        Self {
+            col,
+            row,
+            cols,
+            rows,
+        }
+    }
+}
+
+/// Detect a workable backend.
 pub fn detect_backend() -> TermBackend {
     if let Ok(v) = std::env::var("VGE_TERM") {
         match v.to_ascii_lowercase().as_str() {
@@ -37,9 +82,6 @@ pub fn detect_backend() -> TermBackend {
         }
     }
     if std::env::var_os("VGE_FORCE_ASCII").is_some() {
-        return TermBackend::Ascii;
-    }
-    if std::env::var_os("OBDTUI_FORCE_ASCII").is_some() {
         return TermBackend::Ascii;
     }
 
@@ -66,20 +108,16 @@ pub fn detect_backend() -> TermBackend {
         return TermBackend::Kitty;
     }
 
-    // Truecolor terminals (most modern emulators): half-block path.
     if colorterm.contains("truecolor") || colorterm.contains("24bit") {
         return TermBackend::HalfBlock;
     }
-
-    // Linux console / bare host often still do Unicode + color.
     if term == "dumb" || term.is_empty() {
-        if atty_stdout() {
-            return TermBackend::HalfBlock;
-        }
-        return TermBackend::Ascii;
+        return if atty_stdout() {
+            TermBackend::HalfBlock
+        } else {
+            TermBackend::Ascii
+        };
     }
-
-    // xterm, rxvt, alacritty, foot, konsole, … → half-block truecolor.
     TermBackend::HalfBlock
 }
 
@@ -118,60 +156,92 @@ pub fn terminal_cells() -> (u16, u16) {
     (80, 24)
 }
 
-/// Recommended pixel surface size for the current backend and terminal.
-pub fn suggested_surface_size(backend: TermBackend) -> (u32, u32) {
-    let (cols, rows) = terminal_cells();
-    let cols = cols.max(20) as u32;
-    let rows = rows.saturating_sub(1).max(10) as u32; // leave status line
-    match backend {
-        TermBackend::Kitty => {
-            // ~10×20 device pixels per cell (crisp vectors).
-            (cols * 10, rows * 20)
-        }
-        TermBackend::HalfBlock => {
-            // 1 cell wide × 2 pixels tall per cell.
-            (cols, rows * 2)
-        }
-        TermBackend::Ascii => (cols, rows),
-    }
+fn max_pixels() -> (u32, u32) {
+    let mw = std::env::var("VGE_MAX_W")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(960u32);
+    let mh = std::env::var("VGE_MAX_H")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(540u32);
+    (mw.max(64), mh.max(64))
 }
 
-/// Enter alternate screen, clear, hide cursor.
+/// Pixel surface size for a viewport (capped for present speed).
+pub fn surface_size_for_viewport(backend: TermBackend, vp: Viewport) -> (u32, u32) {
+    let (mw, mh) = max_pixels();
+    let cols = vp.cols.max(1) as u32;
+    let rows = vp.rows.max(1) as u32;
+    let (w, h) = match backend {
+        // 4×8 device px/cell — sharp enough, present stays light.
+        TermBackend::Kitty => (cols * 4, rows * 8),
+        TermBackend::HalfBlock => (cols, rows * 2),
+        TermBackend::Ascii => (cols, rows),
+    };
+    (w.min(mw), h.min(mh))
+}
+
+/// Recommended full-terminal surface (capped).
+pub fn suggested_surface_size(backend: TermBackend) -> (u32, u32) {
+    surface_size_for_viewport(backend, Viewport::full_terminal())
+}
+
+/// Hide cursor only (keep normal screen — overlay mode).
+pub fn enter_overlay() -> io::Result<()> {
+    let mut out = io::stdout().lock();
+    write!(out, "\x1b[?25l")?;
+    out.flush()
+}
+
+/// Full alternate screen (legacy demo mode).
 pub fn enter_fullscreen() -> io::Result<()> {
     let mut out = io::stdout().lock();
     write!(out, "\x1b[?1049h\x1b[H\x1b[2J\x1b[?25l")?;
     out.flush()
 }
 
-/// Leave alternate screen, show cursor.
+pub fn leave_overlay() -> io::Result<()> {
+    let mut out = io::stdout().lock();
+    write!(out, "\x1b_Ga=d,d=a\x1b\\")?;
+    write!(out, "\x1b[?25h")?;
+    out.flush()
+}
+
 pub fn leave_fullscreen() -> io::Result<()> {
     let mut out = io::stdout().lock();
-    // Delete any Kitty image we may have placed.
     write!(out, "\x1b_Ga=d,d=a\x1b\\")?;
     write!(out, "\x1b[?25h\x1b[?1049l")?;
     out.flush()
 }
 
-/// Present surface at top-left of the terminal.
+/// Present at top-left, full suggested area.
 pub fn present(surface: &Surface, backend: TermBackend) -> io::Result<()> {
+    present_at(surface, backend, Viewport::full_terminal())
+}
+
+/// Present inside a cell rectangle. Text outside the viewport is untouched
+/// (overlay). This is how vectors sit **on top of** a normal TUI.
+pub fn present_at(surface: &Surface, backend: TermBackend, vp: Viewport) -> io::Result<()> {
     match backend {
-        TermBackend::Kitty => present_kitty(surface),
-        TermBackend::HalfBlock => present_halfblock(surface),
-        TermBackend::Ascii => present_ascii(surface),
+        TermBackend::Kitty => present_kitty_at(surface, vp),
+        TermBackend::HalfBlock => present_halfblock_at(surface, vp),
+        TermBackend::Ascii => present_ascii_at(surface, vp),
     }
 }
 
-fn present_kitty(surface: &Surface) -> io::Result<()> {
-    let (cols, rows) = terminal_cells();
-    let cols = cols.max(1);
-    let rows = rows.saturating_sub(1).max(1);
-    let rgb = surface.export_rgb24();
+fn present_kitty_at(surface: &Surface, vp: Viewport) -> io::Result<()> {
+    let cols = vp.cols.max(1);
+    let rows = vp.rows.max(1);
     let w = surface.width();
     let h = surface.height();
+    let rgb = surface.export_rgb24();
     let id = KITTY_ID.load(Ordering::Relaxed);
 
-    let mut out = io::stdout().lock();
-    write!(out, "\x1b[H")?;
+    // Build one buffer: cursor → graphics payload.
+    let mut out = Vec::with_capacity(rgb.len() * 2 + 128);
+    // CUP is 1-based
+    push_cup(&mut out, vp.row + 1, vp.col + 1);
 
     let header = format!("a=T,f=24,t=d,s={w},v={h},c={cols},r={rows},i={id},q=2");
     let b64 = b64_encode(&rgb);
@@ -182,78 +252,122 @@ fn present_kitty(surface: &Surface) -> io::Result<()> {
     while offset < bytes.len() {
         let end = (offset + chunk).min(bytes.len());
         let more = if end < bytes.len() { 1 } else { 0 };
-        let slice = &bytes[offset..end];
         if first {
-            write!(
-                out,
-                "\x1b_G{},m={};{}\x1b\\",
-                header,
-                more,
-                std::str::from_utf8(slice).unwrap_or("")
-            )?;
+            out.extend_from_slice(b"\x1b_G");
+            out.extend_from_slice(header.as_bytes());
+            out.extend_from_slice(b",m=");
+            out.push(if more == 1 { b'1' } else { b'0' });
+            out.push(b';');
+            out.extend_from_slice(&bytes[offset..end]);
+            out.extend_from_slice(b"\x1b\\");
             first = false;
         } else {
-            write!(
-                out,
-                "\x1b_Gm={};{}\x1b\\",
-                more,
-                std::str::from_utf8(slice).unwrap_or("")
-            )?;
+            out.extend_from_slice(b"\x1b_Gm=");
+            out.push(if more == 1 { b'1' } else { b'0' });
+            out.push(b';');
+            out.extend_from_slice(&bytes[offset..end]);
+            out.extend_from_slice(b"\x1b\\");
         }
         offset = end;
     }
-    out.flush()
+    let mut stdout = io::stdout().lock();
+    stdout.write_all(&out)?;
+    stdout.flush()
 }
 
-fn present_halfblock(surface: &Surface) -> io::Result<()> {
-    let w = surface.width() as i32;
-    let h = surface.height() as i32;
-    let mut out = io::stdout().lock();
-    write!(out, "\x1b[H")?;
+/// Fast half-block: one buffer, raw pixel walk, single write.
+fn present_halfblock_at(surface: &Surface, vp: Viewport) -> io::Result<()> {
+    let w = surface.width() as usize;
+    let h = surface.height() as usize;
+    let stride = surface.stride() as usize;
+    let px = surface.pixels();
+    let rows = h.div_ceil(2);
 
-    let rows = (h + 1) / 2;
+    // ~40 bytes per cell worst case
+    let mut buf = Vec::with_capacity(rows * w * 40 + 32);
+
     for row in 0..rows {
+        push_cup(&mut buf, vp.row + 1 + row as u16, vp.col + 1);
         let y0 = row * 2;
         let y1 = y0 + 1;
         for x in 0..w {
-            let top = surface.get(x, y0).unwrap_or(0);
+            let top = load_px(px, stride, x, y0, w, h);
             let bot = if y1 < h {
-                surface.get(x, y1).unwrap_or(0)
+                load_px(px, stride, x, y1, w, h)
             } else {
                 0
             };
             let (tr, tg, tb) = unpack_rgb(top);
             let (br, bg, bb) = unpack_rgb(bot);
-            // ▀ = upper half; fg = top, bg = bottom.
-            write!(out, "\x1b[38;2;{tr};{tg};{tb}m\x1b[48;2;{br};{bg};{bb}m▀")?;
+            // \x1b[38;2;R;G;Bm\x1b[48;2;R;G;Bm▀
+            buf.extend_from_slice(b"\x1b[38;2;");
+            push_u8(&mut buf, tr);
+            buf.push(b';');
+            push_u8(&mut buf, tg);
+            buf.push(b';');
+            push_u8(&mut buf, tb);
+            buf.extend_from_slice(b"m\x1b[48;2;");
+            push_u8(&mut buf, br);
+            buf.push(b';');
+            push_u8(&mut buf, bg);
+            buf.push(b';');
+            push_u8(&mut buf, bb);
+            buf.extend_from_slice(b"m\xE2\x96\x80"); // ▀ UTF-8
         }
-        write!(out, "\x1b[0m\r\n")?;
+        buf.extend_from_slice(b"\x1b[0m");
     }
-    out.flush()
+
+    let mut stdout = io::stdout().lock();
+    stdout.write_all(&buf)?;
+    stdout.flush()
 }
 
-fn present_ascii(surface: &Surface) -> io::Result<()> {
+fn present_ascii_at(surface: &Surface, vp: Viewport) -> io::Result<()> {
     const RAMP: &[u8] = b" .:-=+*#%@";
-    let w = surface.width() as i32;
-    let h = surface.height() as i32;
-    let mut out = io::stdout().lock();
-    write!(out, "\x1b[H")?;
+    let w = surface.width() as usize;
+    let h = surface.height() as usize;
+    let stride = surface.stride() as usize;
+    let px = surface.pixels();
+    let mut buf = Vec::with_capacity(h * w * 24 + 32);
+
     for y in 0..h {
+        push_cup(&mut buf, vp.row + 1 + y as u16, vp.col + 1);
         for x in 0..w {
-            let c = surface.get(x, y).unwrap_or(0);
+            let c = load_px(px, stride, x, y, w, h);
             let (r, g, b) = unpack_rgb(c);
             let lum = (r as u32 * 3 + g as u32 * 6 + b as u32) / 10;
             let idx = (lum * (RAMP.len() as u32 - 1) / 255) as usize;
-            let ch = RAMP[idx] as char;
+            let ch = RAMP[idx];
             if r | g | b == 0 {
-                write!(out, "{ch}")?;
+                buf.push(ch);
             } else {
-                write!(out, "\x1b[38;2;{r};{g};{b}m{ch}\x1b[0m")?;
+                buf.extend_from_slice(b"\x1b[38;2;");
+                push_u8(&mut buf, r);
+                buf.push(b';');
+                push_u8(&mut buf, g);
+                buf.push(b';');
+                push_u8(&mut buf, b);
+                buf.push(b'm');
+                buf.push(ch);
+                buf.extend_from_slice(b"\x1b[0m");
             }
         }
-        write!(out, "\r\n")?;
     }
-    out.flush()
+    let mut stdout = io::stdout().lock();
+    stdout.write_all(&buf)?;
+    stdout.flush()
+}
+
+#[inline]
+fn load_px(px: &[u8], stride: usize, x: usize, y: usize, w: usize, h: usize) -> Color {
+    if x >= w || y >= h {
+        return 0;
+    }
+    let i = y * stride + x * 4;
+    if i + 3 >= px.len() {
+        return 0;
+    }
+    u32::from_le_bytes([px[i], px[i + 1], px[i + 2], px[i + 3]])
 }
 
 #[inline]
@@ -263,6 +377,47 @@ fn unpack_rgb(c: Color) -> (u8, u8, u8) {
         ((c >> 8) & 0xFF) as u8,
         (c & 0xFF) as u8,
     )
+}
+
+#[inline]
+fn push_u8(buf: &mut Vec<u8>, n: u8) {
+    if n >= 100 {
+        buf.push(b'0' + n / 100);
+        buf.push(b'0' + (n / 10) % 10);
+        buf.push(b'0' + n % 10);
+    } else if n >= 10 {
+        buf.push(b'0' + n / 10);
+        buf.push(b'0' + n % 10);
+    } else {
+        buf.push(b'0' + n);
+    }
+}
+
+fn push_cup(buf: &mut Vec<u8>, row_1: u16, col_1: u16) {
+    // CSI row;col H
+    buf.extend_from_slice(b"\x1b[");
+    push_u16(buf, row_1);
+    buf.push(b';');
+    push_u16(buf, col_1);
+    buf.push(b'H');
+}
+
+fn push_u16(buf: &mut Vec<u8>, n: u16) {
+    if n >= 1000 {
+        buf.push(b'0' + (n / 1000) as u8);
+        buf.push(b'0' + ((n / 100) % 10) as u8);
+        buf.push(b'0' + ((n / 10) % 10) as u8);
+        buf.push(b'0' + (n % 10) as u8);
+    } else if n >= 100 {
+        buf.push(b'0' + (n / 100) as u8);
+        buf.push(b'0' + ((n / 10) % 10) as u8);
+        buf.push(b'0' + (n % 10) as u8);
+    } else if n >= 10 {
+        buf.push(b'0' + (n / 10) as u8);
+        buf.push(b'0' + (n % 10) as u8);
+    } else {
+        buf.push(b'0' + n as u8);
+    }
 }
 
 fn b64_encode(data: &[u8]) -> String {
@@ -310,5 +465,18 @@ mod tests {
     #[test]
     fn detect_does_not_panic() {
         let _ = detect_backend();
+    }
+
+    #[test]
+    fn surface_size_is_capped() {
+        let vp = Viewport {
+            col: 0,
+            row: 0,
+            cols: 500,
+            rows: 200,
+        };
+        let (w, h) = surface_size_for_viewport(TermBackend::Kitty, vp);
+        let (mw, mh) = max_pixels();
+        assert!(w <= mw && h <= mh);
     }
 }

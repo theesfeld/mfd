@@ -1,148 +1,235 @@
 # VGE — Vector Graphics Engine
 
 <!-- agents:status:begin -->
-> **Status:** active · Phase: [#1](https://github.com/theesfeld/vge/issues/1) · Version: `0.1.0-dev.1` · MIT
+> **Status:** active · Version: `0.1.0-dev.1` · License: MIT · [Issues](https://github.com/theesfeld/vge/issues)
 <!-- agents:status:end -->
 
-True **vector** graphics: you give geometry (`line`, `circle`, transform). The engine lights **each pixel** on that path. This is not a bitmap or sprite display library.
+VGE draws **true vectors**: geometry (`line`, `circle`, transform) lights **individual pixels**.  
+This is not a sprite or bitmap blitter.
 
-Hot path on **x86_64 Linux**: GNU assembly (`asm/x86_64/vge.s`). Other targets use a portable C path with the same API.
+Hot path on **x86_64**: GNU assembly (`asm/x86_64/vge.s`).  
+Other targets use a portable C path with the same C ABI.
 
-## What this is
+<p align="center">
+  <img src="docs/demo-hud.png" alt="Vector HUD sample from VGE" width="640" />
+</p>
 
-| Does | Does not |
-|------|----------|
-| Bresenham / midpoint geometry → pixels | Load and show PNG/JPEG sprites as the draw model |
-| Rotate / scale / translate then stroke | Fake “vectors” with character cells |
-| C ABI + Rust crate | Depend on a GPU frame for the math |
+---
 
-A display layer (window, Kitty protocol, framebuffer) only needs the pixel buffer after VGE draws. The engine itself is pure vector math and pixel stores.
+## Performance (read this first)
 
-## Install (Rust)
+| Stage | Role | Measured rate (release, this class of host) |
+|-------|------|-----------------------------------------------|
+| **Raster** | Geometry → pixels in **system RAM** | Draw-only: **~10 000 FPS** at 1280×720; **~1 700 FPS** at 2560×1600 |
+| **Present** | Put pixels on glass or in a terminal | FB blit full HD: **~800 FPS**. Kitty present (capped): **thousands of FPS** at default density |
+| **Pace** | Optional lock to `VGE_HZ` | Use `VGE_HZ=0` for uncapped present rate |
 
-```toml
-vge = { git = "https://github.com/theesfeld/vge" }
-```
-
-## Performance model (smooth + fast)
-
-| Stage | What |
-|-------|------|
-| **Raster** | Geometry → pixels in **system RAM** (asm Bresenham, inlined stores, bulk clear) |
-| **Present** | One blit / protocol push per frame (never uncached FB writes per pixel) |
-| **Pace** | `FramePacer` locks target Hz (default 60; `VGE_HZ=120`) |
-
-Measured on this host (release, asm hot path):
-
-| Work | Size | FPS |
-|------|------|-----|
-| Draw-only | 1280×720 | ~10 000 |
-| Draw-only | 2560×1600 | ~1 700 |
-| Draw + blit to `/dev/fb0` | 2560×1600 | ~800 |
+**Fact:** The engine is not the bottleneck. Full-frame terminal present was the bottleneck when every cell used a slow format write or a huge base64 image. That path is fixed: one buffer, one write, capped pixel size, region overlay.
 
 ```bash
 cargo run --release --example bench
-cargo run --release --example bench -- --fb
+cargo run --release --example profile_present   # present FPS by backend
 ```
 
-Optional CRT-style trail (vector phosphor): `VGE_PHOSPHOR=1` or `--phosphor`.
+| Present backend | Size (80×24 cells) | Present rate (order of) |
+|-----------------|--------------------|-------------------------|
+| ASCII | 80×24 | >100 000 FPS |
+| Half-block | 80×48 | >50 000 FPS |
+| Kitty | 320×192 (capped density) | >3 000 FPS |
 
-## Demo — every terminal + TTY
+---
 
-### Terminal window (default) — Ghostty, Kitty, xterm, …
+## Overlay model (vectors on top of text)
 
-```bash
-cargo run --release --bin vge-demo
-VGE_HZ=120 cargo run --release --bin vge-demo
+VGE can fill a **cell rectangle** only. Text and inputs stay around that region.
+
+```text
+┌ status / keys ─────────────────────────────┐
+│  [  vector viewport — Kitty or half-block ] │
+│  [  present_at(surface, backend, viewport) ]│
+└ draw_us / present_us / fps ────────────────┘
 ```
 
-| `VGE_TERM` | Present |
-|------------|---------|
-| (auto) | Kitty graphics on Ghostty/Kitty/WezTerm; else half-block truecolor |
-| `kitty` | RGB pixels via Kitty protocol |
-| `half` | Half-block truecolor (wide support) |
-| `ascii` | Density chars for dumb hosts |
+```rust
+use vge::term::{detect_backend, enter_overlay, leave_overlay, present_at, Viewport,
+                surface_size_for_viewport};
+use vge::{Surface, BLACK, GREEN};
 
-### Direct glass (Linux VT / frame buffer)
+let backend = detect_backend();
+let vp = Viewport::centered_frac(0.7, 0.65); // cells
+let (w, h) = surface_size_for_viewport(backend, vp);
+let mut s = Surface::new(w, h);
+s.clear(BLACK);
+s.line(0, 0, w as i32 - 1, h as i32 - 1, GREEN);
 
-```bash
-# Real virtual console recommended: Ctrl+Alt+F3 → login →
-cargo run --release --bin vge-demo -- --fb
-VGE_HZ=120 cargo run --release --bin vge-demo -- --fb
+enter_overlay()?;
+present_at(&s, backend, vp)?;   // does not wipe the whole TTY chrome
+// … print text at other cell positions …
+leave_overlay()?;
 ```
 
-Draws in RAM, **one blit** to `mmap(/dev/fb0)` per frame. Needs RW on the FB device.
+| API | Purpose |
+|-----|---------|
+| `Viewport { col, row, cols, rows }` | Cell box (0-based origin) |
+| `Viewport::centered_frac(fw, fh)` | Centered box as a fraction of the terminal |
+| `present_at(surface, backend, vp)` | Place pixels in that box only |
+| `enter_overlay` / `leave_overlay` | Hide cursor; keep main screen |
+| `enter_fullscreen` / `leave_fullscreen` | Alternate screen (optional) |
 
-Quit: `q`, Esc, or Ctrl+C.
+---
 
-## Quick use (Rust)
+## Install
+
+```toml
+# Cargo.toml
+vge = { git = "https://github.com/theesfeld/vge" }
+```
+
+C header: `include/vge.h`  
+Link the static/shared library from `cargo build --release` (`libvge.a` / `libvge.so`).
+
+---
+
+## Quick start (Rust)
 
 ```rust
 use vge::{Surface, Xform, GREEN, BLACK};
-use vge::term::{detect_backend, present};
 
-let mut s = Surface::new(640, 480);
+let mut s = Surface::new(640, 360);
 s.clear(BLACK);
-s.line(10, 10, 600, 400, GREEN);
-s.circle(320, 240, 80, GREEN);
+s.line(10, 10, 630, 350, GREEN);
+s.circle(320, 180, 80, GREEN);
 
 let m = Xform::identity()
-    .translate(320.0, 240.0)
+    .translate(320.0, 180.0)
     .rotate_deg(15.0)
-    .translate(-320.0, -240.0);
-s.line_xf(&m, 100.0, 240.0, 540.0, 240.0, GREEN);
-
-present(&s, detect_backend()).unwrap();
+    .translate(-320.0, -180.0);
+s.line_xf(&m, 100.0, 180.0, 540.0, 180.0, GREEN);
 ```
 
-## C API
+Linux frame buffer (direct glass):
 
-Header: `include/vge.h`
+```rust
+// Draw in RAM, blit once per frame (do not plot into FB per pixel).
+let mut fb = vge::fb::Framebuffer::open_default()?;
+let mut back = Surface::new(fb.width(), fb.height());
+// … draw into `back` …
+fb.present_from(&back);
+```
+
+---
+
+## Demo
+
+```bash
+# Default: overlay region in the current terminal (Ghostty / Kitty / xterm / …)
+cargo run --release --bin vge-demo
+
+# Uncapped present rate (shows real draw_us / present_us / fps)
+VGE_HZ=0 cargo run --release --bin vge-demo
+
+# Effects (optional; costs extra CPU)
+VGE_EFFECTS=glow,radar cargo run --release --bin vge-demo
+
+# Linux video RAM path
+cargo run --release --bin vge-demo -- --fb
+
+# Full alternate screen
+cargo run --release --bin vge-demo -- --full
+```
+
+| Flag / env | Effect |
+|------------|--------|
+| (default) | Overlay viewport; text chrome around it |
+| `--fb` | RAM draw + blit to `/dev/fb0` |
+| `--full` | Alternate screen, full area |
+| `VGE_HZ=0` | No frame sleep (max rate) |
+| `VGE_HZ=120` | Lock ~120 Hz when present is faster |
+| `VGE_TERM=kitty\|half\|ascii` | Force present backend |
+| `VGE_MAX_W` / `VGE_MAX_H` | Cap pixel buffer (default 960×540) |
+| `VGE_EFFECTS=…` | `glow`, `bloom`, `radar`, `scan` |
+| `VGE_PHOSPHOR=1` | Decay trail instead of hard clear |
+
+Quit: `q`, Esc, or Ctrl+C.
+
+---
+
+## API surface
+
+### Geometry (C + Rust)
+
+| Function | Description |
+|----------|-------------|
+| `vge_clear` / `Surface::clear` | Fill all pixels |
+| `vge_plot` / `plot` | One pixel |
+| `vge_line` / `line` | Bresenham (inlined stores in asm) |
+| `vge_line_thick` / `line_thick` | Multi-pass thick line |
+| `vge_circle` / `circle` | Midpoint circle |
+| `vge_rect_fill` / `rect_fill` | Filled rectangle |
+| `vge_line_xf` / `line_xf` | Line after affine transform |
+| `vge_polyline` / `polyline` | Connected segments |
+| `vge_xform_*` / `Xform` | Translate, scale, rotate |
+
+### Present / buffer
+
+| Function | Description |
+|----------|-------------|
+| `vge_blit` / `blit_to` / `present_from` | Copy RAM → RAM or RAM → FB |
+| `vge_decay` / `decay` | Phosphor fade (`factor_256` / 256) |
+| `vge_export_rgb24` | Tight RGB for protocols |
+| `term::present` / `present_at` | Terminal present |
+| `frame::FramePacer` | Optional target Hz |
+
+### Effects (`vge::effects`)
+
+| Function | Description |
+|----------|-------------|
+| `glow` | Expand bright pixels with falloff |
+| `bloom` | Threshold + box blur add-back |
+| `radar_fade` | Angular sector fade (radar beam) |
+| `scanlines` | Dim every other row |
+
+Effects run **after** geometry. They cost CPU. Leave them off for maximum rate.
+
+---
+
+## C API
 
 ```c
 #include "vge.h"
 
-uint8_t buf[640 * 480 * 4];
-VgeSurface s = { .width = 640, .height = 480, .stride = 640 * 4, .pixels = buf };
+uint8_t buf[640 * 360 * 4];
+VgeSurface s = { .width = 640, .height = 360, .stride = 640 * 4, .pixels = buf };
 vge_clear(&s, 0x000000);
-vge_line(&s, 0, 0, 639, 479, 0x00FF46);
+vge_line(&s, 0, 0, 639, 359, 0x00FF46);
 ```
 
-Link the static library from `cargo build` (`libvge.a` / `libvge.so`) or compile `c/vge_portable.c` and, on x86_64, `asm/x86_64/vge.s` with `as --64`.
-
-## Build
-
-```bash
-cargo test
-cargo build --release
-```
-
-Force portable C on x86_64:
-
-```bash
-VGE_FORCE_C=1 cargo test
-```
-
-Needs: Rust stable, `cc`, GNU `as` (binutils) for the assembly path, `libm`.
+---
 
 ## Layout
 
 ```
-include/vge.h          C ABI
-asm/x86_64/vge.s       assembly hot path (plot/line/circle/clear)
-c/vge_portable.c       transforms + portable raster + export
-src/lib.rs             Rust safe API
-src/fb.rs              Linux /dev/fb0 mmap + present_from blit
-src/frame.rs           FramePacer (smooth target Hz)
-src/term.rs            terminal present (Kitty / half / ASCII)
-src/bin/vge-demo.rs    live demo (RAM draw → present)
-examples/bench.rs      FPS bench
+include/vge.h           C ABI
+asm/x86_64/vge.s        assembly hot path
+c/vge_portable.c        transforms, blit, decay, portable raster
+src/lib.rs              Rust API
+src/term.rs             terminal present + viewport overlay
+src/fb.rs               Linux framebuffer
+src/frame.rs            FramePacer
+src/effects.rs          glow / bloom / radar / scanlines
+src/bin/vge-demo.rs     live demo
+examples/bench.rs       FPS bench
+docs/demo-hud.png       sample image
 ```
+
+---
 
 ## SemVer
 
 Version is `0.1.0-dev.1`. **0.x minors may include breaking changes.**
 
+---
+
 ## License
 
-MIT — see `LICENSE`.
+MIT. See `LICENSE`.

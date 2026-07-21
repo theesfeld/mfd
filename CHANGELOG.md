@@ -7,6 +7,12 @@
 - `vge-demo --fb` release segfault: do not use `dyn Canvas` with the asm FFI path (monomorphize)
 - Terminal default for emulators (Ghostty/Kitty/xterm); FB only on real VT or `--fb`
 - `poll_quit` ignores non-tty stdin (cargo pipes)
+- **Present path FPS**: buffered half-block/ascii (no per-cell `write!`); Kitty density capped; report draw_us vs present_us
+
+### Changed
+
+- Default demo is **overlay** (cell viewport); text can sit around vectors
+- Default `VGE_HZ=0` (uncapped) so present rate is not artificially locked
 
 ### Added
 
@@ -16,6 +22,9 @@
 - `vge_decay` phosphor fade (opt-in smooth trails)
 - `frame::FramePacer` for locked target Hz
 - `examples/bench` FPS measurement
+- `Viewport` / `present_at` terminal overlay API
+- Effects: `glow`, `bloom`, `radar_fade`, `scanlines`
+- `examples/profile_present` present-backend FPS
 - x86_64 GNU assembly hot path: `plot`, `clear`, `line` (Bresenham), `circle`, `rect_fill`, `line_thick`
 - Portable C path for other targets (`VGE_FORCE_C=1` forces C on x86_64)
 - Affine transform helpers (translate, scale, rotate) + transformed lines
