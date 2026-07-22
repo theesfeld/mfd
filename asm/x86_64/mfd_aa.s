@@ -2,22 +2,22 @@
  * Xiaolin Wu antialiased lines — pure System V AMD64 asm.
  * Crisp hairlines with coverage blending (0xAARRGGBB).
  *
- * vge_plot_blend(s, x, y, color, cov)  cov = 0..255
- * vge_line_aa(s, x0, y0, x1, y1, color)
+ * mfd_plot_blend(s, x, y, color, cov)  cov = 0..255
+ * mfd_line_aa(s, x0, y0, x1, y1, color)
  */
         .text
         .intel_syntax noprefix
-        .file   "vge_aa.s"
+        .file   "mfd_aa.s"
 
 /*--------------------------------------------------------------------
- * vge_plot_blend(VgeSurface*, x, y, color, cov)
+ * mfd_plot_blend(MfdSurface*, x, y, color, cov)
  * rdi=s esi=x edx=y ecx=color r8d=cov(0..255)
  * Writes color with alpha scaled by cov; keeps higher coverage if present.
  *------------------------------------------------------------------*/
-        .globl  vge_plot_blend
-        .type   vge_plot_blend, @function
+        .globl  mfd_plot_blend
+        .type   mfd_plot_blend, @function
         .align  16
-vge_plot_blend:
+mfd_plot_blend:
         test    rdi, rdi
         jz      .Lpb_ret
         test    r8d, r8d
@@ -62,16 +62,16 @@ vge_plot_blend:
         mov     dword ptr [r9], ecx
 .Lpb_ret:
         ret
-        .size   vge_plot_blend, .-vge_plot_blend
+        .size   mfd_plot_blend, .-mfd_plot_blend
 
 /*--------------------------------------------------------------------
- * vge_line_aa — Xiaolin Wu (integer gradient, coverage blend)
+ * mfd_line_aa — Xiaolin Wu (integer gradient, coverage blend)
  * rdi=s esi=x0 edx=y0 ecx=x1 r8d=y1 r9d=color
  *------------------------------------------------------------------*/
-        .globl  vge_line_aa
-        .type   vge_line_aa, @function
+        .globl  mfd_line_aa
+        .type   mfd_line_aa, @function
         .align  16
-vge_line_aa:
+mfd_line_aa:
         push    rbp
         mov     rbp, rsp
         push    r12
@@ -147,14 +147,14 @@ vge_line_aa:
         mov     edx, dword ptr [rbp - 48]
         mov     ecx, r13d
         mov     r8d, 255
-        call    vge_plot_blend
+        call    mfd_plot_blend
         jmp     4f
 3:      mov     rdi, r12
         mov     esi, dword ptr [rbp - 48]
         mov     edx, r15d
         mov     ecx, r13d
         mov     r8d, 255
-        call    vge_plot_blend
+        call    mfd_plot_blend
 4:      inc     r15d
         jmp     .Laa_vloop
 
@@ -181,7 +181,7 @@ vge_line_aa:
         mov     edx, dword ptr [rbp - 48]
         mov     ecx, r13d
         mov     r8d, 255
-        call    vge_plot_blend
+        call    mfd_plot_blend
         jmp     .Laa_e0b
 .Laa_e0:
         mov     rdi, r12
@@ -189,7 +189,7 @@ vge_line_aa:
         mov     edx, dword ptr [rbp - 52]
         mov     ecx, r13d
         mov     r8d, 255
-        call    vge_plot_blend
+        call    mfd_plot_blend
 .Laa_e0b:
         /* intery = y0 + grad  (start after first pixel) as 16.16 */
         movsxd  rax, dword ptr [rbp - 52]
@@ -230,7 +230,7 @@ vge_line_aa:
         mov     edx, r9d
         mov     ecx, r13d
         /* r8 already rfpart */
-        call    vge_plot_blend
+        call    mfd_plot_blend
         mov     rdi, r12
         mov     esi, ebx
         mov     edx, r9d
@@ -239,7 +239,7 @@ vge_line_aa:
         mov     eax, r15d
         shr     eax, 8
         movzx   r8d, al
-        call    vge_plot_blend
+        call    mfd_plot_blend
         jmp     .Laa_next
 
 .Laa_steep:
@@ -254,7 +254,7 @@ vge_line_aa:
         mov     edx, ebx
         mov     ecx, r13d
         mov     r8d, eax
-        call    vge_plot_blend
+        call    mfd_plot_blend
         mov     rdi, r12
         mov     esi, r9d
         inc     esi
@@ -263,7 +263,7 @@ vge_line_aa:
         mov     eax, r15d
         shr     eax, 8
         movzx   r8d, al
-        call    vge_plot_blend
+        call    mfd_plot_blend
 
 .Laa_next:
         add     r15, r14                       /* intery += grad */
@@ -280,7 +280,7 @@ vge_line_aa:
         mov     edx, dword ptr [rbp - 56]
         mov     ecx, r13d
         mov     r8d, 255
-        call    vge_plot_blend
+        call    mfd_plot_blend
         jmp     .Laa_done
 .Laa_e1:
         mov     rdi, r12
@@ -288,7 +288,7 @@ vge_line_aa:
         mov     edx, dword ptr [rbp - 60]
         mov     ecx, r13d
         mov     r8d, 255
-        call    vge_plot_blend
+        call    mfd_plot_blend
 
 .Laa_done:
         add     rsp, 72
@@ -299,6 +299,6 @@ vge_line_aa:
         pop     r12
         pop     rbp
         ret
-        .size   vge_line_aa, .-vge_line_aa
+        .size   mfd_line_aa, .-mfd_line_aa
 
         .section .note.GNU-stack, "", @progbits

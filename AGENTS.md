@@ -1,23 +1,27 @@
-# VGE — project facts only
+# MFD — project facts (not a second process constitution)
 
-Global process: `~/.config/agents/AGENTS.md` (wins on conflict).
+User-global process: `~/.config/agents/AGENTS.md`.
+
+## Product
+
+- **Name:** mfd (multi-function display library)
+- **Low-level draw:** pure asm `libmfd` (`make` → `build/libmfd.a`)
+- **Text:** B612 Mono in `assets/fonts/` (EPL; see NOTICE)
+- **Demo:** `cargo run --release --bin mfd-demo`
 
 ## Commands
 
 ```bash
+make
 cargo test
-cargo clippy --all-targets -- -D warnings
-cargo fmt --all -- --check
-VGE_FORCE_C=1 cargo test   # portable C path
+cargo run --release --bin mfd-demo
+MFD_TERM=kitty cargo run --release --bin mfd-demo
 ```
 
 ## Layout
 
-- `asm/x86_64/vge.s` — hot path (plot/line/circle/clear)
-- `include/vge.h` — C ABI
-- `c/vge_portable.c` — transforms + fallback raster
-- `src/lib.rs` — Rust API
-
-## Product rule
-
-Geometry → individual pixels. Do not turn the library into a bitmap/sprite blitter.
+- `src/widget/` — softkeys, tape, round gauge, label, bezel
+- `src/page.rs` — page compositor
+- `src/jet/` — fighter page calls
+- `src/auto/` — automotive reuse + OBD stubs
+- `docs/reference/mfd-photo-index.md` — public study index

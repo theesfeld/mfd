@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT
  * VGE hot path — System V AMD64 ABI (GNU as, intel syntax)
  *
- * VgeSurface:
+ * MfdSurface:
  *   0  width   u32
  *   4  height  u32
  *   8  stride  u32
@@ -19,13 +19,13 @@
         .file   "vge.s"
 
 /*--------------------------------------------------------------------
- * vge_plot(VgeSurface *s, int32_t x, int32_t y, vge_color color)
+ * mfd_plot(MfdSurface *s, int32_t x, int32_t y, mfd_color color)
  * rdi=s  esi=x  edx=y  ecx=color
  *------------------------------------------------------------------*/
-        .globl  vge_plot
-        .type   vge_plot, @function
+        .globl  mfd_plot
+        .type   mfd_plot, @function
         .align  16
-vge_plot:
+mfd_plot:
         test    rdi, rdi
         jz      .Lp_ret
         test    esi, esi
@@ -46,17 +46,17 @@ vge_plot:
         mov     dword ptr [r8 + rax], ecx
 .Lp_ret:
         ret
-        .size   vge_plot, .-vge_plot
+        .size   mfd_plot, .-mfd_plot
 
 /*--------------------------------------------------------------------
- * vge_clear — fill surface
+ * mfd_clear — fill surface
  * rdi=s  esi=color
  * Tight packing (stride == width*4): one rep stosd over all pixels.
  *------------------------------------------------------------------*/
-        .globl  vge_clear
-        .type   vge_clear, @function
+        .globl  mfd_clear
+        .type   mfd_clear, @function
         .align  16
-vge_clear:
+mfd_clear:
         push    rbx
         test    rdi, rdi
         jz      .Lc_done
@@ -98,16 +98,16 @@ vge_clear:
 .Lc_done:
         pop     rbx
         ret
-        .size   vge_clear, .-vge_clear
+        .size   mfd_clear, .-mfd_clear
 
 /*--------------------------------------------------------------------
- * vge_line — Bresenham, inlined pixel store
+ * mfd_line — Bresenham, inlined pixel store
  * rdi=s  esi=x0  edx=y0  ecx=x1  r8d=y1  r9d=color
  *------------------------------------------------------------------*/
-        .globl  vge_line
-        .type   vge_line, @function
+        .globl  mfd_line
+        .type   mfd_line, @function
         .align  16
-vge_line:
+mfd_line:
         push    rbp
         mov     rbp, rsp
         push    r12
@@ -206,16 +206,16 @@ vge_line:
         pop     r12
         pop     rbp
         ret
-        .size   vge_line, .-vge_line
+        .size   mfd_line, .-mfd_line
 
 /*--------------------------------------------------------------------
- * vge_circle — midpoint, inlined 8-way plots
+ * mfd_circle — midpoint, inlined 8-way plots
  * rdi=s  esi=cx  edx=cy  ecx=r  r8d=color
  *------------------------------------------------------------------*/
-        .globl  vge_circle
-        .type   vge_circle, @function
+        .globl  mfd_circle
+        .type   mfd_circle, @function
         .align  16
-vge_circle:
+mfd_circle:
         push    rbp
         mov     rbp, rsp
         push    r12
@@ -346,6 +346,6 @@ vge_circle:
         pop     r12
         pop     rbp
         ret
-        .size   vge_circle, .-vge_circle
+        .size   mfd_circle, .-mfd_circle
 
         .section .note.GNU-stack, "", @progbits

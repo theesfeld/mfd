@@ -7,24 +7,26 @@ on:
     branches: [main]
 
 jobs:
-  # Product gate: pure assembly library only
-  libvge:
+  # Product gate: pure assembly draw library
+  libmfd:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: build libvge (asm only)
+      - name: build libmfd (asm only)
         run: make clean && make all
       - name: pure-asm smoke (no C, no Rust, no libc)
         run: make test
       - name: symbols present
-        run: nm build/libvge.a | grep -E ' T vge_(plot|line|circle|clear)$$'
+        run: nm build/libmfd.a | grep -E ' T mfd_(plot|line|circle|clear)$$'
 
-  # Optional demo bindings — not the library
+  # Rust MFD library + demo
   demo-rust:
     runs-on: ubuntu-latest
-    needs: libvge
+    needs: libmfd
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: cargo test (FFI wrapper only)
+      - name: cargo test
         run: cargo test --all-features
+      - name: cargo build demo
+        run: cargo build --release --bin mfd-demo

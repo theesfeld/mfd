@@ -1,7 +1,7 @@
-//! Demo/FFI build: **link pure-asm libvge**. Never implement the engine here.
+//! Demo/FFI build: **link pure-asm libmfd**. Never implement the engine here.
 //!
 //! Preference order:
-//! 1. `build/libvge.a` from `make static` (canonical product)
+//! 1. `build/libmfd.a` from `make static` (canonical product)
 //! 2. Assemble `asm/x86_64/*.s` into OUT_DIR (same objects, for CI convenience)
 
 use std::env;
@@ -13,35 +13,35 @@ fn main() {
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 
-    println!("cargo:rerun-if-changed=asm/x86_64/vge.s");
-    println!("cargo:rerun-if-changed=asm/x86_64/vge_extra.s");
-    println!("cargo:rerun-if-changed=asm/x86_64/vge_aa.s");
-    println!("cargo:rerun-if-changed=include/vge.h");
+    println!("cargo:rerun-if-changed=asm/x86_64/mfd.s");
+    println!("cargo:rerun-if-changed=asm/x86_64/mfd_extra.s");
+    println!("cargo:rerun-if-changed=asm/x86_64/mfd_aa.s");
+    println!("cargo:rerun-if-changed=include/mfd.h");
     println!("cargo:rerun-if-changed=Makefile");
-    println!("cargo:rerun-if-changed=build/libvge.a");
-    println!("cargo:rustc-check-cfg=cfg(vge_asm)");
+    println!("cargo:rerun-if-changed=build/libmfd.a");
+    println!("cargo:rustc-check-cfg=cfg(mfd_asm)");
 
     if !target.starts_with("x86_64-") {
-        panic!("libvge is pure x86_64 assembly. This target is not supported.");
+        panic!("libmfd is pure x86_64 assembly. This target is not supported.");
     }
 
-    let make_lib = manifest.join("build/libvge.a");
+    let make_lib = manifest.join("build/libmfd.a");
     if make_lib.is_file() {
         println!(
             "cargo:rustc-link-search=native={}",
             manifest.join("build").display()
         );
-        println!("cargo:rustc-link-lib=static=vge");
-        println!("cargo:rustc-cfg=vge_asm");
-        println!("cargo:warning=demo: linking make-built build/libvge.a (pure asm)");
+        println!("cargo:rustc-link-lib=static=mfd");
+        println!("cargo:rustc-cfg=mfd_asm");
+        println!("cargo:warning=demo: linking make-built build/libmfd.a (pure asm)");
         return;
     }
 
     // Assemble the same pure-asm sources the Makefile uses.
     let srcs = [
-        "asm/x86_64/vge.s",
-        "asm/x86_64/vge_extra.s",
-        "asm/x86_64/vge_aa.s",
+        "asm/x86_64/mfd.s",
+        "asm/x86_64/mfd_extra.s",
+        "asm/x86_64/mfd_aa.s",
     ];
     let mut objs = Vec::new();
     for src in srcs {
@@ -63,7 +63,7 @@ fn main() {
         }
         objs.push(obj);
     }
-    let lib = out.join("libvge.a");
+    let lib = out.join("libmfd.a");
     let mut ar = Command::new("ar");
     ar.arg("rcs").arg(&lib);
     for o in &objs {
@@ -73,7 +73,7 @@ fn main() {
         panic!("ar failed");
     }
     println!("cargo:rustc-link-search=native={}", out.display());
-    println!("cargo:rustc-link-lib=static=vge");
-    println!("cargo:rustc-cfg=vge_asm");
-    println!("cargo:warning=demo: assembled pure-asm libvge into OUT_DIR (run `make` for canonical build/)");
+    println!("cargo:rustc-link-lib=static=mfd");
+    println!("cargo:rustc-cfg=mfd_asm");
+    println!("cargo:warning=demo: assembled pure-asm libmfd into OUT_DIR (run `make` for canonical build/)");
 }

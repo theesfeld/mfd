@@ -1,4 +1,4 @@
-//! Present a VGE pixel surface in the terminal.
+//! Present a MFD pixel surface in the terminal.
 //!
 //! # Speed rule
 //!
@@ -9,8 +9,8 @@
 //! - caps default pixel density so present stays fast
 //! - supports a **viewport** (cell rectangle) so vectors sit on top of text
 //!
-//! Force backend: `VGE_TERM=kitty|half|ascii`  
-//! Cap pixels: `VGE_MAX_W`, `VGE_MAX_H` (defaults 1280×720 for MFD density)
+//! Force backend: `MFD_TERM=kitty|half|ascii`  
+//! Cap pixels: `MFD_MAX_W`, `MFD_MAX_H` (defaults 1280×720 for MFD density)
 
 use crate::{Color, Surface};
 use std::io::{self, Write};
@@ -73,7 +73,7 @@ impl Viewport {
 
 /// Detect a workable backend.
 pub fn detect_backend() -> TermBackend {
-    if let Ok(v) = std::env::var("VGE_TERM") {
+    if let Ok(v) = std::env::var("MFD_TERM") {
         match v.to_ascii_lowercase().as_str() {
             "kitty" | "pixel" | "gfx" => return TermBackend::Kitty,
             "half" | "halfblock" | "block" => return TermBackend::HalfBlock,
@@ -81,7 +81,7 @@ pub fn detect_backend() -> TermBackend {
             _ => {}
         }
     }
-    if std::env::var_os("VGE_FORCE_ASCII").is_some() {
+    if std::env::var_os("MFD_FORCE_ASCII").is_some() {
         return TermBackend::Ascii;
     }
 
@@ -158,12 +158,12 @@ pub fn terminal_cells() -> (u16, u16) {
 
 fn max_pixels() -> (u32, u32) {
     // Higher defaults so instrument faces stay sharp (Kitty path).
-    // Lower with VGE_MAX_W / VGE_MAX_H if present stutters.
-    let mw = std::env::var("VGE_MAX_W")
+    // Lower with MFD_MAX_W / MFD_MAX_H if present stutters.
+    let mw = std::env::var("MFD_MAX_W")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(1280u32);
-    let mh = std::env::var("VGE_MAX_H")
+    let mh = std::env::var("MFD_MAX_H")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(720u32);
@@ -176,7 +176,7 @@ pub fn surface_size_for_viewport(backend: TermBackend, vp: Viewport) -> (u32, u3
     let cols = vp.cols.max(1) as u32;
     let rows = vp.rows.max(1) as u32;
     let (w, h) = match backend {
-        // Dense enough for MFD-class hairlines; still capped by VGE_MAX_*.
+        // Dense enough for MFD-class hairlines; still capped by MFD_MAX_*.
         TermBackend::Kitty => (cols * 8, rows * 16),
         TermBackend::HalfBlock => (cols, rows * 2),
         TermBackend::Ascii => (cols, rows),
