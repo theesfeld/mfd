@@ -18,15 +18,16 @@
 pub mod obd_feed;
 
 use crate::bezel::BezelState;
+use crate::color::{rgb, CYAN};
 use crate::geom::Rect;
 use crate::page::Page;
 use crate::palette::Palette;
 use crate::video::{blit_grey_flir, GreyFrame};
 use crate::widget::{
-    caution_box, content_after_osb, crosshair, label, list_menu, numeric_readout, osb_chrome,
-    progress_strip, range_display, round_gauge, status_grid, tape_gauge, tire_grid, track_gate,
-    value_readout, RangeSnapshot, RoundGaugeOpts, StatusItem, TapeOpts, TapeOrientation,
-    TireReading,
+    attitude_ball, caution_box, content_after_osb, crosshair, heading_display, heading_rose, label,
+    list_menu, numeric_readout, osb_chrome, progress_strip, range_display, round_gauge,
+    schematic_topo_map, status_grid, tape_gauge, tire_grid, track_gate, value_readout,
+    RangeSnapshot, RoundGaugeOpts, StatusItem, TapeOpts, TapeOrientation, TireReading,
 };
 use crate::Surface;
 
@@ -180,6 +181,12 @@ pub struct VehicleSnapshot {
     pub hvac_defrost: bool,
     pub dtc_count: u32,
     pub speed_unit: SpeedUnit,
+    /// Pitch degrees (nose up +).
+    pub pitch_deg: f32,
+    /// Roll degrees (right wing down +).
+    pub roll_deg: f32,
+    /// Heading degrees magnetic/true (0–360, 0 = north).
+    pub heading_deg: f32,
 }
 
 impl Default for VehicleSnapshot {
@@ -246,6 +253,9 @@ impl Default for VehicleSnapshot {
             hvac_defrost: false,
             dtc_count: 0,
             speed_unit: SpeedUnit::Mph,
+            pitch_deg: 0.0,
+            roll_deg: 0.0,
+            heading_deg: 0.0,
         }
     }
 }
@@ -291,6 +301,9 @@ pub fn demo_vehicle(t: f32) -> VehicleSnapshot {
     v.temp_out_c = 12.0 + 8.0 * (t * 0.03).sin();
     v.temp_in_c = 20.0 + 2.0 * (t * 0.1).cos();
     v.hvac_fan = 0.3 + 0.4 * (0.5 + 0.5 * (t * 0.2).sin());
+    v.pitch_deg = 8.0 * (t * 0.45).sin();
+    v.roll_deg = 18.0 * (t * 0.35).cos();
+    v.heading_deg = (t * 12.0) % 360.0;
     v
 }
 
@@ -339,6 +352,10 @@ pub enum AutoPage {
     Flir,
     /// Forward/rear parking & collision ranges (sensor arcs).
     Collision,
+    /// Attitude ball + heading (cardinals + degrees).
+    Attitude,
+    /// Schematic line/topo map (not full DEM).
+    Map,
     Obd,
     Setup,
 }
@@ -355,6 +372,8 @@ impl AutoPage {
         AutoPage::Clim,
         AutoPage::Flir,
         AutoPage::Collision,
+        AutoPage::Attitude,
+        AutoPage::Map,
         AutoPage::Obd,
         AutoPage::Setup,
     ];
@@ -371,6 +390,8 @@ impl AutoPage {
             AutoPage::Clim => "CLIM",
             AutoPage::Flir => "FLIR",
             AutoPage::Collision => "RNG",
+            AutoPage::Attitude => "ATT",
+            AutoPage::Map => "MAP",
             AutoPage::Obd => "OBD",
             AutoPage::Setup => "SET",
         }
@@ -388,6 +409,8 @@ impl AutoPage {
             AutoPage::Clim => "CLIMATE",
             AutoPage::Flir => "FLIR / CAM",
             AutoPage::Collision => "RANGE",
+            AutoPage::Attitude => "ATTITUDE",
+            AutoPage::Map => "MAP",
             AutoPage::Obd => "OBD",
             AutoPage::Setup => "SETUP",
         }
@@ -417,11 +440,13 @@ impl AutoPage {
         }
     }
 
-    /// Left OSB 16–20 (bottom→top in jet map is reverse; our chrome left[0]=OSB20).
+    /// Left OSB 16–20 (chrome left[0]=OSB20).
     pub fn from_left_osb(osb: u8) -> Option<AutoPage> {
         match osb {
             20 => Some(AutoPage::Obd),
             19 => Some(AutoPage::Setup),
+            18 => Some(AutoPage::Attitude),
+            17 => Some(AutoPage::Map),
             _ => None,
         }
     }
@@ -453,7 +478,9 @@ fn legends(page: AutoPage, v: &VehicleSnapshot) -> (Osb5, Osb5, Osb5, Osb5) {
         AutoPage::Drive => ["OBD", "SET", "4L", "4H", "2H"],
         AutoPage::Tpm => ["OBD", "SET", "BAR", "kPa", "PSI"],
         AutoPage::Clim => ["OBD", "SET", "DEF", "FAN+", "AC"],
-        _ => ["OBD", "SET", "4L", "4H", "2H"],
+        AutoPage::Attitude => ["OBD", "SET", "ATT", "MAP", "CLST"],
+        AutoPage::Map => ["OBD", "SET", "ATT", "MAP", "N-UP"],
+        _ => ["OBD", "SET", "ATT", "MAP", "2H"],
     };
     (top, right, bottom, left)
 }
@@ -980,6 +1007,71 @@ pub fn draw_auto_with_video(
                 "PARK/COLLISION  ·  MFD_RANGE=m",
                 pal.dim,
                 fh * 0.65,
+            );
+        }
+        AutoPage::Attitude => {
+            // Attitude ball (left) + heading (right) — pitch/roll/heading.
+            let ball_w = (c.w as f32 * 0.58) as i32;
+            let sky = CYAN;
+            let ground = rgb(120, 90, 40);
+            attitude_ball(
+                page.surface,
+                Rect::new(c.x, c.y, ball_w, c.h - 8),
+                v.pitch_deg,
+                v.roll_deg,
+                sky,
+                ground,
+                pal.readout,
+                pal.dim,
+            );
+            let hx = c.x + ball_w + 4;
+            let hw = c.w - ball_w - 8;
+            heading_display(
+                page.surface,
+                Rect::new(hx, c.y + 8, hw, c.h / 3),
+                v.heading_deg,
+                pal.readout,
+                pal.dim,
+                fh,
+            );
+            heading_rose(
+                page.surface,
+                hx + hw / 2,
+                c.y + c.h * 2 / 3,
+                (hw.min(c.h / 2) / 2 - 4).max(28),
+                v.heading_deg,
+                pal.primary,
+                pal.dim,
+                fh * 0.85,
+            );
+            label(
+                page.surface,
+                hx as f32,
+                c.bottom() as f32 - fh * 2.0,
+                &format!("P {:+.0}°  R {:+.0}°", v.pitch_deg, v.roll_deg),
+                pal.dim,
+                fh * 0.7,
+            );
+        }
+        AutoPage::Map => {
+            schematic_topo_map(
+                page.surface,
+                c.inset(4),
+                v.heading_deg,
+                t,
+                pal.structure,
+                pal.nav,
+                pal.caution,
+                pal.readout,
+                pal.primary,
+            );
+            label(
+                page.surface,
+                c.x as f32 + 4.0,
+                c.y as f32 + fh + 2.0,
+                &format!("HDG {:05.1}°", ((v.heading_deg % 360.0) + 360.0) % 360.0),
+                pal.readout,
+                fh * 0.75,
             );
         }
         AutoPage::Obd => {

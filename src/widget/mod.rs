@@ -1,5 +1,6 @@
 //! Composable MFD **widgets**.
 
+mod attitude;
 mod bezel;
 mod extra;
 mod label;
@@ -8,7 +9,9 @@ mod round_gauge;
 mod softkeys;
 mod status;
 mod tape;
+mod topo;
 
+pub use attitude::{attitude_ball, heading_cardinal, heading_display, heading_rose};
 pub use bezel::bezel_frame;
 pub use extra::{
     bearing_pointer, bscope_grid, caution_box, content_after_osb, crosshair, horizon_cue,
@@ -21,3 +24,4 @@ pub use round_gauge::{round_gauge, RoundGaugeOpts};
 pub use softkeys::{softkey_row, SoftkeyLayout};
 pub use status::{status_grid, tire_grid, value_readout, StatusItem, TireReading};
 pub use tape::{tape_gauge, TapeOpts, TapeOrientation};
+pub use topo::schematic_topo_map;

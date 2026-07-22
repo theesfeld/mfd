@@ -101,6 +101,8 @@ fn main() -> io::Result<()> {
         "CLIM" | "CLIMATE" => AutoPage::Clim,
         "FLIR" | "CAM" => AutoPage::Flir,
         "RNG" | "RANGE" | "COLL" => AutoPage::Collision,
+        "ATT" | "ATTITUDE" => AutoPage::Attitude,
+        "MAP" | "TOPO" => AutoPage::Map,
         "OBD" => AutoPage::Obd,
         "SET" | "SETUP" => AutoPage::Setup,
         _ => AutoPage::Cluster,
@@ -256,15 +258,26 @@ fn main() -> io::Result<()> {
                 b'u' | b'U' if matches!(domain, Domain::Auto) => {
                     vehicle.speed_unit = vehicle.speed_unit.cycle();
                 }
-                b']' if matches!(domain, Domain::Auto) => {
+                // Page cycle — do not steal [ ] (real CMFD BRT rocker).
+                b'n' | b'N' if matches!(domain, Domain::Auto) => {
                     auto_page = cycle_auto(auto_page, 1);
                 }
-                b'[' if matches!(domain, Domain::Auto) => {
+                b'p' | b'P' if matches!(domain, Domain::Auto) => {
                     auto_page = cycle_auto(auto_page, -1);
                 }
                 b'h' | b'H' if matches!(domain, Domain::Auto) => {
                     auto_page = AutoPage::Setup;
                 }
+                // Attitude / map jump
+                b'v' | b'V' => {
+                    domain = Domain::Auto;
+                    auto_page = AutoPage::Attitude;
+                }
+                b'x' | b'X' => {
+                    domain = Domain::Auto;
+                    auto_page = AutoPage::Map;
+                }
+                // [ ] ; ' - = , .  → real bezel knobs (BRT CON SYM GAIN)
                 _ => bezel_src.push_key_state(k, &bezel),
             }
         }
@@ -421,7 +434,7 @@ fn main() -> io::Result<()> {
                     }
                 };
                 let status = format!(
-                    "AUTO {} · {} · {} · [] 1-0 o s · Tab jet",
+                    "AUTO {} · {} · {} · n/p · [ ] BRT · Tab jet",
                     auto_page.title(),
                     feed,
                     cam
@@ -482,15 +495,23 @@ fn print_banner(ver: &str) {
     eprintln!("    8 CLIM   out/in temp HVAC");
     eprintln!("    9 FLIR   camera / FLIR glass");
     eprintln!("    0 RNG    collision / park ranges");
+    eprintln!("    v ATT    attitude ball + heading N/NW/… + degrees");
+    eprintln!("    x MAP    schematic line/topo (not full DEM)");
     eprintln!("    o OBD    PID list");
     eprintln!("    s SET    setup / units");
-    eprintln!("    [ ]      previous / next auto page");
+    eprintln!("    n / p    next / previous auto page");
     eprintln!("    u        cycle speed unit MPH/KM/H/KT");
     eprintln!();
     eprintln!("  OSB (auto)");
     eprintln!("    top     CLST FUEL TEMP DRV LITE");
     eprintln!("    right   TPM  BODY CLIM FLIR RNG");
-    eprintln!("    left    OBD  SET  …");
+    eprintln!("    left    OBD  SET  ATT  MAP  …");
+    eprintln!();
+    eprintln!("  BEZEL (real CMFD rockers)");
+    eprintln!("    [ ]     BRT brightness −/+   (yes — on real MFD)");
+    eprintln!("    ; '     CON contrast −/+");
+    eprintln!("    - =     SYM symbology −/+");
+    eprintln!("    , .     GAIN −/+");
     eprintln!();
     eprintln!("  JET");
     eprintln!("    OSB 12/13/14 format slots · m Master Menu · g widget QA");
@@ -500,7 +521,7 @@ fn print_banner(ver: &str) {
     eprintln!("    MFD_FLIR_PATH=still.pgm");
     eprintln!("    MFD_OBD_PORT=/dev/ttyUSB0  MFD_OBD_REPLAY=…");
     eprintln!("    MFD_RANGE=2.1,3.0,2.8,1.2");
-    eprintln!("    MFD_DOMAIN=auto|jet   MFD_AUTO_PAGE=FLIR|RNG|…");
+    eprintln!("    MFD_DOMAIN=auto|jet   MFD_AUTO_PAGE=ATT|MAP|FLIR|…");
     eprintln!("    c color · Esc quit");
     eprintln!();
 }

@@ -53,11 +53,12 @@ pub use term::{
 pub use video::V4l2Source;
 pub use video::{blit_grey_flir, GreyFrame};
 pub use widget::{
-    bearing_pointer, bezel_frame, bscope_grid, caution_box, content_after_osb, crosshair,
-    horizon_cue, label, label_centered, list_menu, numeric_readout, osb_chrome, progress_strip,
-    range_display, range_rings, round_gauge, softkey_row, station_grid, status_grid, tape_gauge,
-    tire_grid, track_gate, value_readout, video_frame, RangeSnapshot, RoundGaugeOpts,
-    SoftkeyLayout, StatusItem, TapeOpts, TapeOrientation, TireReading,
+    attitude_ball, bearing_pointer, bezel_frame, bscope_grid, caution_box, content_after_osb,
+    crosshair, heading_cardinal, heading_display, heading_rose, horizon_cue, label, label_centered,
+    list_menu, numeric_readout, osb_chrome, progress_strip, range_display, range_rings,
+    round_gauge, schematic_topo_map, softkey_row, station_grid, status_grid, tape_gauge, tire_grid,
+    track_gate, value_readout, video_frame, RangeSnapshot, RoundGaugeOpts, SoftkeyLayout,
+    StatusItem, TapeOpts, TapeOrientation, TireReading,
 };
 
 /// Packed color `0xAARRGGBB`.
