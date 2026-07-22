@@ -398,7 +398,79 @@ vge_polyline:
         .size   vge_polyline, .-vge_polyline
 
 /*--------------------------------------------------------------------
- * Transforms — float SSE; rotate calls libm sinf/cosf
+ * Pure-asm sin/cos (no libc). Taylor on reduced angle.
+ * In:  xmm0 = radians
+ * Out: xmm0 = sin, xmm1 = cos
+ *------------------------------------------------------------------*/
+        .align  16
+.Lsincos:
+        /* reduce roughly with fmod against 2π using trunc */
+        movss   xmm2, dword ptr [rip + .Ltwo_pi]
+        movss   xmm3, xmm0
+        divss   xmm3, xmm2
+        /* truncate toward zero via cvttss2si */
+        cvttss2si eax, xmm3
+        cvtsi2ss xmm3, eax
+        mulss   xmm3, xmm2
+        subss   xmm0, xmm3                     /* x in ~[-2π,2π] */
+        /* clamp-ish: if |x| > π, x -= sign*2π already from fmod-ish */
+        movss   xmm2, dword ptr [rip + .Lpi]
+        movss   xmm3, xmm0
+        andps   xmm3, [rip + .Labs_mask]
+        comiss  xmm3, xmm2
+        jbe     .Lsc_ok
+        movss   xmm4, dword ptr [rip + .Ltwo_pi]
+        /* if x > 0: x -= 2π else x += 2π */
+        xorps   xmm5, xmm5
+        comiss  xmm0, xmm5
+        jb      .Lsc_neg
+        subss   xmm0, xmm4
+        jmp     .Lsc_ok
+.Lsc_neg:
+        addss   xmm0, xmm4
+.Lsc_ok:
+        /* sin = x - x^3/6 + x^5/120 ; cos = 1 - x^2/2 + x^4/24 */
+        movss   xmm2, xmm0                     /* x */
+        movss   xmm3, xmm0
+        mulss   xmm3, xmm0                     /* x2 */
+        movss   xmm4, xmm3
+        mulss   xmm4, xmm0                     /* x3 */
+        movss   xmm5, xmm4
+        mulss   xmm5, xmm0                     /* x4 */
+        movss   xmm6, xmm5
+        mulss   xmm6, xmm0                     /* x5 */
+        /* sin */
+        movss   xmm7, xmm4
+        mulss   xmm7, dword ptr [rip + .Linv6]
+        movss   xmm0, xmm2
+        subss   xmm0, xmm7
+        movss   xmm7, xmm6
+        mulss   xmm7, dword ptr [rip + .Linv120]
+        addss   xmm0, xmm7                     /* sin in xmm0 */
+        /* cos */
+        movss   xmm1, dword ptr [rip + .Lone]
+        movss   xmm7, xmm3
+        mulss   xmm7, dword ptr [rip + .Linv2]
+        subss   xmm1, xmm7
+        movss   xmm7, xmm5
+        mulss   xmm7, dword ptr [rip + .Linv24]
+        addss   xmm1, xmm7                     /* cos in xmm1 */
+        ret
+
+        .section .rodata
+        .align  16
+.Labs_mask: .long 0x7FFFFFFF, 0, 0, 0
+.Ltwo_pi:   .float 6.28318530718
+.Lpi:       .float 3.14159265359
+.Lone:      .float 1.0
+.Linv2:     .float 0.5
+.Linv6:     .float 0.166666666667
+.Linv24:    .float 0.0416666666667
+.Linv120:   .float 0.00833333333333
+        .text
+
+/*--------------------------------------------------------------------
+ * Transforms — float SSE, pure asm (no C, no libm)
  * VgeXform: a b tx c d ty  at offsets 0 4 8 12 16 20
  *------------------------------------------------------------------*/
         .globl  vge_xform_identity
@@ -462,45 +534,38 @@ vge_xform_scale:
         .globl  vge_xform_rotate
         .type   vge_xform_rotate, @function
 vge_xform_rotate:
-        /* rdi=m  xmm0=radians */
-        push    rbx
+        /* rdi=m  xmm0=radians — pure asm, no libm */
         push    r12
-        sub     rsp, 40
+        sub     rsp, 24
         test    rdi, rdi
         jz      .Lxr_done
         mov     r12, rdi
-        movss   dword ptr [rsp], xmm0
-        /* cos */
-        movss   xmm0, dword ptr [rsp]
-        call    cosf@PLT
-        movss   dword ptr [rsp + 4], xmm0      /* cs */
-        movss   xmm0, dword ptr [rsp]
-        call    sinf@PLT
-        movss   dword ptr [rsp + 8], xmm0      /* sn */
+        call    .Lsincos                       /* xmm0=sin xmm1=cos */
+        movss   dword ptr [rsp], xmm0          /* sn */
+        movss   dword ptr [rsp + 4], xmm1      /* cs */
         /* a' = a*cs + b*sn ; b' = -a*sn + b*cs */
         movss   xmm0, dword ptr [r12]          /* a */
         movss   xmm1, dword ptr [r12 + 4]      /* b */
         movss   xmm2, dword ptr [rsp + 4]      /* cs */
-        movss   xmm3, dword ptr [rsp + 8]      /* sn */
+        movss   xmm3, dword ptr [rsp]          /* sn */
         movss   xmm4, xmm0
-        mulss   xmm4, xmm2                     /* a*cs */
+        mulss   xmm4, xmm2
         movss   xmm5, xmm1
-        mulss   xmm5, xmm3                     /* b*sn */
-        addss   xmm4, xmm5                     /* a' */
+        mulss   xmm5, xmm3
+        addss   xmm4, xmm5
         movss   xmm5, xmm0
         mulss   xmm5, xmm3
         xorps   xmm6, xmm6
-        subss   xmm6, xmm5                     /* -a*sn */
+        subss   xmm6, xmm5
         movss   xmm5, xmm1
         mulss   xmm5, xmm2
-        addss   xmm6, xmm5                     /* b' */
+        addss   xmm6, xmm5
         movss   dword ptr [r12], xmm4
         movss   dword ptr [r12 + 4], xmm6
-        /* c' d' same with c d */
         movss   xmm0, dword ptr [r12 + 12]
         movss   xmm1, dword ptr [r12 + 16]
         movss   xmm2, dword ptr [rsp + 4]
-        movss   xmm3, dword ptr [rsp + 8]
+        movss   xmm3, dword ptr [rsp]
         movss   xmm4, xmm0
         mulss   xmm4, xmm2
         movss   xmm5, xmm1
@@ -516,9 +581,8 @@ vge_xform_rotate:
         movss   dword ptr [r12 + 12], xmm4
         movss   dword ptr [r12 + 16], xmm6
 .Lxr_done:
-        add     rsp, 40
+        add     rsp, 24
         pop     r12
-        pop     rbx
         ret
         .size   vge_xform_rotate, .-vge_xform_rotate
 

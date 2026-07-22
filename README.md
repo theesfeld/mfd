@@ -1,33 +1,31 @@
-# VGE — Vector Graphics Engine
+# VGE — pure assembly vector engine
 
 <!-- agents:status:begin -->
-> **Status:** active · Version: `0.1.0-dev.1` · License: MIT · [Issues](https://github.com/theesfeld/vge/issues)
+> **Status:** active · Version: `0.1.0-dev.1` · **libvge = ASM only** · MIT
 <!-- agents:status:end -->
 
-## Product: pure assembly library
+## This is assembly
 
-**`libvge` is written in assembly.** It is not a Rust engine with an asm helper.
-
-| Artifact | Role |
-|----------|------|
-| `asm/x86_64/*.s` | **Implementation** |
-| `include/vge.h` | C ABI (any language) |
-| `build/libvge.a` / `.so` | Link: `-lvge -lm` |
-| Rust / demos | Optional thin consumers |
+**The library is only `asm/x86_64/*.s`.**  
+No C in the library. No Rust in the library. No libc. No libm.
 
 ```bash
-make && make test    # C smoke, no Rust
-make install         # ~/.local/{lib,include}
+make && make test     # pure-asm smoke (examples/asm/smoke.s)
+make install          # libvge.a / libvge.so + vge.h
 ```
 
-Calligraphic model: stroke list → beam into pixels → present.  
-Raster/beam functions live in asm. Client languages may hold the display list.
+```
+include/vge.h          calling convention (System V AMD64)
+asm/x86_64/vge.s       plot clear line circle
+asm/x86_64/vge_extra.s thick rect blit decay export xform polyline …
+build/libvge.a         static
+build/libvge.so        shared
+```
 
-<p align="center">
-  <img src="docs/demo-hud.png" alt="Vector HUD sample from VGE" width="640" />
-</p>
+Any language: load `libvge`, call the symbols in `vge.h`.
 
----
+Optional demos (not the product): Rust `vge-demo` is a consumer only.
+
 
 ## Performance (read this first)
 

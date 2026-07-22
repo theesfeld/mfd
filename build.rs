@@ -19,8 +19,6 @@ fn main() {
     println!("cargo:rerun-if-changed=include/vge.h");
     println!("cargo:rerun-if-env-changed=VGE_FORCE_C");
     println!("cargo:rustc-check-cfg=cfg(vge_asm)");
-    println!("cargo:rustc-link-lib=m");
-
     if use_asm {
         let objs = ["vge.o", "vge_extra.o"];
         let srcs = ["asm/x86_64/vge.s", "asm/x86_64/vge_extra.s"];
@@ -38,7 +36,6 @@ fn main() {
             }
             paths.push(obj);
         }
-        // Archive as libvge_asm.a via ar, then link
         let lib = out.join("libvge_asm.a");
         let mut ar = Command::new("ar");
         ar.arg("rcs").arg(&lib);
@@ -52,13 +49,12 @@ fn main() {
         println!("cargo:rustc-link-search=native={}", out.display());
         println!("cargo:rustc-link-lib=static=vge_asm");
         println!("cargo:rustc-cfg=vge_asm");
-        println!("cargo:warning=VGE: pure x86_64 assembly library (no C in core)");
+        // Demo FFI only — library itself is pure asm, no -lm.
+        println!("cargo:warning=VGE demo: linking pure-asm libvge (no C, no libm)");
     } else {
-        // Non-x86_64 only: portable C reference implementation.
-        let mut build = cc::Build::new();
-        build.include(manifest.join("include"));
-        build.file(manifest.join("c/vge_portable.c"));
-        build.compile("vge_c");
-        println!("cargo:warning=VGE: portable C reference (not asm host)");
+        panic!(
+            "libvge is pure x86_64 assembly. Non-x86_64 is not a product target. \
+             Set VGE_FORCE_C only for experiments (unsupported)."
+        );
     }
 }
