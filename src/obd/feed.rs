@@ -1,8 +1,10 @@
 //! Background poller → [`VehicleSnapshot`](crate::auto::VehicleSnapshot).
 //!
-//! DTCs are loaded **immediately** on connect, then refreshed often.
+//! Startup: capability probe (BIT), then DTC + Mode 01 / Ford DID poll.
 //! Read-only — never Mode 04 clear.
 
+use crate::auto::caps::VehicleCaps;
+use crate::auto::probe;
 use crate::auto::{DtcEntry, DtcKind, VehicleSnapshot};
 use crate::obd::j1979::{self, PRIORITY_PIDS};
 use crate::obd::session::Session;
@@ -21,6 +23,7 @@ struct Telemetry {
     ticks: u64,
     dtcs: Vec<DtcEntry>,
     dtc_loaded: bool,
+    caps: VehicleCaps,
 }
 
 /// Background OBD poller (native stack).
@@ -46,7 +49,12 @@ impl ObdFeed {
     pub fn from_session(session: Session) -> Result<Self, String> {
         let stop = Arc::new(AtomicBool::new(false));
         let tele = Arc::new(Mutex::new(Telemetry {
-            status: format!("live {}", session.name()),
+            status: format!("probe {}", session.name()),
+            caps: VehicleCaps {
+                phase: "POWER ON".into(),
+                link: session.name().into(),
+                ..Default::default()
+            },
             ..Default::default()
         }));
         let stop_t = Arc::clone(&stop);
@@ -71,11 +79,17 @@ impl ObdFeed {
         apply_telemetry(&t, v);
     }
 
+    pub fn caps(&self) -> VehicleCaps {
+        self.tele.lock().map(|t| t.caps.clone()).unwrap_or_default()
+    }
+
     pub fn status_line(&self) -> String {
         self.tele
             .lock()
             .map(|t| {
-                if let Some(e) = &t.error {
+                if !t.caps.ready {
+                    format!("BIT {:.0}% {}", t.caps.progress * 100.0, t.caps.phase)
+                } else if let Some(e) = &t.error {
                     format!("OBD ERR {e}")
                 } else {
                     let d = if t.dtc_loaded {
@@ -128,14 +142,23 @@ fn load_dtcs(session: &mut Session, tele: &Arc<Mutex<Telemetry>>) {
                 if !msg.contains("NO DATA") {
                     t.error = Some(format!("DTC {msg}"));
                 }
-                t.dtc_loaded = true; // empty / fail still "attempted"
+                t.dtc_loaded = true;
             }
         }
     }
 }
 
 fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemetry>>) {
-    // Fault inventory first — page must show codes immediately.
+    // ── BIT / capability probe first ──────────────────────────────────────
+    let caps = probe::run_live_probe(&mut session);
+    if let Ok(mut t) = tele.lock() {
+        t.caps = caps;
+        t.status = format!("live {}", session.name());
+    }
+    if stop.load(Ordering::Relaxed) {
+        return;
+    }
+
     load_dtcs(&mut session, &tele);
 
     if let Ok(vin) = session.read_vin_mode09() {
@@ -143,7 +166,6 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
             t.vin = Some(vin);
         }
     }
-    // Extended session on PCM for Mode 0x22 extras (read path).
     let _ = crate::obd::ford::prepare_pcm_read(&mut session);
 
     let ford_dids: Vec<_> = crate::obd::ford::feed_poll_dids().collect();
@@ -152,14 +174,12 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
     let mut keep = 0u32;
     while !stop.load(Ordering::Relaxed) {
         keep += 1;
-        // Refresh DTCs every ~50 PID polls
         if keep % 50 == 1 {
             load_dtcs(&mut session, &tele);
         }
         if keep % 40 == 0 {
             let _ = session.tester_present();
         }
-        // Interleave Ford 0x22 DIDs (slower than Mode 01).
         if keep % 8 == 0 && !ford_dids.is_empty() {
             let def = ford_dids[fi % ford_dids.len()];
             fi = fi.wrapping_add(1);
@@ -178,9 +198,7 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
                     }
                 }
                 Ok(_) => {}
-                Err(_) => {
-                    // NRC / unsupported — skip quietly
-                }
+                Err(_) => {}
             }
         }
         let pid = PRIORITY_PIDS[i % PRIORITY_PIDS.len()];

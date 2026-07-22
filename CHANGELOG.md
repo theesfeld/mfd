@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Startup BIT + adaptive caps:** F-16-style power-on/BIT glass until probe finishes; pages/items omit NOGO options (fog, HSEAT, HSTR, TPMS, CAM, …). Refs #88.
+
 ### Changed
 
 - **Auto-centric CMFD:** demo is vehicle-only (jet formats stay in lib). Systems pages ENG/FUEL/FLUID/ELEC/DRV/CHAS/BODY/LITE/CLIM/CAM/RNG/ATT/MAP/DTC/BUS/OWN/SET; dense numerics; channel dump. Refs #86.

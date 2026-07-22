@@ -13,7 +13,7 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-use mfd::auto::{self, AutoPage, GearSelect, VehicleSnapshot};
+use mfd::auto::{self, AutoPage, DemoProbe, GearSelect, VehicleSnapshot};
 use mfd::bezel::{BezelEvent, BezelSource, BezelState, KeyboardBezel};
 use mfd::font::{draw_text, text_width};
 use mfd::frame::FramePacer;
@@ -96,6 +96,10 @@ fn main() -> io::Result<()> {
     let mut vehicle = VehicleSnapshot::default();
     let mut color_mode = ColorMode::ColorMfd;
     let mut osb_tick: u32 = 0;
+    // Startup BIT until capability probe finishes (adaptive pages).
+    let mut demo_probe = DemoProbe::start();
+    let mut boot_done = false;
+    let mut available_pages: Vec<AutoPage> = Vec::new();
 
     #[cfg(feature = "obd")]
     let obd_feed = mfd::obd::ObdFeed::try_start_from_env();
@@ -105,13 +109,13 @@ fn main() -> io::Result<()> {
         eprintln!("OBD: {s}");
         s
     } else {
-        eprintln!("OBD: DEMO (MFD_OBD_BT / MFD_OBD_PORT / MFD_OBD_REPLAY)");
+        eprintln!("OBD: DEMO probe (MFD_OBD_BT / MFD_OBD_PORT / MFD_OBD_REPLAY)");
         "DEMO".into()
     };
     #[cfg(not(feature = "obd"))]
     let obd_status = {
-        eprintln!("OBD: off (build --features obd)");
-        "OFF".to_string()
+        eprintln!("OBD: DEMO probe");
+        "DEMO".to_string()
     };
 
     #[cfg(target_os = "linux")]
@@ -149,14 +153,20 @@ fn main() -> io::Result<()> {
         for &k in &keybuf {
             match k {
                 0x1b => RUNNING.store(false, Ordering::Relaxed),
-                b'c' | b'C' => {
+                b'c' | b'C' if boot_done => {
                     color_mode = match color_mode {
                         ColorMode::GreenMono => ColorMode::ColorMfd,
                         ColorMode::ColorMfd => ColorMode::HighVis,
                         ColorMode::HighVis => ColorMode::GreenMono,
                     };
                 }
-                // Systems page jumps
+                // During BIT: only Esc / quit
+                _ if !boot_done => {
+                    if k != 0x1b {
+                        bezel_src.push_key_state(k, &bezel);
+                    }
+                }
+                // Systems page jumps (after BIT)
                 b'1' => auto_page = AutoPage::Eng,
                 b'2' => auto_page = AutoPage::Fuel,
                 b'3' => auto_page = AutoPage::Fluid,
@@ -173,8 +183,8 @@ fn main() -> io::Result<()> {
                 b'o' | b'O' => auto_page = AutoPage::Own,
                 b's' | b'S' => auto_page = AutoPage::Setup,
                 b'u' | b'U' => vehicle.speed_unit = vehicle.speed_unit.cycle(),
-                b'n' | b'N' => auto_page = cycle_auto(auto_page, 1),
-                b'p' | b'P' => auto_page = cycle_auto(auto_page, -1),
+                b'n' | b'N' => auto_page = cycle_auto(auto_page, 1, &available_pages),
+                b'p' | b'P' => auto_page = cycle_auto(auto_page, -1, &available_pages),
                 b'h' | b'H' => auto_page = AutoPage::Setup,
                 b'v' | b'V' => auto_page = AutoPage::Attitude,
                 b'x' | b'X' => auto_page = AutoPage::Map,
@@ -190,13 +200,22 @@ fn main() -> io::Result<()> {
         for ev in bezel_src.poll() {
             bezel.apply(ev);
             if let BezelEvent::OsbDown(osb) = ev {
+                if !boot_done {
+                    continue;
+                }
                 osb_tick = osb_tick.wrapping_add(1);
                 if let Some(p) = AutoPage::from_top_osb(osb) {
-                    auto_page = p;
+                    if available_pages.is_empty() || available_pages.contains(&p) {
+                        auto_page = p;
+                    }
                 } else if let Some(p) = AutoPage::from_right_osb(osb) {
-                    auto_page = p;
+                    if available_pages.is_empty() || available_pages.contains(&p) {
+                        auto_page = p;
+                    }
                 } else if let Some(p) = AutoPage::from_left_osb(osb) {
-                    auto_page = p;
+                    if available_pages.is_empty() || available_pages.contains(&p) {
+                        auto_page = p;
+                    }
                 } else {
                     match (auto_page, osb) {
                         (AutoPage::Eng | AutoPage::Setup, 11 | 15) => {
@@ -231,12 +250,39 @@ fn main() -> io::Result<()> {
         #[cfg(not(feature = "obd"))]
         let use_obd = false;
 
+        let caps_now = {
+            #[cfg(feature = "obd")]
+            {
+                if let Some(ref feed) = obd_feed {
+                    feed.caps()
+                } else {
+                    demo_probe.tick().clone()
+                }
+            }
+            #[cfg(not(feature = "obd"))]
+            {
+                demo_probe.tick().clone()
+            }
+        };
+        if !boot_done && caps_now.ready {
+            boot_done = true;
+            available_pages = caps_now.pages();
+            if !available_pages.contains(&auto_page) {
+                auto_page = available_pages.first().copied().unwrap_or(AutoPage::Eng);
+            }
+            eprintln!(
+                "BIT COMPLETE · {} pages · {}",
+                available_pages.len(),
+                caps_now.link
+            );
+        }
+
         if use_obd {
             #[cfg(feature = "obd")]
             if let Some(ref feed) = obd_feed {
                 feed.apply_to(&mut vehicle);
             }
-        } else {
+        } else if boot_done {
             let mut live = auto::demo_vehicle(t);
             live.speed_unit = vehicle.speed_unit;
             live.gear = vehicle.gear;
@@ -254,7 +300,7 @@ fn main() -> io::Result<()> {
         }
 
         #[cfg(target_os = "linux")]
-        let cam_frame = if matches!(auto_page, AutoPage::Cam) {
+        let cam_frame = if boot_done && matches!(auto_page, AutoPage::Cam) {
             if frame_i % 2 == 0 {
                 camera.as_mut().and_then(|c| c.grab().cloned())
             } else {
@@ -270,7 +316,9 @@ fn main() -> io::Result<()> {
         let mut page = Page::new(&mut panel);
         page.font_px = if w.min(h) >= 480 { 14.0 } else { 12.0 };
 
-        {
+        if !boot_done {
+            auto::draw_bit_screen(&mut page, &pal, &caps_now, t);
+        } else {
             let font_px = page.font_px;
             auto::draw_auto_with_video(
                 &mut page,
@@ -280,26 +328,10 @@ fn main() -> io::Result<()> {
                 &vehicle,
                 t,
                 cam_frame.as_ref(),
+                Some(&caps_now),
             );
             let feed = if use_obd { "OBD" } else { "DEMO" };
-            let cam = if cam_frame.is_some() {
-                "CAM"
-            } else if std::env::var_os("MFD_FLIR_PATH").is_some() {
-                "FILE"
-            } else {
-                #[cfg(target_os = "linux")]
-                {
-                    if camera.is_some() {
-                        "CAM?"
-                    } else {
-                        "SYN"
-                    }
-                }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    "SYN"
-                }
-            };
+            let cam = if cam_frame.is_some() { "CAM" } else { "SYN" };
             let status = format!("{} · {} · {} · n/p · [ ] BRT", auto_page.title(), feed, cam);
             draw_demo_status(page.surface, &status, pal.dim, font_px * 0.6);
         }
@@ -318,8 +350,12 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn cycle_auto(cur: AutoPage, dir: i32) -> AutoPage {
-    let all = AutoPage::ALL;
+fn cycle_auto(cur: AutoPage, dir: i32, pages: &[AutoPage]) -> AutoPage {
+    let all = if pages.is_empty() {
+        AutoPage::ALL
+    } else {
+        pages
+    };
     let i = all.iter().position(|&p| p == cur).unwrap_or(0) as i32;
     let n = all.len() as i32;
     let j = (i + dir).rem_euclid(n) as usize;

@@ -18,8 +18,15 @@
 //! | Forward camera / FLIR | greyscale blit + TGP overlays |
 //! | Collision / park range | range_display |
 
+pub mod boot;
+pub mod caps;
 pub mod channels;
+pub mod probe;
 pub mod vehicle_profile;
+
+pub use boot::draw_bit_screen;
+pub use caps::{BitLine, BitState, FeatureCaps, VehicleCaps};
+pub use probe::DemoProbe;
 
 use crate::bezel::BezelState;
 use crate::color::{rgb, CYAN};
@@ -715,10 +722,12 @@ pub fn draw_auto(
     v: &VehicleSnapshot,
     t: f32,
 ) {
-    draw_auto_with_video(page, which, pal, bezel, v, t, None);
+    draw_auto_with_video(page, which, pal, bezel, v, t, None, None);
 }
 
 /// Draw auto page; optional live greyscale camera frame for FLIR.
+/// `caps` omits equipment that did not probe GO (fog, HSWM, …).
+#[allow(clippy::too_many_arguments)]
 pub fn draw_auto_with_video(
     page: &mut Page,
     which: AutoPage,
@@ -727,6 +736,7 @@ pub fn draw_auto_with_video(
     v: &VehicleSnapshot,
     t: f32,
     cam_frame: Option<&GreyFrame>,
+    caps: Option<&VehicleCaps>,
 ) {
     page.clear();
     page.surface.clear(pal.glass);
@@ -734,6 +744,7 @@ pub fn draw_auto_with_video(
     chrome(page, pal, which, bezel, v);
     let c = content(page);
     let fh = page.font_px;
+    let feat = caps.map(|c| &c.features);
 
     match which {
         AutoPage::Eng => {
@@ -927,7 +938,7 @@ pub fn draw_auto_with_video(
             );
         }
         AutoPage::Body => {
-            let items = [
+            let mut items = vec![
                 StatusItem {
                     label: "DR FL",
                     on: v.door_fl,
@@ -965,6 +976,18 @@ pub fn draw_auto_with_video(
                     on: v.belt_rr,
                 },
             ];
+            if feat.map(|f| f.heated_seats).unwrap_or(false) {
+                items.push(StatusItem {
+                    label: "HSEAT",
+                    on: true,
+                });
+            }
+            if feat.map(|f| f.heated_steering).unwrap_or(false) {
+                items.push(StatusItem {
+                    label: "HSTR",
+                    on: true,
+                });
+            }
             status_grid(
                 page.surface,
                 Rect::new(c.x, c.y, c.w, (c.h as f32 * 0.55) as i32),
@@ -993,7 +1016,7 @@ pub fn draw_auto_with_video(
             );
         }
         AutoPage::Lights => {
-            let items = [
+            let mut items = vec![
                 StatusItem {
                     label: "LO BEAM",
                     on: v.light_low,
@@ -1006,27 +1029,29 @@ pub fn draw_auto_with_video(
                     label: "DRL",
                     on: v.light_drive,
                 },
-                StatusItem {
+            ];
+            if feat.map(|f| f.fog_lights).unwrap_or(true) {
+                items.push(StatusItem {
                     label: "FOG",
                     on: v.light_fog,
-                },
-                StatusItem {
-                    label: "BRAKE",
-                    on: v.light_brake,
-                },
-                StatusItem {
-                    label: "TURN L",
-                    on: v.light_turn_l,
-                },
-                StatusItem {
-                    label: "TURN R",
-                    on: v.light_turn_r,
-                },
-                StatusItem {
-                    label: "INT",
-                    on: v.light_interior,
-                },
-            ];
+                });
+            }
+            items.push(StatusItem {
+                label: "BRAKE",
+                on: v.light_brake,
+            });
+            items.push(StatusItem {
+                label: "TURN L",
+                on: v.light_turn_l,
+            });
+            items.push(StatusItem {
+                label: "TURN R",
+                on: v.light_turn_r,
+            });
+            items.push(StatusItem {
+                label: "INT",
+                on: v.light_interior,
+            });
             status_grid(
                 page.surface,
                 c.inset(4),
@@ -1263,7 +1288,7 @@ pub fn draw_auto_obd(
     v.throttle = obd.throttle;
     v.load = obd.load;
     v.dtc_count = obd.dtc_count;
-    draw_auto_with_video(page, which, pal, bezel, &v, t, None);
+    draw_auto_with_video(page, which, pal, bezel, &v, t, None, None);
 }
 
 pub fn rpm_norm(rpm: f32, redline: f32) -> f32 {

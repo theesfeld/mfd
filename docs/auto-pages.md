@@ -37,3 +37,17 @@ Same signal may appear on multiple pages (e.g. RPM on ENG and DRV).
 
 `n`/`p` cycle · number keys and letters jump (see `mfd-demo` banner).  
 Default domain: **auto only**.
+
+## Startup (BIT)
+
+At power-on the glass shows an **F-16 CMFD-style BIT** page (TEST language: GO / RDY / NOGO + progress) until capability probe finishes.
+
+Probe (read-only):
+
+1. Link / modules (PCM, BCM, ABS, …)  
+2. J1979 PID support  
+3. UDS Mode 0x22 DIDs  
+4. Comfort options (fog, heated seats, HSWM, TPMS, …)
+
+**Only GO features appear** on systems pages (e.g. no FOG row if fog not present).  
+Unavailable pages (no camera → no CAM) are omitted from the cycle list.
