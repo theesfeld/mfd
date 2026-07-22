@@ -19,8 +19,13 @@
 - Default display lock **120 Hz** phase-locked; `VGE_HZ=0` for uncapped throughput tests
 - Terminal demo default phosphor on (`VGE_PHOSPHOR=0` to disable)
 
+### Changed
+
+- **Core is pure assembly `libvge`** (`make` → `.a`/`.so`); Rust is optional FFI only
+
 ### Added
 
+- `Makefile`, `examples/c/smoke.c`, full public ABI in `asm/x86_64/vge_extra.s`
 - **`DisplayList` / stroke commands** — calligraphic refresh model (1970s vector CRT / HUD style)
 - True vector engine: geometry lights individual pixels (no sprite/bitmap draw path)
 - **Fast path:** inlined Bresenham stores, bulk clear, RAM back-buffer + single blit present

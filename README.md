@@ -92,13 +92,22 @@ leave_overlay()?;
 
 ## Install
 
+### Primary (assembly library)
+
+```bash
+git clone https://github.com/theesfeld/vge
+cd vge && make && make install
+# CFLAGS: -I$HOME/.local/include
+# LDFLAGS: -L$HOME/.local/lib -lvge -lm
+```
+
+### Optional Rust bindings (FFI only)
+
 ```toml
-# Cargo.toml
 vge = { git = "https://github.com/theesfeld/vge" }
 ```
 
-C header: `include/vge.h`  
-Link the static/shared library from `cargo build --release` (`libvge.a` / `libvge.so`).
+The Rust package **links** the assembly objects; it does not reimplement the engine.
 
 ---
 
@@ -247,18 +256,13 @@ vge_line(&s, 0, 0, 639, 359, 0x00FF46);
 ## Layout
 
 ```
-include/vge.h           C ABI
-asm/x86_64/vge.s        assembly hot path
-c/vge_portable.c        transforms, blit, decay, portable raster
-src/lib.rs              Rust API
-src/stroke.rs           DisplayList (calligraphic core)
-src/term.rs             terminal present + viewport overlay
-src/fb.rs               Linux framebuffer
-src/frame.rs            display refresh lock
-src/effects.rs          glow / bloom / radar / scanlines
-src/bin/vge-demo.rs     stroke-list HUD demo
-examples/bench.rs       FPS bench
-docs/demo-hud.png       sample image
+include/vge.h              public C ABI
+asm/x86_64/vge.s           plot/clear/line/circle
+asm/x86_64/vge_extra.s     thick/rect/blit/decay/export/xform/…
+Makefile                   builds libvge.a / libvge.so
+examples/c/smoke.c         pure-C link test
+c/vge_portable.c           reference only (non-x86_64 / VGE_FORCE_C)
+src/                       optional Rust FFI + demos (not the engine)
 ```
 
 ## Architecture note

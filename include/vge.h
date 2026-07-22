@@ -1,8 +1,11 @@
 /* SPDX-License-Identifier: MIT
- * VGE — true vector graphics engine
+ * VGE — calligraphic vector graphics engine
  *
- * Geometry → individual pixels. No bitmap sprite path.
- * C ABI for C and Rust (and any language that can call C).
+ * PRODUCT: pure assembly library (libvge) with this C ABI.
+ * Link: -lvge -lm
+ * Language bindings (Rust, etc.) are thin FFI only — not the core.
+ *
+ * Geometry → individual pixels. Color format: 0xAARRGGBB.
  */
 #ifndef VGE_H
 #define VGE_H
@@ -14,10 +17,10 @@
 extern "C" {
 #endif
 
-/** Packed color: 0x00RRGGBB (top byte unused). */
+/** Packed color: 0xAARRGGBB (alpha in high byte; 0 = transparent). */
 typedef uint32_t vge_color;
 
-/** Pixel surface: XRGB8888 little-endian words, row-major. */
+/** Pixel surface: 32-bit pixels (0xAARRGGBB), row-major. */
 typedef struct VgeSurface {
     uint32_t width;  /* pixels */
     uint32_t height; /* pixels */
@@ -59,7 +62,7 @@ void vge_circle(VgeSurface *s, int32_t cx, int32_t cy, int32_t r, vge_color colo
 void vge_rect_fill(VgeSurface *s, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
                    vge_color color);
 
-/* --- Transform helpers (portable C; apply then call line) --- */
+/* --- Transform helpers (assembly; rotate uses libm sinf/cosf) --- */
 
 void vge_xform_identity(VgeXform *m);
 void vge_xform_translate(VgeXform *m, float tx, float ty);
