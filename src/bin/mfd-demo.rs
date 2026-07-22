@@ -1,10 +1,12 @@
-//! **MFD demo** — square face, OSB bezel, F-16 formats + auto.
+//! **MFD demo** — jet CMFD formats + **full auto vehicle** pages.
 //!
-//! Physical reference: F-16 MLU color MFD ≈ **4×4 in (10×10 cm)** square glass.
-//! This demo uses a **square** framebuffer + centered terminal viewport.
+//! Default domain is **auto** (vehicle MFD). Jet remains on Tab / `j`.
 //!
 //! ```text
 //! cargo run --release --bin mfd-demo
+//! MFD_DOMAIN=jet cargo run --release --bin mfd-demo
+//! MFD_CAMERA=auto cargo run --release --bin mfd-demo
+//! MFD_OBD_PORT=/dev/ttyUSB0 cargo run --release --bin mfd-demo
 //! ```
 
 use std::io;
@@ -13,6 +15,7 @@ use std::time::Instant;
 
 use mfd::auto::{self, AutoPage, DriveMode, GearSelect, VehicleSnapshot};
 use mfd::bezel::{BezelEvent, BezelSource, BezelState, KeyboardBezel};
+use mfd::font::{draw_text, text_width};
 use mfd::frame::FramePacer;
 use mfd::jet::{self, Format, FormatSelect, FormatSelectAction};
 use mfd::page::Page;
@@ -37,15 +40,10 @@ fn main() -> io::Result<()> {
         eprintln!("error: mfd-demo requires pure-asm libmfd (x86_64)");
         std::process::exit(1);
     }
-    eprintln!("loaded libmfd {ver} · MLU CMFD 4x4 · jet + auto");
-    eprintln!("Tab jet/auto · c color · g widget-QA · Esc quit");
-    eprintln!("JET: OSB 12/13/14 format select · m = Master Menu");
-    eprintln!("AUTO: top CLST…LITE · right TPM/BODY/CLIM/FLIR/RNG · left OBD/SET");
-    eprintln!("CAM: MFD_CAMERA=/dev/video0|auto  FLIR: MFD_FLIR_PATH=still.pgm");
-    eprintln!("OBD: MFD_OBD_PORT=/dev/ttyUSB0  or  MFD_OBD_REPLAY=capture.jsonl");
+
+    print_banner(ver);
 
     install_sigint();
-    // 30 Hz default keeps Kitty present from queuing into multi-second lag.
     let hz = std::env::var("MFD_HZ")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -55,33 +53,7 @@ fn main() -> io::Result<()> {
     let face = physical_mfd_layout(backend, mfd_face_inches());
     let vp = face.viewport;
     let (w, h) = face.surface_size();
-    let src = match face.ppi_source {
-        PpiSource::Env => "MFD_PPI",
-        PpiSource::EdidDetailed => "EDID-mm",
-        PpiSource::EdidCm => "EDID-cm",
-        PpiSource::Fallback96 => "fallback-96 (set MFD_PPI for ruler accuracy)",
-    };
-    let pxsrc = match face.pixel_space.source {
-        PxSpaceSource::Env => "MFD_PX_SCALE",
-        PxSpaceSource::Compositor => "compositor",
-        PxSpaceSource::Identity => "identity",
-    };
-    eprintln!(
-        "ruler face {req:.2}\" @ {ppi:.1} ppi ({src})  px×{pxs:.3} ({pxsrc})  cell {cw:.1}×{ch:.1}dev  → {w}×{h}px  cells {}×{}  on-glass {og:.2}\"×{og:.2}\"{clip}",
-        vp.cols,
-        vp.rows,
-        req = face.inches_requested,
-        ppi = face.ppi,
-        pxs = face.pixel_space.winsize_to_device,
-        cw = face.cell_device.0,
-        ch = face.cell_device.1,
-        og = face.on_glass_in,
-        clip = if face.clipped {
-            "  [clipped to window — enlarge terminal or lower MFD_FACE_IN]"
-        } else {
-            ""
-        }
-    );
+    log_ruler(&face, vp.cols, vp.rows, w, h);
     debug_assert_eq!(w, h, "framebuffer must be square");
 
     let mut panel = Surface::new(w, h);
@@ -102,11 +74,37 @@ fn main() -> io::Result<()> {
 
     let mut bezel_src = KeyboardBezel::new();
     let mut bezel = BezelState::default();
-    let mut domain = Domain::Jet;
-    // MLU M1: three format options on OSB 14/13/12; start FCR active.
+
+    // Default: auto vehicle showcase (override MFD_DOMAIN=jet).
+    let mut domain = match std::env::var("MFD_DOMAIN")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "jet" | "f16" | "cmfd" => Domain::Jet,
+        _ => Domain::Auto,
+    };
+
     let mut fmt_sel = FormatSelect::default();
     let mut jet_fmt = fmt_sel.current();
-    let mut auto_page = AutoPage::Cluster;
+    let mut auto_page = match std::env::var("MFD_AUTO_PAGE")
+        .unwrap_or_default()
+        .to_ascii_uppercase()
+        .as_str()
+    {
+        "FUEL" => AutoPage::Fuel,
+        "TEMP" | "TEMPS" => AutoPage::Temps,
+        "DRV" | "DRIVE" => AutoPage::Drive,
+        "LITE" | "LIGHTS" => AutoPage::Lights,
+        "TPM" => AutoPage::Tpm,
+        "BODY" => AutoPage::Body,
+        "CLIM" | "CLIMATE" => AutoPage::Clim,
+        "FLIR" | "CAM" => AutoPage::Flir,
+        "RNG" | "RANGE" | "COLL" => AutoPage::Collision,
+        "OBD" => AutoPage::Obd,
+        "SET" | "SETUP" => AutoPage::Setup,
+        _ => AutoPage::Cluster,
+    };
     let mut vehicle = VehicleSnapshot::default();
     let mut color_mode = ColorMode::ColorMfd;
     let mut osb_tick: u32 = 0;
@@ -114,25 +112,47 @@ fn main() -> io::Result<()> {
     #[cfg(feature = "obd")]
     let obd_feed = auto::obd_feed::ObdFeed::try_start_from_env();
     #[cfg(feature = "obd")]
-    if let Some(ref f) = obd_feed {
-        eprintln!("OBD feed: {}", f.status_line());
+    let obd_status = if let Some(ref f) = obd_feed {
+        let s = f.status_line();
+        eprintln!("OBD: {s}");
+        s
     } else {
-        eprintln!("OBD feed: demo (set MFD_OBD_PORT or MFD_OBD_REPLAY for live)");
-    }
+        eprintln!("OBD: DEMO (set MFD_OBD_PORT or MFD_OBD_REPLAY)");
+        "DEMO".into()
+    };
     #[cfg(not(feature = "obd"))]
-    eprintln!("OBD feed: disabled (build with --features obd)");
+    let obd_status = {
+        eprintln!("OBD: off (build --features obd)");
+        "OFF".to_string()
+    };
 
     #[cfg(target_os = "linux")]
     let mut camera = {
         use mfd::V4l2Source;
         let cam = V4l2Source::auto_detect().or_else(V4l2Source::from_env);
         if let Some(ref c) = cam {
-            eprintln!("camera: {}", c.device.display());
+            eprintln!("CAM: {}", c.device.display());
         } else {
-            eprintln!("camera: none (MFD_CAMERA=/dev/video0 or auto)");
+            eprintln!("CAM: none — MFD_CAMERA=/dev/video0|auto  or  MFD_FLIR_PATH=still.pgm");
         }
         cam
     };
+    #[cfg(target_os = "linux")]
+    let cam_label = camera
+        .as_ref()
+        .map(|c| format!("CAM {}", c.device.display()))
+        .unwrap_or_else(|| "CAM off".into());
+    #[cfg(not(target_os = "linux"))]
+    let cam_label = "CAM n/a".to_string();
+
+    eprintln!(
+        "start: {} · auto page {}",
+        match domain {
+            Domain::Auto => "AUTO vehicle MFD",
+            Domain::Jet => "JET CMFD",
+        },
+        auto_page.title()
+    );
 
     enter_fullscreen()?;
     let t0 = Instant::now();
@@ -153,6 +173,21 @@ fn main() -> io::Result<()> {
                         Domain::Jet => Domain::Auto,
                         Domain::Auto => Domain::Jet,
                     };
+                    eprintln!(
+                        "domain → {}",
+                        match domain {
+                            Domain::Auto => "AUTO",
+                            Domain::Jet => "JET",
+                        }
+                    );
+                }
+                b'a' | b'A' => {
+                    domain = Domain::Auto;
+                    eprintln!("domain → AUTO");
+                }
+                b'j' | b'J' => {
+                    domain = Domain::Jet;
+                    eprintln!("domain → JET");
                 }
                 b'c' | b'C' => {
                     color_mode = match color_mode {
@@ -165,12 +200,70 @@ fn main() -> io::Result<()> {
                     domain = Domain::Jet;
                     jet_fmt = Format::Gallery;
                 }
-                b'm' | b'M' => {
-                    // Open Master Menu on active slot (same as press highlighted format OSB).
-                    domain = Domain::Jet;
+                b'm' | b'M' if matches!(domain, Domain::Jet) => {
                     osb_tick = osb_tick.wrapping_add(1);
                     let _ = fmt_sel.handle_osb(fmt_sel.active.osb(), osb_tick);
                     jet_fmt = fmt_sel.current();
+                }
+                // Auto page jump keys (always switch to auto)
+                b'1' => {
+                    domain = Domain::Auto;
+                    auto_page = AutoPage::Cluster;
+                }
+                b'2' => {
+                    domain = Domain::Auto;
+                    auto_page = AutoPage::Fuel;
+                }
+                b'3' => {
+                    domain = Domain::Auto;
+                    auto_page = AutoPage::Temps;
+                }
+                b'4' => {
+                    domain = Domain::Auto;
+                    auto_page = AutoPage::Drive;
+                }
+                b'5' => {
+                    domain = Domain::Auto;
+                    auto_page = AutoPage::Lights;
+                }
+                b'6' => {
+                    domain = Domain::Auto;
+                    auto_page = AutoPage::Tpm;
+                }
+                b'7' => {
+                    domain = Domain::Auto;
+                    auto_page = AutoPage::Body;
+                }
+                b'8' => {
+                    domain = Domain::Auto;
+                    auto_page = AutoPage::Clim;
+                }
+                b'9' => {
+                    domain = Domain::Auto;
+                    auto_page = AutoPage::Flir;
+                }
+                b'0' => {
+                    domain = Domain::Auto;
+                    auto_page = AutoPage::Collision;
+                }
+                b'o' | b'O' => {
+                    domain = Domain::Auto;
+                    auto_page = AutoPage::Obd;
+                }
+                b's' | b'S' if matches!(domain, Domain::Auto) => {
+                    auto_page = AutoPage::Setup;
+                }
+                b'u' | b'U' if matches!(domain, Domain::Auto) => {
+                    vehicle.speed_unit = vehicle.speed_unit.cycle();
+                }
+                b']' if matches!(domain, Domain::Auto) => {
+                    auto_page = cycle_auto(auto_page, 1);
+                }
+                b'[' if matches!(domain, Domain::Auto) => {
+                    auto_page = cycle_auto(auto_page, -1);
+                }
+                b'h' | b'H' if matches!(domain, Domain::Auto) => {
+                    auto_page = AutoPage::Setup;
                 }
                 _ => bezel_src.push_key_state(k, &bezel),
             }
@@ -185,26 +278,15 @@ fn main() -> io::Result<()> {
                 match domain {
                     Domain::Jet => {
                         osb_tick = osb_tick.wrapping_add(1);
-                        // 1) Format select / Master Menu (OSB 12/13/14 + menu picks).
                         match fmt_sel.handle_osb(osb, osb_tick) {
                             FormatSelectAction::Show(f) => jet_fmt = f,
                             FormatSelectAction::OpenMenu { .. } => jet_fmt = Format::Menu,
                             FormatSelectAction::CloseMenu => jet_fmt = fmt_sel.current(),
                             FormatSelectAction::Ignore => {
-                                // 2) Page-local OSBs only when not format-select.
-                                // Top row and sides are format-specific (rotary / CNTL / etc.).
-                                // Demo shortcuts when not on menu:
                                 if !fmt_sel.menu_open {
-                                    match osb {
-                                        1..=5 | 6..=11 | 15..=20 => {
-                                            // Page owns these; optional demo: top bank still switches
-                                            // via format assign for exploration.
-                                            if let Some(f) = Format::from_top_osb(osb, 0) {
-                                                fmt_sel.assign(fmt_sel.active, f);
-                                                jet_fmt = f;
-                                            }
-                                        }
-                                        _ => {}
+                                    if let Some(f) = Format::from_top_osb(osb, 0) {
+                                        fmt_sel.assign(fmt_sel.active, f);
+                                        jet_fmt = f;
                                     }
                                 }
                             }
@@ -257,7 +339,6 @@ fn main() -> io::Result<()> {
         let t = t0.elapsed().as_secs_f32();
         frame_i = frame_i.wrapping_add(1);
 
-        // Vehicle: OBD live if available, else animated demo; keep operator toggles.
         #[cfg(feature = "obd")]
         let use_obd = obd_feed.is_some();
         #[cfg(not(feature = "obd"))]
@@ -285,10 +366,12 @@ fn main() -> io::Result<()> {
             vehicle = live;
         }
 
-        // Camera: grab every few frames to keep present snappy
         #[cfg(target_os = "linux")]
-        let cam_frame = if matches!(domain, Domain::Auto) && matches!(auto_page, AutoPage::Flir) {
-            if frame_i % 3 == 0 {
+        let cam_frame = if matches!(domain, Domain::Auto)
+            && matches!(auto_page, AutoPage::Flir | AutoPage::Collision)
+        {
+            // Grab on FLIR; keep last frame warm for Collision if needed later
+            if matches!(auto_page, AutoPage::Flir) && frame_i % 2 == 0 {
                 camera.as_mut().and_then(|c| c.grab().cloned())
             } else {
                 camera.as_ref().and_then(|c| c.last.clone())
@@ -305,9 +388,10 @@ fn main() -> io::Result<()> {
 
         match domain {
             Domain::Jet => {
-                jet::draw_format_sel(&mut page, jet_fmt, &pal, &bezel, t, Some(&fmt_sel))
+                jet::draw_format_sel(&mut page, jet_fmt, &pal, &bezel, t, Some(&fmt_sel));
             }
             Domain::Auto => {
+                let font_px = page.font_px;
                 auto::draw_auto_with_video(
                     &mut page,
                     auto_page,
@@ -317,12 +401,36 @@ fn main() -> io::Result<()> {
                     t,
                     cam_frame.as_ref(),
                 );
+                let feed = if use_obd { "OBD" } else { "DEMO" };
+                let cam = if cam_frame.is_some() {
+                    "CAM"
+                } else if std::env::var_os("MFD_FLIR_PATH").is_some() {
+                    "FILE"
+                } else {
+                    #[cfg(target_os = "linux")]
+                    {
+                        if camera.is_some() {
+                            "CAM?"
+                        } else {
+                            "SYN"
+                        }
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        "SYN"
+                    }
+                };
+                let status = format!(
+                    "AUTO {} · {} · {} · [] 1-0 o s · Tab jet",
+                    auto_page.title(),
+                    feed,
+                    cam
+                );
+                draw_demo_status(page.surface, &status, pal.dim, font_px * 0.6);
             }
         }
 
-        // Real BRT: scale ink after draw.
         panel.apply_brightness(bezel.brightness.clamp(0.05, 1.0));
-
         present_at_state_scratch(&panel, backend, vp, None, Some(&mut scratch))?;
         if let Some(p) = pacer.as_mut() {
             p.wait_next();
@@ -331,8 +439,96 @@ fn main() -> io::Result<()> {
 
     leave_fullscreen()?;
     drop(raw);
+    let _ = (obd_status.as_str(), cam_label.as_str());
     eprintln!("mfd-demo done · libmfd {ver}");
     Ok(())
+}
+
+fn cycle_auto(cur: AutoPage, dir: i32) -> AutoPage {
+    let all = AutoPage::ALL;
+    let i = all.iter().position(|&p| p == cur).unwrap_or(0) as i32;
+    let n = all.len() as i32;
+    let j = (i + dir).rem_euclid(n) as usize;
+    all[j]
+}
+
+fn draw_demo_status(s: &mut Surface, text: &str, color: mfd::Color, px: f32) {
+    let w = s.width() as f32;
+    let h = s.height() as f32;
+    let tw = text_width(text, px);
+    let x = ((w - tw) * 0.5).max(2.0);
+    let y = h - px - 4.0;
+    draw_text(s, x, y, text, color, px);
+}
+
+fn print_banner(ver: &str) {
+    eprintln!("═══════════════════════════════════════════════════════════");
+    eprintln!("  mfd-demo  libmfd {ver}");
+    eprintln!("  Vehicle MFD (default) + jet CMFD");
+    eprintln!("═══════════════════════════════════════════════════════════");
+    eprintln!();
+    eprintln!("  DOMAIN");
+    eprintln!("    Tab / a     AUTO vehicle pages   (default)");
+    eprintln!("    j           JET F-16 formats");
+    eprintln!();
+    eprintln!("  AUTO PAGES  (keys or OSB)");
+    eprintln!("    1 CLST   cluster  speed/RPM/gear/throttle");
+    eprintln!("    2 FUEL   fuel + battery + load tapes");
+    eprintln!("    3 TEMP   oil/coolant/trans/IAT/MAF/EGT");
+    eprintln!("    4 DRV    gear P/R/N/D/M · 2H/4H/4L");
+    eprintln!("    5 LITE   headlights fog brake turns interior");
+    eprintln!("    6 TPM    tire pressures + temps");
+    eprintln!("    7 BODY   doors + seat belts");
+    eprintln!("    8 CLIM   out/in temp HVAC");
+    eprintln!("    9 FLIR   camera / FLIR glass");
+    eprintln!("    0 RNG    collision / park ranges");
+    eprintln!("    o OBD    PID list");
+    eprintln!("    s SET    setup / units");
+    eprintln!("    [ ]      previous / next auto page");
+    eprintln!("    u        cycle speed unit MPH/KM/H/KT");
+    eprintln!();
+    eprintln!("  OSB (auto)");
+    eprintln!("    top     CLST FUEL TEMP DRV LITE");
+    eprintln!("    right   TPM  BODY CLIM FLIR RNG");
+    eprintln!("    left    OBD  SET  …");
+    eprintln!();
+    eprintln!("  JET");
+    eprintln!("    OSB 12/13/14 format slots · m Master Menu · g widget QA");
+    eprintln!();
+    eprintln!("  SENSORS");
+    eprintln!("    MFD_CAMERA=/dev/video0|auto");
+    eprintln!("    MFD_FLIR_PATH=still.pgm");
+    eprintln!("    MFD_OBD_PORT=/dev/ttyUSB0  MFD_OBD_REPLAY=…");
+    eprintln!("    MFD_RANGE=2.1,3.0,2.8,1.2");
+    eprintln!("    MFD_DOMAIN=auto|jet   MFD_AUTO_PAGE=FLIR|RNG|…");
+    eprintln!("    c color · Esc quit");
+    eprintln!();
+}
+
+fn log_ruler(face: &mfd::PhysicalFace, cols: u16, rows: u16, w: u32, h: u32) {
+    let src = match face.ppi_source {
+        PpiSource::Env => "MFD_PPI",
+        PpiSource::EdidDetailed => "EDID-mm",
+        PpiSource::EdidCm => "EDID-cm",
+        PpiSource::Fallback96 => "fallback-96",
+    };
+    let pxsrc = match face.pixel_space.source {
+        PxSpaceSource::Env => "MFD_PX_SCALE",
+        PxSpaceSource::Compositor => "compositor",
+        PxSpaceSource::Identity => "identity",
+    };
+    eprintln!(
+        "ruler face {:.2}\" @ {:.1} ppi ({src}) px×{:.3} ({pxsrc}) → {w}×{h}px cells {cols}×{rows} on-glass {:.2}\"{}",
+        face.inches_requested,
+        face.ppi,
+        face.pixel_space.winsize_to_device,
+        face.on_glass_in,
+        if face.clipped {
+            " [clipped]"
+        } else {
+            ""
+        }
+    );
 }
 
 fn install_sigint() {
