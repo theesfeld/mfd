@@ -1,129 +1,73 @@
-//! F-16 CMFD-style **power-on / BIT** glass until capability probe is ready.
+//! Real F-16 **CMFD power-on** glass (public MLU / training model).
 //!
-//! Visual language matches MLU TEST format: black glass, GO/RDY/NOGO list,
-//! progress strip, OFP line — not a marketing splash.
+//! Phases (see `docs/reference/cmfd-power-on.md`):
+//! 1. Power apply — pure black  
+//! 2. Display alive — BLANK face (empty content) + MLU OSB chrome  
+//! 3. Format select labels — SWAP · FCR · HSD · SMS · DCLT (training default)
+//!
+//! Capability probe runs in the background. This is **not** a invented BIT
+//! checklist splash. TEST/BIT format is a separate selectable page, not cold power.
 
-use crate::auto::caps::{BitState, VehicleCaps};
-use crate::geom::Rect;
+use crate::auto::caps::VehicleCaps;
+use crate::jet::FormatSelect;
 use crate::page::Page;
 use crate::palette::Palette;
-use crate::widget::{bezel_frame, caution_box, label, label_centered, list_menu, progress_strip};
-use crate::VERSION;
+use crate::widget::{bezel_frame, osb_chrome};
 
-/// Draw CMFD BIT / loading page (full face).
+/// Training-default format select (left CMFD NAV/A-A style).
+fn power_on_format_select() -> FormatSelect {
+    FormatSelect::default() // FCR / HSD / SMS on OSB 14/13/12
+}
+
+/// Draw authentic CMFD power-on face while probe runs.
+///
+/// `t` — wall time for phase timing.  
+/// `caps.progress` — 0..1 probe progress (only used to advance visual phase).
 pub fn draw_bit_screen(page: &mut Page, pal: &Palette, caps: &VehicleCaps, t: f32) {
+    // Prefer probe progress; if zero, use wall clock so demo still animates.
+    let p = if caps.progress > 0.02 {
+        caps.progress.clamp(0.0, 1.0)
+    } else {
+        (t / 2.8).clamp(0.0, 1.0)
+    };
+
     page.clear();
     page.surface.clear(pal.glass);
+
+    // ── Phase 1: power apply — black glass, no legends ───────────────────
+    if p < 0.12 {
+        // Pure black face (real LCD just powered).
+        let _ = caps;
+        return;
+    }
+
+    // ── Phase 2–3: bezel + OSB chrome, empty content (BLANK format) ───────
     let b = page.bounds.inset(2);
     bezel_frame(page.surface, b);
-    // Structure ink: outer frame already from bezel_frame
 
-    let fh = page.font_px;
-    let cx = b.center().0 as f32;
+    let sel = power_on_format_select();
+    // Bottom L→R = OSB 15..11: SWAP · FCR · HSD · SMS · DCLT
+    // Top / sides empty on blank power-on face (no page softkeys yet).
+    let top = ["", "", "", "", ""];
+    let right = ["", "", "", "", ""];
+    let left = ["", "", "", "", ""];
+    let [a, b_lab, c] = sel.slot_labels();
+    let bottom = ["SWAP", a, b_lab, c, "DCLT"];
 
-    // Title block (format-like)
-    label_centered(
+    // Highlight active format slot (OSB 14) once "alive"
+    let active = if p >= 0.20 { Some(14u8) } else { None };
+    osb_chrome(
         page.surface,
-        cx,
-        b.y as f32 + fh * 0.6,
-        "CMFD",
-        pal.primary,
-        fh * 1.1,
-    );
-    label_centered(
-        page.surface,
-        cx,
-        b.y as f32 + fh * 1.7,
-        &format!("OFP  MFD {}", VERSION),
+        b,
+        &top,
+        &right,
+        &bottom,
+        &left,
+        page.font_px * 0.65,
         pal.dim,
-        fh * 0.7,
-    );
-    label_centered(
-        page.surface,
-        cx,
-        b.y as f32 + fh * 2.6,
-        &caps.phase,
-        pal.readout,
-        fh * 0.85,
+        active,
     );
 
-    // BIT lines — same language as jet TEST format
-    let mut lines: Vec<String> = caps
-        .lines
-        .iter()
-        .map(|l| format!("{:<8} {}", l.name, l.state.label()))
-        .collect();
-    if lines.is_empty() {
-        // Animated placeholder while first lines arrive
-        let step = ((t * 2.0) as usize) % 4;
-        let dots = ["", ".", "..", "..."][step];
-        lines.push(format!("MFDS     RDY{dots}"));
-        lines.push("LINK     RDY".into());
-        lines.push("PROBE    RDY".into());
-    }
-    // Pad for stable layout
-    while lines.len() < 8 {
-        lines.push(String::new());
-    }
-    let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
-    let list_top = b.y + (fh * 3.4) as i32;
-    let list_h = b.h - (fh * 6.5) as i32;
-    list_menu(
-        page.surface,
-        Rect::new(b.x + 12, list_top, b.w - 24, list_h.max(40)),
-        &refs,
-        None,
-        fh * 0.85,
-        pal.primary,
-        pal.readout,
-    );
-
-    // Progress (LOAD / BIT)
-    let prog = caps.progress.clamp(0.0, 1.0);
-    let bar_y = b.bottom() - (fh * 2.8) as i32;
-    progress_strip(
-        page.surface,
-        Rect::new(b.x + 20, bar_y, b.w - 40, 12),
-        prog,
-        pal.nav,
-        pal.structure,
-    );
-    label_centered(
-        page.surface,
-        cx,
-        bar_y as f32 + 16.0,
-        &format!("BIT  {:.0}%  ·  {}", prog * 100.0, caps.link),
-        pal.dim,
-        fh * 0.7,
-    );
-
-    if caps.ready {
-        caution_box(
-            page.surface,
-            Rect::new(
-                b.x + 24,
-                b.bottom() - (fh * 1.6) as i32 - 8,
-                b.w - 48,
-                (fh * 1.4) as i32,
-            ),
-            "BIT COMPLETE",
-            fh * 0.85,
-            pal.primary,
-        );
-    } else {
-        // Blink RDY cue
-        if (t * 3.0).sin() > 0.0 {
-            label(
-                page.surface,
-                b.x as f32 + 16.0,
-                b.bottom() as f32 - fh * 1.2,
-                "INIT",
-                pal.caution,
-                fh * 0.75,
-            );
-        }
-    }
-
-    // Legend: map BitState colors via trailing labels already GO/RDY/NOGO
-    let _ = BitState::Go;
+    // Content: true blank — no center text, no progress bar, no OFP splash.
+    // Real BLANK format has empty glass; format names live on OSB 12/13/14.
 }

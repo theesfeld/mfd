@@ -38,16 +38,22 @@ Same signal may appear on multiple pages (e.g. RPM on ENG and DRV).
 `n`/`p` cycle · number keys and letters jump (see `mfd-demo` banner).  
 Default domain: **auto only**.
 
-## Startup (BIT)
+## Startup (real CMFD power-on)
 
-At power-on the glass shows an **F-16 CMFD-style BIT** page (TEST language: GO / RDY / NOGO + progress) until capability probe finishes.
+Glass matches **real F-16 CMFD power-on** (see `docs/reference/cmfd-power-on.md`):
 
-Probe (read-only):
+1. **Black** face (power apply)  
+2. **BLANK** content + MLU OSB chrome (`SWAP` · `FCR` · `HSD` · `SMS` · `DCLT`)  
+3. When vehicle probe finishes → systems pages  
+
+No invented loading splash or GO/NOGO list on the face. Probe runs **off-glass**.
+
+Probe (read-only, background):
 
 1. Link / modules (PCM, BCM, ABS, …)  
 2. J1979 PID support  
 3. UDS Mode 0x22 DIDs  
 4. Comfort options (fog, heated seats, HSWM, TPMS, …)
 
-**Only GO features appear** on systems pages (e.g. no FOG row if fog not present).  
-Unavailable pages (no camera → no CAM) are omitted from the cycle list.
+**Only GO features appear** on systems pages.  
+Unavailable pages are omitted from the cycle list.
