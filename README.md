@@ -1,7 +1,7 @@
 # MFD — multi-function display library
 
 <!-- agents:status:begin -->
-> **Status:** active · `0.1.0-dev.1` · color CMFD · **display-only** (no vehicle write) · [#73](https://github.com/theesfeld/mfd/issues/73) · MIT
+> **Status:** active · `0.1.0-dev.1` · **vehicle CMFD** systems pages · display-only · [#86](https://github.com/theesfeld/mfd/issues/86) · MIT
 <!-- agents:status:end -->
 
 ## What this is

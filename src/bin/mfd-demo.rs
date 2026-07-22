@@ -1,10 +1,9 @@
-//! **MFD demo** — jet CMFD formats + **full auto vehicle** pages.
+//! **MFD demo** — vehicle CMFD systems pages (auto-centric).
 //!
-//! Default domain is **auto** (vehicle MFD). Jet remains on Tab / `j`.
+//! Jet **formats** are not in this path; widgets remain in the library for later.
 //!
 //! ```text
 //! cargo run --release --bin mfd-demo
-//! MFD_DOMAIN=jet cargo run --release --bin mfd-demo
 //! MFD_CAMERA=auto cargo run --release --bin mfd-demo
 //! MFD_OBD_BT=00:04:3E:96:B8:F1 cargo run --release --bin mfd-demo
 //! MFD_OBD_REPLAY=docs/odbii-session cargo run --release --bin mfd-demo
@@ -14,11 +13,10 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-use mfd::auto::{self, AutoPage, DriveMode, GearSelect, VehicleSnapshot};
+use mfd::auto::{self, AutoPage, GearSelect, VehicleSnapshot};
 use mfd::bezel::{BezelEvent, BezelSource, BezelState, KeyboardBezel};
 use mfd::font::{draw_text, text_width};
 use mfd::frame::FramePacer;
-use mfd::jet::{self, Format, FormatSelect, FormatSelectAction};
 use mfd::page::Page;
 use mfd::palette::{ColorMode, Palette};
 use mfd::term::{
@@ -28,12 +26,6 @@ use mfd::term::{
 use mfd::{engine_version, using_assembly, Surface};
 
 static RUNNING: AtomicBool = AtomicBool::new(true);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Domain {
-    Jet,
-    Auto,
-}
 
 fn main() -> io::Result<()> {
     let ver = engine_version();
@@ -76,38 +68,30 @@ fn main() -> io::Result<()> {
     let mut bezel_src = KeyboardBezel::new();
     let mut bezel = BezelState::default();
 
-    // Default: auto vehicle showcase (override MFD_DOMAIN=jet).
-    let mut domain = match std::env::var("MFD_DOMAIN")
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "jet" | "f16" | "cmfd" => Domain::Jet,
-        _ => Domain::Auto,
-    };
-
-    let mut fmt_sel = FormatSelect::default();
-    let mut jet_fmt = fmt_sel.current();
+    // Vehicle CMFD only (jet formats remain in lib for later).
     let mut auto_page = match std::env::var("MFD_AUTO_PAGE")
         .unwrap_or_default()
         .to_ascii_uppercase()
         .as_str()
     {
+        "ENG" | "ENGINE" | "CLST" | "CLUSTER" => AutoPage::Eng,
         "FUEL" => AutoPage::Fuel,
-        "TEMP" | "TEMPS" => AutoPage::Temps,
+        "FLUD" | "FLUID" | "TEMP" | "TEMPS" => AutoPage::Fluid,
+        "ELEC" => AutoPage::Elec,
         "DRV" | "DRIVE" => AutoPage::Drive,
-        "LITE" | "LIGHTS" => AutoPage::Lights,
-        "TPM" => AutoPage::Tpm,
+        "CHAS" | "TPM" => AutoPage::Chas,
         "BODY" => AutoPage::Body,
+        "LITE" | "LIGHTS" => AutoPage::Lights,
         "CLIM" | "CLIMATE" => AutoPage::Clim,
-        "FLIR" | "CAM" => AutoPage::Flir,
-        "RNG" | "RANGE" | "COLL" => AutoPage::Collision,
+        "FLIR" | "CAM" => AutoPage::Cam,
+        "RNG" | "RANGE" | "COLL" => AutoPage::Range,
         "ATT" | "ATTITUDE" => AutoPage::Attitude,
         "MAP" | "TOPO" => AutoPage::Map,
         "DTC" | "FAULT" | "FAULTS" | "CODES" => AutoPage::Faults,
-        "OBD" => AutoPage::Obd,
+        "BUS" | "OBD" | "DATA" => AutoPage::Bus,
+        "OWN" | "OWN SHIP" => AutoPage::Own,
         "SET" | "SETUP" => AutoPage::Setup,
-        _ => AutoPage::Cluster,
+        _ => AutoPage::Eng,
     };
     let mut vehicle = VehicleSnapshot::default();
     let mut color_mode = ColorMode::ColorMfd;
@@ -149,14 +133,7 @@ fn main() -> io::Result<()> {
     #[cfg(not(target_os = "linux"))]
     let cam_label = "CAM n/a".to_string();
 
-    eprintln!(
-        "start: {} · auto page {}",
-        match domain {
-            Domain::Auto => "AUTO vehicle MFD",
-            Domain::Jet => "JET CMFD",
-        },
-        auto_page.title()
-    );
+    eprintln!("start · AUTO vehicle CMFD · page {}", auto_page.title());
 
     enter_fullscreen()?;
     let t0 = Instant::now();
@@ -172,27 +149,6 @@ fn main() -> io::Result<()> {
         for &k in &keybuf {
             match k {
                 0x1b => RUNNING.store(false, Ordering::Relaxed),
-                b'\t' => {
-                    domain = match domain {
-                        Domain::Jet => Domain::Auto,
-                        Domain::Auto => Domain::Jet,
-                    };
-                    eprintln!(
-                        "domain → {}",
-                        match domain {
-                            Domain::Auto => "AUTO",
-                            Domain::Jet => "JET",
-                        }
-                    );
-                }
-                b'a' | b'A' => {
-                    domain = Domain::Auto;
-                    eprintln!("domain → AUTO");
-                }
-                b'j' | b'J' => {
-                    domain = Domain::Jet;
-                    eprintln!("domain → JET");
-                }
                 b'c' | b'C' => {
                     color_mode = match color_mode {
                         ColorMode::GreenMono => ColorMode::ColorMfd,
@@ -200,89 +156,29 @@ fn main() -> io::Result<()> {
                         ColorMode::HighVis => ColorMode::GreenMono,
                     };
                 }
-                b'g' | b'G' => {
-                    domain = Domain::Jet;
-                    jet_fmt = Format::Gallery;
-                }
-                b'm' | b'M' if matches!(domain, Domain::Jet) => {
-                    osb_tick = osb_tick.wrapping_add(1);
-                    let _ = fmt_sel.handle_osb(fmt_sel.active.osb(), osb_tick);
-                    jet_fmt = fmt_sel.current();
-                }
-                // Auto page jump keys (always switch to auto)
-                b'1' => {
-                    domain = Domain::Auto;
-                    auto_page = AutoPage::Cluster;
-                }
-                b'2' => {
-                    domain = Domain::Auto;
-                    auto_page = AutoPage::Fuel;
-                }
-                b'3' => {
-                    domain = Domain::Auto;
-                    auto_page = AutoPage::Temps;
-                }
-                b'4' => {
-                    domain = Domain::Auto;
-                    auto_page = AutoPage::Drive;
-                }
-                b'5' => {
-                    domain = Domain::Auto;
-                    auto_page = AutoPage::Lights;
-                }
-                b'6' => {
-                    domain = Domain::Auto;
-                    auto_page = AutoPage::Tpm;
-                }
-                b'7' => {
-                    domain = Domain::Auto;
-                    auto_page = AutoPage::Body;
-                }
-                b'8' => {
-                    domain = Domain::Auto;
-                    auto_page = AutoPage::Clim;
-                }
-                b'9' => {
-                    domain = Domain::Auto;
-                    auto_page = AutoPage::Flir;
-                }
-                b'0' => {
-                    domain = Domain::Auto;
-                    auto_page = AutoPage::Collision;
-                }
-                b'o' | b'O' => {
-                    domain = Domain::Auto;
-                    auto_page = AutoPage::Obd;
-                }
-                b's' | b'S' if matches!(domain, Domain::Auto) => {
-                    auto_page = AutoPage::Setup;
-                }
-                b'u' | b'U' if matches!(domain, Domain::Auto) => {
-                    vehicle.speed_unit = vehicle.speed_unit.cycle();
-                }
-                // Page cycle — do not steal [ ] (real CMFD BRT rocker).
-                b'n' | b'N' if matches!(domain, Domain::Auto) => {
-                    auto_page = cycle_auto(auto_page, 1);
-                }
-                b'p' | b'P' if matches!(domain, Domain::Auto) => {
-                    auto_page = cycle_auto(auto_page, -1);
-                }
-                b'h' | b'H' if matches!(domain, Domain::Auto) => {
-                    auto_page = AutoPage::Setup;
-                }
-                // Attitude / map jump
-                b'v' | b'V' => {
-                    domain = Domain::Auto;
-                    auto_page = AutoPage::Attitude;
-                }
-                b'x' | b'X' => {
-                    domain = Domain::Auto;
-                    auto_page = AutoPage::Map;
-                }
-                b'f' | b'F' => {
-                    domain = Domain::Auto;
-                    auto_page = AutoPage::Faults;
-                }
+                // Systems page jumps
+                b'1' => auto_page = AutoPage::Eng,
+                b'2' => auto_page = AutoPage::Fuel,
+                b'3' => auto_page = AutoPage::Fluid,
+                b'4' => auto_page = AutoPage::Elec,
+                b'5' => auto_page = AutoPage::Drive,
+                b'6' => auto_page = AutoPage::Chas,
+                b'7' => auto_page = AutoPage::Body,
+                b'8' => auto_page = AutoPage::Lights,
+                b'9' => auto_page = AutoPage::Clim,
+                b'0' => auto_page = AutoPage::Cam,
+                b'r' | b'R' => auto_page = AutoPage::Range,
+                b'b' | b'B' => auto_page = AutoPage::Bus,
+                b'w' | b'W' => auto_page = AutoPage::Own,
+                b'o' | b'O' => auto_page = AutoPage::Own,
+                b's' | b'S' => auto_page = AutoPage::Setup,
+                b'u' | b'U' => vehicle.speed_unit = vehicle.speed_unit.cycle(),
+                b'n' | b'N' => auto_page = cycle_auto(auto_page, 1),
+                b'p' | b'P' => auto_page = cycle_auto(auto_page, -1),
+                b'h' | b'H' => auto_page = AutoPage::Setup,
+                b'v' | b'V' => auto_page = AutoPage::Attitude,
+                b'x' | b'X' => auto_page = AutoPage::Map,
+                b'f' | b'F' => auto_page = AutoPage::Faults,
                 // [ ] ; ' - = , .  → real bezel knobs (BRT CON SYM GAIN)
                 _ => bezel_src.push_key_state(k, &bezel),
             }
@@ -294,62 +190,34 @@ fn main() -> io::Result<()> {
         for ev in bezel_src.poll() {
             bezel.apply(ev);
             if let BezelEvent::OsbDown(osb) = ev {
-                match domain {
-                    Domain::Jet => {
-                        osb_tick = osb_tick.wrapping_add(1);
-                        match fmt_sel.handle_osb(osb, osb_tick) {
-                            FormatSelectAction::Show(f) => jet_fmt = f,
-                            FormatSelectAction::OpenMenu { .. } => jet_fmt = Format::Menu,
-                            FormatSelectAction::CloseMenu => jet_fmt = fmt_sel.current(),
-                            FormatSelectAction::Ignore => {
-                                if !fmt_sel.menu_open {
-                                    if let Some(f) = Format::from_top_osb(osb, 0) {
-                                        fmt_sel.assign(fmt_sel.active, f);
-                                        jet_fmt = f;
-                                    }
-                                }
-                            }
+                osb_tick = osb_tick.wrapping_add(1);
+                if let Some(p) = AutoPage::from_top_osb(osb) {
+                    auto_page = p;
+                } else if let Some(p) = AutoPage::from_right_osb(osb) {
+                    auto_page = p;
+                } else if let Some(p) = AutoPage::from_left_osb(osb) {
+                    auto_page = p;
+                } else {
+                    match (auto_page, osb) {
+                        (AutoPage::Eng | AutoPage::Setup, 11 | 15) => {
+                            vehicle.speed_unit = vehicle.speed_unit.cycle();
                         }
-                    }
-                    Domain::Auto => {
-                        if let Some(p) = AutoPage::from_top_osb(osb) {
-                            auto_page = p;
-                        } else if let Some(p) = AutoPage::from_right_osb(osb) {
-                            auto_page = p;
-                        } else if let Some(p) = AutoPage::from_left_osb(osb) {
-                            auto_page = p;
-                        } else {
-                            match (auto_page, osb) {
-                                (AutoPage::Cluster | AutoPage::Setup, 11 | 15) => {
-                                    vehicle.speed_unit = vehicle.speed_unit.cycle();
-                                }
-                                (AutoPage::Drive, 11) => vehicle.gear = GearSelect::Park,
-                                (AutoPage::Drive, 12) => vehicle.gear = GearSelect::Reverse,
-                                (AutoPage::Drive, 13) => vehicle.gear = GearSelect::Neutral,
-                                (AutoPage::Drive, 14) => vehicle.gear = GearSelect::Drive,
-                                (AutoPage::Drive, 15) => vehicle.gear = GearSelect::Manual,
-                                (AutoPage::Drive, 16) => vehicle.drive = DriveMode::TwoHigh,
-                                (AutoPage::Drive, 17) => vehicle.drive = DriveMode::FourHigh,
-                                (AutoPage::Drive, 18) => vehicle.drive = DriveMode::FourLow,
-                                (AutoPage::Lights, 11) => {
-                                    vehicle.light_interior = !vehicle.light_interior
-                                }
-                                (AutoPage::Lights, 12) => {
-                                    vehicle.light_drive = !vehicle.light_drive
-                                }
-                                (AutoPage::Lights, 13) => vehicle.light_fog = !vehicle.light_fog,
-                                (AutoPage::Lights, 14) => vehicle.light_high = !vehicle.light_high,
-                                (AutoPage::Lights, 15) => vehicle.light_low = !vehicle.light_low,
-                                (AutoPage::Clim, 16) => vehicle.hvac_ac = !vehicle.hvac_ac,
-                                (AutoPage::Clim, 17) => {
-                                    vehicle.hvac_fan = (vehicle.hvac_fan + 0.1).min(1.0)
-                                }
-                                (AutoPage::Clim, 18) => {
-                                    vehicle.hvac_defrost = !vehicle.hvac_defrost
-                                }
-                                _ => {}
-                            }
+                        (AutoPage::Drive, 11) => vehicle.gear = GearSelect::Park,
+                        (AutoPage::Drive, 12) => vehicle.gear = GearSelect::Reverse,
+                        (AutoPage::Drive, 13) => vehicle.gear = GearSelect::Neutral,
+                        (AutoPage::Drive, 14) => vehicle.gear = GearSelect::Drive,
+                        (AutoPage::Drive, 15) => vehicle.gear = GearSelect::Manual,
+                        (AutoPage::Lights, 11) => vehicle.light_interior = !vehicle.light_interior,
+                        (AutoPage::Lights, 12) => vehicle.light_drive = !vehicle.light_drive,
+                        (AutoPage::Lights, 13) => vehicle.light_fog = !vehicle.light_fog,
+                        (AutoPage::Lights, 14) => vehicle.light_high = !vehicle.light_high,
+                        (AutoPage::Lights, 15) => vehicle.light_low = !vehicle.light_low,
+                        (AutoPage::Clim, 16) => vehicle.hvac_ac = !vehicle.hvac_ac,
+                        (AutoPage::Clim, 17) => {
+                            vehicle.hvac_fan = (vehicle.hvac_fan + 0.1).min(1.0)
                         }
+                        (AutoPage::Clim, 18) => vehicle.hvac_defrost = !vehicle.hvac_defrost,
+                        _ => {}
                     }
                 }
             }
@@ -386,11 +254,8 @@ fn main() -> io::Result<()> {
         }
 
         #[cfg(target_os = "linux")]
-        let cam_frame = if matches!(domain, Domain::Auto)
-            && matches!(auto_page, AutoPage::Flir | AutoPage::Collision)
-        {
-            // Grab on FLIR; keep last frame warm for Collision if needed later
-            if matches!(auto_page, AutoPage::Flir) && frame_i % 2 == 0 {
+        let cam_frame = if matches!(auto_page, AutoPage::Cam) {
+            if frame_i % 2 == 0 {
                 camera.as_mut().and_then(|c| c.grab().cloned())
             } else {
                 camera.as_ref().and_then(|c| c.last.clone())
@@ -405,48 +270,38 @@ fn main() -> io::Result<()> {
         let mut page = Page::new(&mut panel);
         page.font_px = if w.min(h) >= 480 { 14.0 } else { 12.0 };
 
-        match domain {
-            Domain::Jet => {
-                jet::draw_format_sel(&mut page, jet_fmt, &pal, &bezel, t, Some(&fmt_sel));
-            }
-            Domain::Auto => {
-                let font_px = page.font_px;
-                auto::draw_auto_with_video(
-                    &mut page,
-                    auto_page,
-                    &pal,
-                    &bezel,
-                    &vehicle,
-                    t,
-                    cam_frame.as_ref(),
-                );
-                let feed = if use_obd { "OBD" } else { "DEMO" };
-                let cam = if cam_frame.is_some() {
-                    "CAM"
-                } else if std::env::var_os("MFD_FLIR_PATH").is_some() {
-                    "FILE"
-                } else {
-                    #[cfg(target_os = "linux")]
-                    {
-                        if camera.is_some() {
-                            "CAM?"
-                        } else {
-                            "SYN"
-                        }
-                    }
-                    #[cfg(not(target_os = "linux"))]
-                    {
+        {
+            let font_px = page.font_px;
+            auto::draw_auto_with_video(
+                &mut page,
+                auto_page,
+                &pal,
+                &bezel,
+                &vehicle,
+                t,
+                cam_frame.as_ref(),
+            );
+            let feed = if use_obd { "OBD" } else { "DEMO" };
+            let cam = if cam_frame.is_some() {
+                "CAM"
+            } else if std::env::var_os("MFD_FLIR_PATH").is_some() {
+                "FILE"
+            } else {
+                #[cfg(target_os = "linux")]
+                {
+                    if camera.is_some() {
+                        "CAM?"
+                    } else {
                         "SYN"
                     }
-                };
-                let status = format!(
-                    "AUTO {} · {} · {} · n/p · [ ] BRT · Tab jet",
-                    auto_page.title(),
-                    feed,
-                    cam
-                );
-                draw_demo_status(page.surface, &status, pal.dim, font_px * 0.6);
-            }
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    "SYN"
+                }
+            };
+            let status = format!("{} · {} · {} · n/p · [ ] BRT", auto_page.title(), feed, cam);
+            draw_demo_status(page.surface, &status, pal.dim, font_px * 0.6);
         }
 
         panel.apply_brightness(bezel.brightness.clamp(0.05, 1.0));

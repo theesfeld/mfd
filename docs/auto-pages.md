@@ -1,0 +1,39 @@
+# Auto CMFD — pages and data stack
+
+**Product:** vehicle color MFD only. Jet **formats** are not in the demo path.  
+**Widgets** (tapes, gauges, lists, attitude, …) remain in `mfd::widget` / `mfd::jet` for later reuse.
+
+## Data stack (all three)
+
+| Layer | What | Source |
+|-------|------|--------|
+| **1. SAE J1979 OBD-II** | Mode 01 live · 03/07/0A DTC · 09 VIN | Universal; ELM `01xx` |
+| **2. UDS / CAN** | ISO 14229 + ISO-TP · `0x22` DID · `0x10`/`0x3E` | HS-CAN (MS later) |
+| **3. Ford-specific** | DID catalog · FORScan As-Built **labels** | 2019 SuperCrew · Sync 3 |
+
+The spreadsheet is **Ford As-Built** vocabulary, not a full live PID dump. Live glass still needs Mode 01 + Mode 22.
+
+## Systems grouping (fighter-style banks)
+
+| Bank | Pages | Content |
+|------|-------|---------|
+| **ENG** | ENG | RPM, load, TPS, MAF, oil/coolant (powerplant) |
+| **FUEL** | FUEL | Fuel %, pressure, battery, load (energy) |
+| **FLUID** | FLUID | Oil, coolant, TFT, IAT, EGT, ambient |
+| **ELEC** | ELEC | Battery V, load %, module voltage |
+| **DRV** | DRV | Gear, 4WD, speed, RPM cue |
+| **CHAS** | CHAS | TPM, wheel speeds, brake/park |
+| **BODY** | BODY | Doors, belts |
+| **LITE** | LITE | Exterior/interior lamps |
+| **CLIM** | CLIM | Cabin / HVAC |
+| **SA** | ATT · MAP | Attitude + heading · schematic map |
+| **SENS** | CAM · RNG | Camera/FLIR · park range |
+| **BIT** | DTC · BUS | Fault codes · all channels numeric |
+| **OWN** | OWN · SET | Ownship VIN/profile · setup |
+
+Same signal may appear on multiple pages (e.g. RPM on ENG and DRV).
+
+## Demo keys
+
+`n`/`p` cycle · number keys and letters jump (see `mfd-demo` banner).  
+Default domain: **auto only**.

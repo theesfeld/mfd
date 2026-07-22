@@ -11,7 +11,7 @@ User-global process: `~/.config/agents/AGENTS.md`.
 - **Sensors:** prefer **vehicle OBD/CAN/UDS** for pitch/roll/heading; on-box gyro/compass only as fallback
 - **Low-level draw:** pure asm `libmfd` (`make` → `build/libmfd.a`)
 - **Text:** baked atlas `src/font_atlas_data.rs` from B612 Mono; re-bake with `--features bake_font`
-- **Demo:** `cargo run --release --bin mfd-demo`
+- **Demo:** `cargo run --release --bin mfd-demo` — **vehicle systems only** (jet formats remain in `src/jet/` for widgets reuse, not product path)
 
 ## Commands
 

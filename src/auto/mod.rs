@@ -18,6 +18,7 @@
 //! | Forward camera / FLIR | greyscale blit + TGP overlays |
 //! | Collision / park range | range_display |
 
+pub mod channels;
 pub mod vehicle_profile;
 
 use crate::bezel::BezelState;
@@ -27,10 +28,10 @@ use crate::page::Page;
 use crate::palette::Palette;
 use crate::video::{blit_grey_flir, GreyFrame};
 use crate::widget::{
-    attitude_ball, caution_box, content_after_osb, crosshair, heading_display, heading_rose, label,
-    list_menu, numeric_readout, osb_chrome, progress_strip, range_display, round_gauge,
-    schematic_topo_map, status_grid, tape_gauge, tire_grid, track_gate, value_readout,
-    RangeSnapshot, RoundGaugeOpts, StatusItem, TapeOpts, TapeOrientation, TireReading,
+    attitude_ball, content_after_osb, crosshair, heading_display, label, osb_chrome,
+    progress_strip, range_display, round_gauge, schematic_topo_map, status_grid, tape_gauge,
+    tire_grid, track_gate, value_readout, RangeSnapshot, RoundGaugeOpts, StatusItem, TapeOpts,
+    TapeOrientation, TireReading,
 };
 use crate::Surface;
 
@@ -159,25 +160,36 @@ impl DriveMode {
 }
 
 /// Full vehicle snapshot for auto pages (demo or OBD/CAN host).
+///
+/// Prefer **engineering units** on glass. Normalized 0..1 fields remain for tape widgets.
 #[derive(Clone, Debug)]
 pub struct VehicleSnapshot {
-    /// Engine RPM absolute (e.g. 0..7000).
     pub rpm: f32,
     pub rpm_redline: f32,
-    /// Speed in **mph** (convert with [`SpeedUnit`]).
     pub speed_mph: f32,
     pub throttle: f32,
+    /// Fuel level 0..1
     pub fuel: f32,
+    /// Battery as 0..1 (legacy tapes); use [`Self::battery_v`] for display.
     pub battery: f32,
+    pub battery_v: f32,
     pub load: f32,
+    /// Normalized temps 0..1 (tapes)
     pub oil_temp: f32,
     pub coolant: f32,
     pub trans_temp: f32,
     pub iat: f32,
     pub maf: f32,
     pub exhaust_temp: f32,
+    /// Absolute °C for numeric glass
+    pub oil_temp_c: f32,
+    pub coolant_c: f32,
+    pub trans_temp_c: f32,
+    pub iat_c: f32,
+    pub exhaust_temp_c: f32,
+    pub maf_gps: f32,
+    pub fuel_pressure_kpa: f32,
     pub gear: GearSelect,
-    /// Manual gear 1..6 when Manual.
     pub gear_num: u8,
     pub drive: DriveMode,
     pub light_low: bool,
@@ -192,6 +204,13 @@ pub struct VehicleSnapshot {
     pub tire_fr: TireReading,
     pub tire_rl: TireReading,
     pub tire_rr: TireReading,
+    pub wheel_fl_kph: f32,
+    pub wheel_fr_kph: f32,
+    pub wheel_rl_kph: f32,
+    pub wheel_rr_kph: f32,
+    pub brake_pedal: bool,
+    pub park_brake: bool,
+    pub steer_deg: f32,
     pub door_fl: bool,
     pub door_fr: bool,
     pub door_rl: bool,
@@ -208,16 +227,11 @@ pub struct VehicleSnapshot {
     pub hvac_ac: bool,
     pub hvac_defrost: bool,
     pub dtc_count: u32,
-    /// Full fault list for FAULT CODES page (Mode 03/07/0A when live).
     pub dtcs: Vec<DtcEntry>,
     pub speed_unit: SpeedUnit,
-    /// Pitch degrees (nose up +).
     pub pitch_deg: f32,
-    /// Roll degrees (right wing down +).
     pub roll_deg: f32,
-    /// Heading degrees magnetic/true (0–360, 0 = north).
     pub heading_deg: f32,
-    /// Vehicle VIN (ownship ID). Empty until Mode 09 / feed fills it.
     pub vin: String,
 }
 
@@ -230,6 +244,7 @@ impl Default for VehicleSnapshot {
             throttle: 0.0,
             fuel: 0.62,
             battery: 0.72,
+            battery_v: 13.8,
             load: 0.2,
             oil_temp: 0.45,
             coolant: 0.5,
@@ -237,6 +252,13 @@ impl Default for VehicleSnapshot {
             iat: 0.35,
             maf: 0.3,
             exhaust_temp: 0.4,
+            oil_temp_c: 95.0,
+            coolant_c: 90.0,
+            trans_temp_c: 85.0,
+            iat_c: 28.0,
+            exhaust_temp_c: 320.0,
+            maf_gps: 8.0,
+            fuel_pressure_kpa: 350.0,
             gear: GearSelect::Park,
             gear_num: 1,
             drive: DriveMode::TwoHigh,
@@ -268,6 +290,13 @@ impl Default for VehicleSnapshot {
                 temp_c: 30.0,
                 alert: false,
             },
+            wheel_fl_kph: 0.0,
+            wheel_fr_kph: 0.0,
+            wheel_rl_kph: 0.0,
+            wheel_rr_kph: 0.0,
+            brake_pedal: false,
+            park_brake: true,
+            steer_deg: 0.0,
             door_fl: true,
             door_fr: true,
             door_rl: true,
@@ -304,14 +333,22 @@ pub fn demo_vehicle(t: f32) -> VehicleSnapshot {
     v.speed_mph = 25.0 + 40.0 * (0.5 + 0.5 * (t * 0.35).sin());
     v.throttle = 0.2 + 0.5 * (0.5 + 0.5 * (t * 0.8).sin());
     v.fuel = 0.55 + 0.1 * (t * 0.08).cos();
-    v.battery = 0.65 + 0.08 * (t * 0.2).sin();
+    v.battery_v = 12.6 + 1.4 * (0.5 + 0.5 * (t * 0.2).sin());
+    v.battery = ((v.battery_v - 11.0) / 4.0).clamp(0.0, 1.0);
     v.load = 0.25 + 0.35 * (0.5 + 0.5 * (t * 0.5).cos());
-    v.oil_temp = 0.4 + 0.15 * (t * 0.12).sin();
-    v.coolant = 0.48 + 0.1 * (t * 0.1).sin();
-    v.trans_temp = 0.38 + 0.12 * (t * 0.15).cos();
-    v.iat = 0.3 + 0.1 * (t * 0.2).sin();
-    v.maf = 0.25 + 0.3 * v.throttle;
-    v.exhaust_temp = 0.35 + 0.25 * v.throttle;
+    v.oil_temp_c = 88.0 + 18.0 * (t * 0.12).sin();
+    v.coolant_c = 86.0 + 12.0 * (t * 0.1).sin();
+    v.trans_temp_c = 78.0 + 20.0 * (t * 0.15).cos();
+    v.iat_c = 22.0 + 14.0 * (t * 0.2).sin();
+    v.exhaust_temp_c = 280.0 + 180.0 * v.throttle;
+    v.maf_gps = 4.0 + 40.0 * v.throttle;
+    v.fuel_pressure_kpa = 280.0 + 120.0 * v.throttle;
+    v.oil_temp = ((v.oil_temp_c + 40.0) / 160.0).clamp(0.0, 1.0);
+    v.coolant = ((v.coolant_c + 40.0) / 160.0).clamp(0.0, 1.0);
+    v.trans_temp = ((v.trans_temp_c + 40.0) / 160.0).clamp(0.0, 1.0);
+    v.iat = ((v.iat_c + 40.0) / 120.0).clamp(0.0, 1.0);
+    v.maf = (v.maf_gps / 100.0).clamp(0.0, 1.0);
+    v.exhaust_temp = (v.exhaust_temp_c / 800.0).clamp(0.0, 1.0);
     v.gear = if v.speed_mph < 2.0 {
         GearSelect::Park
     } else if (t * 0.15).sin() > 0.7 {
@@ -328,6 +365,14 @@ pub fn demo_vehicle(t: f32) -> VehicleSnapshot {
     v.light_low = true;
     v.light_turn_l = (t * 2.0).sin() > 0.3 && (t as i32 % 4 < 2);
     v.light_brake = v.throttle < 0.15 && v.speed_mph > 10.0;
+    v.brake_pedal = v.light_brake;
+    v.park_brake = v.speed_mph < 1.0 && matches!(v.gear, GearSelect::Park);
+    v.steer_deg = 25.0 * (t * 0.4).sin();
+    let kph = v.speed_mph * 1.60934;
+    v.wheel_fl_kph = kph + (t * 1.1).sin();
+    v.wheel_fr_kph = kph + (t * 1.05).cos();
+    v.wheel_rl_kph = kph - 0.3;
+    v.wheel_rr_kph = kph + 0.2;
     v.tire_fl.pressure = 34.0 + (t * 0.3).sin();
     v.tire_fr.pressure = 35.0 + (t * 0.25).cos();
     v.tire_rl.alert = (t * 0.05).sin() > 0.92;
@@ -398,116 +443,129 @@ impl From<&VehicleSnapshot> for ObdSnapshot {
 
 // ─── Pages ───────────────────────────────────────────────────────────────────
 
+/// Systems pages (fighter-style banks). Vehicle CMFD product path only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AutoPage {
-    Cluster,
+    /// Powerplant — ENG
+    Eng,
     Fuel,
-    Temps,
+    /// Fluids / temperatures — FLUID
+    Fluid,
+    /// Electrical — ELEC
+    Elec,
     Drive,
-    Lights,
-    Tpm,
+    /// Chassis: TPM + wheels + brake — CHAS
+    Chas,
     Body,
+    Lights,
     Clim,
-    Flir,
-    /// Forward/rear parking & collision ranges (sensor arcs).
-    Collision,
-    /// Attitude ball + heading (cardinals + degrees).
+    /// Camera / FLIR — CAM
+    Cam,
+    /// Park / collision range — RNG
+    Range,
     Attitude,
-    /// Schematic line/topo map (not full DEM).
     Map,
-    /// Fault / trouble codes (Mode 03/07/0A — read only).
     Faults,
-    Obd,
+    /// All channels numeric dump — BUS
+    Bus,
+    /// Ownship identity — OWN
+    Own,
     Setup,
 }
 
 impl AutoPage {
     pub const ALL: &'static [AutoPage] = &[
-        AutoPage::Cluster,
+        AutoPage::Eng,
         AutoPage::Fuel,
-        AutoPage::Temps,
+        AutoPage::Fluid,
+        AutoPage::Elec,
         AutoPage::Drive,
-        AutoPage::Lights,
-        AutoPage::Tpm,
+        AutoPage::Chas,
         AutoPage::Body,
+        AutoPage::Lights,
         AutoPage::Clim,
-        AutoPage::Flir,
-        AutoPage::Collision,
+        AutoPage::Cam,
+        AutoPage::Range,
         AutoPage::Attitude,
         AutoPage::Map,
         AutoPage::Faults,
-        AutoPage::Obd,
+        AutoPage::Bus,
+        AutoPage::Own,
         AutoPage::Setup,
     ];
 
     pub fn name(self) -> &'static str {
         match self {
-            AutoPage::Cluster => "CLST",
+            AutoPage::Eng => "ENG",
             AutoPage::Fuel => "FUEL",
-            AutoPage::Temps => "TEMP",
+            AutoPage::Fluid => "FLUD",
+            AutoPage::Elec => "ELEC",
             AutoPage::Drive => "DRV",
-            AutoPage::Lights => "LITE",
-            AutoPage::Tpm => "TPM",
+            AutoPage::Chas => "CHAS",
             AutoPage::Body => "BODY",
+            AutoPage::Lights => "LITE",
             AutoPage::Clim => "CLIM",
-            AutoPage::Flir => "FLIR",
-            AutoPage::Collision => "RNG",
+            AutoPage::Cam => "CAM",
+            AutoPage::Range => "RNG",
             AutoPage::Attitude => "ATT",
             AutoPage::Map => "MAP",
             AutoPage::Faults => "DTC",
-            AutoPage::Obd => "OBD",
+            AutoPage::Bus => "BUS",
+            AutoPage::Own => "OWN",
             AutoPage::Setup => "SET",
         }
     }
 
     pub fn title(self) -> &'static str {
         match self {
-            AutoPage::Cluster => "CLUSTER",
-            AutoPage::Fuel => "FUEL / BAT",
-            AutoPage::Temps => "TEMPS",
+            AutoPage::Eng => "ENGINE",
+            AutoPage::Fuel => "FUEL / ENERGY",
+            AutoPage::Fluid => "FLUIDS / TEMP",
+            AutoPage::Elec => "ELECTRICAL",
             AutoPage::Drive => "DRIVE",
-            AutoPage::Lights => "LIGHTS",
-            AutoPage::Tpm => "TPM",
+            AutoPage::Chas => "CHASSIS",
             AutoPage::Body => "BODY",
+            AutoPage::Lights => "LIGHTS",
             AutoPage::Clim => "CLIMATE",
-            AutoPage::Flir => "FLIR / CAM",
-            AutoPage::Collision => "RANGE",
+            AutoPage::Cam => "CAMERA / FLIR",
+            AutoPage::Range => "RANGE",
             AutoPage::Attitude => "ATTITUDE",
             AutoPage::Map => "MAP",
             AutoPage::Faults => "FAULT CODES",
-            AutoPage::Obd => "OBD",
+            AutoPage::Bus => "BUS / CHANNELS",
+            AutoPage::Own => "OWNSHIP",
             AutoPage::Setup => "SETUP",
         }
     }
 
-    /// Top OSB 1–5 primary bank.
+    /// Top OSB 1–5: ENG bank
     pub fn from_top_osb(osb: u8) -> Option<AutoPage> {
         match osb {
-            1 => Some(AutoPage::Cluster),
+            1 => Some(AutoPage::Eng),
             2 => Some(AutoPage::Fuel),
-            3 => Some(AutoPage::Temps),
-            4 => Some(AutoPage::Drive),
-            5 => Some(AutoPage::Lights),
+            3 => Some(AutoPage::Fluid),
+            4 => Some(AutoPage::Elec),
+            5 => Some(AutoPage::Drive),
             _ => None,
         }
     }
 
-    /// Right OSB 6–10.
+    /// Right OSB 6–10
     pub fn from_right_osb(osb: u8) -> Option<AutoPage> {
         match osb {
-            6 => Some(AutoPage::Tpm),
+            6 => Some(AutoPage::Chas),
             7 => Some(AutoPage::Body),
-            8 => Some(AutoPage::Clim),
-            9 => Some(AutoPage::Flir),
-            10 => Some(AutoPage::Collision),
+            8 => Some(AutoPage::Lights),
+            9 => Some(AutoPage::Clim),
+            10 => Some(AutoPage::Cam),
             _ => None,
         }
     }
 
-    /// Left OSB 16–20 (chrome left[0]=OSB20).
+    /// Left OSB 16–20
     pub fn from_left_osb(osb: u8) -> Option<AutoPage> {
         match osb {
-            20 => Some(AutoPage::Obd),
+            20 => Some(AutoPage::Bus),
             19 => Some(AutoPage::Setup),
             18 => Some(AutoPage::Attitude),
             17 => Some(AutoPage::Map),
@@ -520,35 +578,45 @@ impl AutoPage {
 type Osb5 = [&'static str; 5];
 
 fn legends(page: AutoPage, v: &VehicleSnapshot) -> (Osb5, Osb5, Osb5, Osb5) {
-    let top = ["CLST", "FUEL", "TEMP", "DRV", "LITE"];
-    let right = ["TPM", "BODY", "CLIM", "FLIR", "RNG"];
-    // Bottom: context for page
+    let top = ["ENG", "FUEL", "FLUD", "ELEC", "DRV"];
+    let right = ["CHAS", "BODY", "LITE", "CLIM", "CAM"];
     let bottom: Osb5 = match page {
-        AutoPage::Cluster => ["UNIT", v.speed_unit.name(), "", "SET", "HOME"],
-        AutoPage::Drive => [
-            GearSelect::Park.name(),
-            GearSelect::Reverse.name(),
-            GearSelect::Neutral.name(),
-            GearSelect::Drive.name(),
-            GearSelect::Manual.name(),
-        ],
+        AutoPage::Eng | AutoPage::Drive => ["UNIT", v.speed_unit.name(), "OWN", "SET", "BUS"],
         AutoPage::Lights => ["LO", "HI", "FOG", "DRL", "INT"],
-        AutoPage::Flir => ["CAM", "WHOT", "GHOT", "GATE", "SET"],
-        AutoPage::Collision => ["F", "FL", "FR", "R", "RST"],
-        AutoPage::Setup => ["UNIT", "OBD", "CAN", "BRT", "HOME"],
-        _ => ["P", "R", "N", "D", "M"],
+        AutoPage::Cam => ["CAM", "WHOT", "GHOT", "GATE", "RNG"],
+        AutoPage::Range => ["F", "FL", "FR", "R", "RST"],
+        AutoPage::Setup => ["UNIT", "BUS", "CAN", "BRT", "OWN"],
+        AutoPage::Own => ["VIN", "PROF", "SET", "BUS", "DTC"],
+        _ => ["OWN", "BUS", "DTC", "ATT", "MAP"],
     };
-    // left[0]=OSB20 … left[4]=OSB16
-    let left: Osb5 = match page {
-        AutoPage::Drive => ["OBD", "SET", "ATT", "MAP", "DTC"],
-        AutoPage::Tpm => ["OBD", "SET", "BAR", "kPa", "DTC"],
-        AutoPage::Clim => ["OBD", "SET", "DEF", "FAN+", "DTC"],
-        AutoPage::Attitude => ["OBD", "SET", "ATT", "MAP", "DTC"],
-        AutoPage::Map => ["OBD", "SET", "ATT", "MAP", "DTC"],
-        AutoPage::Faults => ["OBD", "SET", "ATT", "MAP", "DTC"],
-        _ => ["OBD", "SET", "ATT", "MAP", "DTC"],
-    };
+    let left: Osb5 = ["BUS", "SET", "ATT", "MAP", "DTC"];
     (top, right, bottom, left)
+}
+
+/// Dense numeric matrix (preferred glass style).
+fn numeric_matrix(
+    s: &mut Surface,
+    rect: Rect,
+    lines: &[String],
+    font_px: f32,
+    color: crate::Color,
+    cols: i32,
+) {
+    let cols = cols.clamp(1, 3);
+    let n = lines.len() as i32;
+    let rows = (n + cols - 1) / cols;
+    let cell_w = rect.w / cols;
+    let cell_h = ((rect.h as f32) / rows.max(1) as f32).max(font_px + 2.0) as i32;
+    for (i, line) in lines.iter().enumerate() {
+        let col = i as i32 % cols;
+        let row = i as i32 / cols;
+        let x = rect.x + col * cell_w + 2;
+        let y = rect.y + row * cell_h;
+        if y + font_px as i32 > rect.bottom() {
+            break;
+        }
+        label(s, x as f32, y as f32, line, color, font_px);
+    }
 }
 
 fn chrome(
@@ -668,182 +736,260 @@ pub fn draw_auto_with_video(
     let fh = page.font_px;
 
     match which {
-        AutoPage::Cluster => {
-            // Tach (round) + speed (value) + throttle strip + gear
-            let tach_w = (c.w as f32 * 0.5) as i32;
+        AutoPage::Eng => {
+            let tach_w = (c.w as f32 * 0.42) as i32;
             let rpm_n = (v.rpm / v.rpm_redline).clamp(0.0, 1.1);
             round_gauge(
                 page.surface,
-                Rect::new(c.x, c.y, tach_w, c.h - 28),
+                Rect::new(c.x, c.y, tach_w, c.h - 8),
                 RoundGaugeOpts {
                     value: rpm_n.min(1.0),
                     redline: Some(0.9),
                     label: "RPM",
                     color: pal.primary,
-                    font_px: fh * 0.85,
+                    font_px: fh * 0.8,
                     ..Default::default()
                 },
             );
-            let sx = c.x + tach_w + 4;
-            let spd = v.speed_unit.from_mph(v.speed_mph);
-            value_readout(
+            let lines = channels::channels_in_group(v, "ENG")
+                .into_iter()
+                .map(|ch| ch.line())
+                .collect::<Vec<_>>();
+            numeric_matrix(
                 page.surface,
-                sx as f32 + (c.w - tach_w) as f32 * 0.45,
-                c.y as f32 + c.h as f32 * 0.28,
-                "SPD",
-                &format!("{:.0}", spd),
-                v.speed_unit.name(),
+                Rect::new(c.x + tach_w + 4, c.y, c.w - tach_w - 6, c.h),
+                &lines,
+                fh * 0.85,
                 pal.readout,
-                fh * 0.75,
-                fh * 2.2,
-            );
-            let gear_s = if matches!(v.gear, GearSelect::Manual) {
-                format!("{} {}", v.gear.label(), v.gear_num)
-            } else {
-                v.gear.label().to_string()
-            };
-            numeric_readout(
-                page.surface,
-                sx as f32 + (c.w - tach_w) as f32 * 0.45,
-                c.y as f32 + c.h as f32 * 0.55,
-                &gear_s,
-                pal.nav,
-                fh * 1.1,
-            );
-            label(
-                page.surface,
-                sx as f32 + 4.0,
-                c.bottom() as f32 - fh * 2.2,
-                "TPS",
-                pal.dim,
-                fh * 0.7,
-            );
-            progress_strip(
-                page.surface,
-                Rect::new(sx, c.bottom() - 20, c.w - tach_w - 8, 12),
-                v.throttle,
-                pal.caution,
-                pal.structure,
-            );
-            numeric_readout(
-                page.surface,
-                c.x as f32 + 40.0,
-                c.bottom() as f32 - 8.0,
-                &format!("{:.0} RPM", v.rpm),
-                pal.dim,
-                fh * 0.75,
+                1,
             );
         }
         AutoPage::Fuel => {
-            let cols = 3;
-            let tw = (c.w - 8) / cols;
-            for (i, (lab, val, col)) in [
-                ("FUEL", v.fuel, pal.primary),
-                ("BATT", v.battery, pal.nav),
-                ("LOAD", v.load, pal.caution),
-            ]
-            .iter()
-            .enumerate()
-            {
-                tape(
-                    page.surface,
-                    Rect::new(c.x + i as i32 * (tw + 2), c.y, tw, c.h),
-                    lab,
-                    *val,
-                    *col,
-                    fh * 0.8,
-                    false,
-                );
-            }
-        }
-        AutoPage::Temps => {
-            // Horizontal total + vertical stack of engine fluids (jet FUEL page language).
+            let lines = channels::channels_in_group(v, "FUEL")
+                .into_iter()
+                .chain(channels::channels_in_group(v, "ELEC").into_iter().take(2))
+                .map(|ch| ch.line())
+                .collect::<Vec<_>>();
+            // Big numerics + small fuel tape
+            value_readout(
+                page.surface,
+                c.x as f32 + c.w as f32 * 0.28,
+                c.y as f32 + c.h as f32 * 0.28,
+                "FUEL",
+                &format!("{:.0}", v.fuel * 100.0),
+                "%",
+                pal.primary,
+                fh * 0.75,
+                fh * 2.0,
+            );
+            value_readout(
+                page.surface,
+                c.x as f32 + c.w as f32 * 0.72,
+                c.y as f32 + c.h as f32 * 0.28,
+                "FP",
+                &format!("{:.0}", v.fuel_pressure_kpa),
+                "kPa",
+                pal.caution,
+                fh * 0.7,
+                fh * 1.6,
+            );
             tape(
                 page.surface,
-                Rect::new(c.x, c.y, c.w, (c.h as f32 * 0.2) as i32),
-                "EGT",
-                v.exhaust_temp,
-                pal.warning,
-                fh * 0.75,
+                Rect::new(c.x + 8, c.bottom() - 48, c.w - 16, 40),
+                "FUEL",
+                v.fuel,
+                pal.primary,
+                fh * 0.7,
                 true,
             );
-            let ty = c.y + (c.h as f32 * 0.22) as i32;
-            let th = c.h - (ty - c.y);
-            let n = 5;
-            let tw = (c.w - 4) / n;
-            for (i, (lab, val, col)) in [
-                ("OIL", v.oil_temp, pal.caution),
-                ("COOL", v.coolant, pal.nav),
-                ("TRNS", v.trans_temp, pal.caution),
-                ("IAT", v.iat, pal.primary),
-                ("MAF", v.maf, pal.readout),
-            ]
-            .iter()
-            .enumerate()
-            {
-                tape(
-                    page.surface,
-                    Rect::new(c.x + i as i32 * tw, ty, tw - 2, th),
-                    lab,
-                    *val,
-                    *col,
-                    fh * 0.7,
-                    false,
-                );
-            }
+            numeric_matrix(
+                page.surface,
+                Rect::new(
+                    c.x,
+                    c.y + (c.h as f32 * 0.45) as i32,
+                    c.w,
+                    (c.h as f32 * 0.35) as i32,
+                ),
+                &lines,
+                fh * 0.75,
+                pal.readout,
+                2,
+            );
+        }
+        AutoPage::Fluid => {
+            let lines = channels::channels_in_group(v, "FLUID")
+                .into_iter()
+                .map(|ch| ch.line())
+                .collect::<Vec<_>>();
+            numeric_matrix(page.surface, c.inset(2), &lines, fh * 0.95, pal.readout, 2);
+        }
+        AutoPage::Elec => {
+            value_readout(
+                page.surface,
+                c.center().0 as f32,
+                c.y as f32 + c.h as f32 * 0.3,
+                "BATT",
+                &format!("{:.1}", v.battery_v),
+                "V",
+                pal.nav,
+                fh * 0.8,
+                fh * 2.2,
+            );
+            value_readout(
+                page.surface,
+                c.center().0 as f32,
+                c.y as f32 + c.h as f32 * 0.62,
+                "LOAD",
+                &format!("{:.0}", v.load * 100.0),
+                "%",
+                pal.caution,
+                fh * 0.75,
+                fh * 1.8,
+            );
+            progress_strip(
+                page.surface,
+                Rect::new(c.x + 12, c.bottom() - 22, c.w - 24, 14),
+                v.load,
+                pal.caution,
+                pal.structure,
+            );
         }
         AutoPage::Drive => {
             value_readout(
                 page.surface,
-                c.center().0 as f32,
-                c.y as f32 + c.h as f32 * 0.28,
-                "GEAR",
-                v.gear.name(),
-                v.gear.label(),
+                c.x as f32 + c.w as f32 * 0.3,
+                c.y as f32 + c.h as f32 * 0.25,
+                "SPD",
+                &format!("{:.0}", v.speed_unit.from_mph(v.speed_mph)),
+                v.speed_unit.name(),
                 pal.readout,
-                fh,
-                fh * 3.0,
+                fh * 0.75,
+                fh * 2.0,
             );
-            if matches!(v.gear, GearSelect::Manual) {
-                numeric_readout(
-                    page.surface,
-                    c.center().0 as f32,
-                    c.y as f32 + c.h as f32 * 0.48,
-                    &format!("GEAR {}", v.gear_num),
-                    pal.primary,
-                    fh * 1.2,
-                );
-            }
-            numeric_readout(
+            value_readout(
                 page.surface,
-                c.center().0 as f32,
-                c.y as f32 + c.h as f32 * 0.62,
-                v.drive.label(),
+                c.x as f32 + c.w as f32 * 0.72,
+                c.y as f32 + c.h as f32 * 0.25,
+                "GEAR",
+                v.gear.label(),
+                "",
                 pal.nav,
-                fh * 1.1,
+                fh * 0.75,
+                fh * 1.8,
             );
+            let lines = channels::channels_in_group(v, "DRV")
+                .into_iter()
+                .map(|ch| ch.line())
+                .collect::<Vec<_>>();
+            numeric_matrix(
+                page.surface,
+                Rect::new(
+                    c.x,
+                    c.y + (c.h as f32 * 0.48) as i32,
+                    c.w,
+                    (c.h as f32 * 0.5) as i32,
+                ),
+                &lines,
+                fh * 0.85,
+                pal.readout,
+                2,
+            );
+        }
+        AutoPage::Chas => {
+            tire_grid(
+                page.surface,
+                Rect::new(c.x, c.y, c.w, (c.h as f32 * 0.55) as i32),
+                v.tire_fl,
+                v.tire_fr,
+                v.tire_rl,
+                v.tire_rr,
+                fh * 0.75,
+                pal.primary,
+                pal.warning,
+                pal.structure,
+            );
+            let lines = channels::channels_in_group(v, "CHAS")
+                .into_iter()
+                .map(|ch| ch.line())
+                .collect::<Vec<_>>();
+            numeric_matrix(
+                page.surface,
+                Rect::new(
+                    c.x,
+                    c.y + (c.h as f32 * 0.55) as i32,
+                    c.w,
+                    (c.h as f32 * 0.45) as i32,
+                ),
+                &lines,
+                fh * 0.7,
+                pal.readout,
+                2,
+            );
+        }
+        AutoPage::Body => {
             let items = [
                 StatusItem {
-                    label: "2H",
-                    on: matches!(v.drive, DriveMode::TwoHigh),
+                    label: "DR FL",
+                    on: v.door_fl,
                 },
                 StatusItem {
-                    label: "4H",
-                    on: matches!(v.drive, DriveMode::FourHigh),
+                    label: "DR FR",
+                    on: v.door_fr,
                 },
                 StatusItem {
-                    label: "4L",
-                    on: matches!(v.drive, DriveMode::FourLow),
+                    label: "DR RL",
+                    on: v.door_rl,
+                },
+                StatusItem {
+                    label: "DR RR",
+                    on: v.door_rr,
+                },
+                StatusItem {
+                    label: "HATCH",
+                    on: v.door_hatch,
+                },
+                StatusItem {
+                    label: "BELT FL",
+                    on: v.belt_fl,
+                },
+                StatusItem {
+                    label: "BELT FR",
+                    on: v.belt_fr,
+                },
+                StatusItem {
+                    label: "BELT RL",
+                    on: v.belt_rl,
+                },
+                StatusItem {
+                    label: "BELT RR",
+                    on: v.belt_rr,
                 },
             ];
             status_grid(
                 page.surface,
-                Rect::new(c.x + 8, c.bottom() - 50, c.w - 16, 44),
+                Rect::new(c.x, c.y, c.w, (c.h as f32 * 0.55) as i32),
                 &items,
                 3,
-                fh * 0.9,
+                fh * 0.75,
                 pal.primary,
-                pal.dim,
+                pal.warning,
+            );
+            let lines = channels::channels_in_group(v, "BODY")
+                .into_iter()
+                .map(|ch| ch.line())
+                .collect::<Vec<_>>();
+            numeric_matrix(
+                page.surface,
+                Rect::new(
+                    c.x,
+                    c.y + (c.h as f32 * 0.58) as i32,
+                    c.w,
+                    (c.h as f32 * 0.4) as i32,
+                ),
+                &lines,
+                fh * 0.75,
+                pal.readout,
+                2,
             );
         }
         AutoPage::Lights => {
@@ -891,192 +1037,40 @@ pub fn draw_auto_with_video(
                 pal.dim,
             );
         }
-        AutoPage::Tpm => {
-            tire_grid(
-                page.surface,
-                c.inset(6),
-                v.tire_fl,
-                v.tire_fr,
-                v.tire_rl,
-                v.tire_rr,
-                fh * 0.85,
-                pal.primary,
-                pal.warning,
-                pal.structure,
-            );
-            numeric_readout(
-                page.surface,
-                c.center().0 as f32,
-                c.bottom() as f32 - 6.0,
-                "PSI  /  °C",
-                pal.dim,
-                fh * 0.7,
-            );
+        AutoPage::Clim => {
+            let lines = channels::channels_in_group(v, "CLIM")
+                .into_iter()
+                .chain(std::iter::once(channels::Channel {
+                    group: "CLIM",
+                    label: "AC",
+                    value: if v.hvac_ac { "ON".into() } else { "OFF".into() },
+                    unit: "",
+                }))
+                .map(|ch| ch.line())
+                .collect::<Vec<_>>();
+            numeric_matrix(page.surface, c.inset(4), &lines, fh * 1.0, pal.readout, 1);
         }
-        AutoPage::Body => {
-            let items = [
-                StatusItem {
-                    label: "DR FL",
-                    on: v.door_fl,
-                },
-                StatusItem {
-                    label: "DR FR",
-                    on: v.door_fr,
-                },
-                StatusItem {
-                    label: "DR RL",
-                    on: v.door_rl,
-                },
-                StatusItem {
-                    label: "DR RR",
-                    on: v.door_rr,
-                },
-                StatusItem {
-                    label: "HATCH",
-                    on: v.door_hatch,
-                },
-                StatusItem {
-                    label: "BELT FL",
-                    on: v.belt_fl,
-                },
-                StatusItem {
-                    label: "BELT FR",
-                    on: v.belt_fr,
-                },
-                StatusItem {
-                    label: "BELT RL",
-                    on: v.belt_rl,
-                },
-                StatusItem {
-                    label: "BELT RR",
-                    on: v.belt_rr,
-                },
-            ];
-            // ON = closed door / buckled belt (green); open/unbuckled = dim
-            status_grid(
-                page.surface,
-                c.inset(4),
-                &items,
-                3,
-                fh * 0.8,
-                pal.primary,
-                pal.warning,
-            );
+        AutoPage::Cam => {
+            let owned;
+            let fr = if let Some(f) = cam_frame {
+                f
+            } else {
+                owned = GreyFrame::synthetic(160, 120, t);
+                &owned
+            };
+            blit_grey_flir(page.surface, c.inset(4), fr, pal.primary, pal.structure);
+            crosshair(page.surface, c.center().0, c.center().1, 18, 4, pal.caution);
+            track_gate(page.surface, c.center().0, c.center().1, 28, pal.readout);
             label(
                 page.surface,
                 c.x as f32 + 4.0,
                 c.bottom() as f32 - fh,
-                "ON=CLOSED/BUCKLED",
-                pal.dim,
-                fh * 0.65,
-            );
-        }
-        AutoPage::Clim => {
-            value_readout(
-                page.surface,
-                c.x as f32 + c.w as f32 * 0.28,
-                c.y as f32 + c.h as f32 * 0.25,
-                "OUT",
-                &format!("{:.0}", v.temp_out_c),
-                "C",
-                pal.nav,
-                fh * 0.8,
-                fh * 1.8,
-            );
-            value_readout(
-                page.surface,
-                c.x as f32 + c.w as f32 * 0.72,
-                c.y as f32 + c.h as f32 * 0.25,
-                "IN",
-                &format!("{:.0}", v.temp_in_c),
-                "C",
-                pal.readout,
-                fh * 0.8,
-                fh * 1.8,
-            );
-            tape(
-                page.surface,
-                Rect::new(c.x + 4, c.y + c.h / 2, c.w / 2 - 8, c.h / 2 - 4),
-                "FAN",
-                v.hvac_fan,
-                pal.primary,
-                fh * 0.75,
-                false,
-            );
-            let items = [
-                StatusItem {
-                    label: "A/C",
-                    on: v.hvac_ac,
-                },
-                StatusItem {
-                    label: "DEFROST",
-                    on: v.hvac_defrost,
-                },
-            ];
-            status_grid(
-                page.surface,
-                Rect::new(c.x + c.w / 2, c.y + c.h / 2, c.w / 2 - 4, c.h / 2 - 4),
-                &items,
-                1,
-                fh * 0.9,
-                pal.nav,
-                pal.dim,
-            );
-            numeric_readout(
-                page.surface,
-                c.center().0 as f32,
-                c.y as f32 + c.h as f32 * 0.42,
-                &format!("SET {:.0}C", v.hvac_set_c),
-                pal.caution,
-                fh,
-            );
-        }
-        AutoPage::Flir => {
-            let frame = c.inset(c.w / 14);
-            let fw = (frame.w as u32).clamp(80, 320);
-            let fh_px = (frame.h as u32).clamp(60, 240);
-            let owned;
-            let grey = if let Some(f) = cam_frame {
-                f
-            } else {
-                owned = GreyFrame::resolve(t, fw, fh_px);
-                &owned
-            };
-            blit_grey_flir(page.surface, frame, grey, pal.primary, pal.structure);
-            let (cx, cy) = frame.center();
-            crosshair(page.surface, cx, cy, 22, 6, pal.dim);
-            track_gate(
-                page.surface,
-                cx + ((t * 0.6).sin() * 20.0) as i32,
-                cy + ((t * 0.45).cos() * 12.0) as i32,
-                12,
-                pal.readout,
-            );
-            label(
-                page.surface,
-                frame.x as f32 + 4.0,
-                frame.y as f32 + 4.0,
-                "FLIR  G-HOT",
-                pal.readout,
-                fh * 0.75,
-            );
-            let src = if cam_frame.is_some() {
-                "SRC  CAM"
-            } else if std::env::var_os("MFD_FLIR_PATH").is_some() {
-                "SRC  FILE"
-            } else {
-                "SRC  SYN"
-            };
-            label(
-                page.surface,
-                frame.x as f32 + 4.0,
-                frame.bottom() as f32 - fh,
-                src,
+                "CAM / FLIR",
                 pal.dim,
                 fh * 0.7,
             );
         }
-        AutoPage::Collision => {
+        AutoPage::Range => {
             let rng = RangeSnapshot::from_env_or_synthetic(t);
             range_display(
                 page.surface,
@@ -1088,28 +1082,17 @@ pub fn draw_auto_with_video(
                 pal.warning,
                 pal.readout,
             );
-            label(
-                page.surface,
-                c.x as f32 + 4.0,
-                c.bottom() as f32 - fh,
-                "PARK/COLLISION  ·  MFD_RANGE=m",
-                pal.dim,
-                fh * 0.65,
-            );
         }
         AutoPage::Attitude => {
-            // Attitude ball (left) + heading (right) — pitch/roll/heading.
             let ball_w = (c.w as f32 * 0.58) as i32;
-            let sky = CYAN;
-            let ground = rgb(120, 90, 40);
             attitude_ball(
                 page.surface,
                 Rect::new(c.x, c.y, ball_w, c.h - 8),
                 v.pitch_deg,
                 v.roll_deg,
                 v.heading_deg,
-                sky,
-                ground,
+                CYAN,
+                rgb(120, 90, 40),
                 pal.readout,
                 pal.dim,
             );
@@ -1123,23 +1106,17 @@ pub fn draw_auto_with_video(
                 pal.dim,
                 fh,
             );
-            heading_rose(
+            let lines = channels::channels_in_group(v, "SA")
+                .into_iter()
+                .map(|ch| ch.line())
+                .collect::<Vec<_>>();
+            numeric_matrix(
                 page.surface,
-                hx + hw / 2,
-                c.y + c.h * 2 / 3,
-                (hw.min(c.h / 2) / 2 - 4).max(28),
-                v.heading_deg,
-                pal.primary,
-                pal.dim,
-                fh * 0.85,
-            );
-            label(
-                page.surface,
-                hx as f32,
-                c.bottom() as f32 - fh * 2.0,
-                &format!("P {:+.0}°  R {:+.0}°", v.pitch_deg, v.roll_deg),
-                pal.dim,
-                fh * 0.7,
+                Rect::new(hx, c.y + c.h / 2, hw, c.h / 2 - 4),
+                &lines,
+                fh * 0.8,
+                pal.readout,
+                1,
             );
         }
         AutoPage::Map => {
@@ -1160,7 +1137,7 @@ pub fn draw_auto_with_video(
                 c.x as f32 + 4.0,
                 c.y as f32 + fh + 2.0,
                 &format!(
-                    "HDG {:05.1}°  {:.0} {}",
+                    "HDG {:05.1}  {:.0} {}",
                     ((v.heading_deg % 360.0) + 360.0) % 360.0,
                     v.speed_unit.from_mph(v.speed_mph),
                     v.speed_unit.name()
@@ -1170,7 +1147,6 @@ pub fn draw_auto_with_video(
             );
         }
         AutoPage::Faults => {
-            // Immediate full list: stored / pending / permanent (read-only).
             label(
                 page.surface,
                 c.x as f32 + 4.0,
@@ -1195,105 +1171,75 @@ pub fn draw_auto_with_video(
                     fh,
                     fh * 2.0,
                 );
-                label(
-                    page.surface,
-                    c.x as f32 + 4.0,
-                    c.bottom() as f32 - fh * 1.5,
-                    "NO CODES  ·  MODE 03/07/0A",
-                    pal.dim,
-                    fh * 0.7,
-                );
             } else {
                 let lines: Vec<String> = v
                     .dtcs
                     .iter()
                     .map(|d| format!("{}  {}", d.code, d.kind.label()))
                     .collect();
-                let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
-                list_menu(
+                numeric_matrix(
                     page.surface,
-                    Rect::new(c.x, c.y + (fh as i32) + 6, c.w, c.h - (fh as i32) - 20),
-                    &refs,
-                    None,
+                    Rect::new(c.x, c.y + 20, c.w, c.h - 28),
+                    &lines,
                     fh * 0.95,
                     pal.warning,
-                    pal.readout,
-                );
-                label(
-                    page.surface,
-                    c.x as f32 + 4.0,
-                    c.bottom() as f32 - fh,
-                    "NO CLEAR  ·  DISPLAY ONLY",
-                    pal.dim,
-                    fh * 0.65,
+                    1,
                 );
             }
         }
-        AutoPage::Obd => {
-            let vin_line = if v.vin.is_empty() {
-                "VIN   —".into()
-            } else {
-                format!("VIN   {}", v.vin)
-            };
-            let lines = [
-                vin_line,
-                format!("RPM   {:.0}", v.rpm),
-                format!(
-                    "VSS   {:.0} {}",
-                    v.speed_unit.from_mph(v.speed_mph),
-                    v.speed_unit.name()
-                ),
-                format!("TPS   {:.0}%", v.throttle * 100.0),
-                format!("FUEL  {:.0}%", v.fuel * 100.0),
-                format!("ECT   {:.0}%", v.coolant * 100.0),
-                format!("TFT   {:.0}%", v.trans_temp * 100.0),
-                format!("IAT   {:.0}%", v.iat * 100.0),
-                format!("DTC   {}  (page DTC)", v.dtc_count),
-            ];
-            let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
-            list_menu(
+        AutoPage::Bus => {
+            // Everything: full channel dump (numeric preferred).
+            let lines: Vec<String> = channels::all_channels(v)
+                .into_iter()
+                .map(|ch| format!("{} {}", ch.group, ch.line()))
+                .collect();
+            numeric_matrix(page.surface, c.inset(2), &lines, fh * 0.62, pal.readout, 2);
+        }
+        AutoPage::Own => {
+            let id = vehicle_profile::identity_line();
+            value_readout(
                 page.surface,
-                c,
-                &refs,
-                None,
-                fh * 0.9,
-                pal.primary,
+                c.center().0 as f32,
+                c.y as f32 + c.h as f32 * 0.22,
+                "OWN",
+                if v.vin.is_empty() { "——" } else { &v.vin },
+                "",
                 pal.readout,
+                fh * 0.7,
+                fh * 1.4,
+            );
+            let lines = vec![
+                id,
+                format!("VIN  {}", if v.vin.is_empty() { "—" } else { &v.vin }),
+                format!("BT   {}", vehicle_profile::OBD_BT_MAC),
+                "STACK J1979+UDS+FORD".into(),
+                "DISPLAY ONLY".into(),
+            ];
+            numeric_matrix(
+                page.surface,
+                Rect::new(
+                    c.x,
+                    c.y + (c.h as f32 * 0.4) as i32,
+                    c.w,
+                    (c.h as f32 * 0.55) as i32,
+                ),
+                &lines,
+                fh * 0.7,
+                pal.primary,
+                1,
             );
         }
         AutoPage::Setup => {
-            // Ownship + truck profile + As-Built feature labels (help only).
             let vin_s = if v.vin.is_empty() {
                 "VIN  (none)".to_string()
             } else {
                 format!("VIN  {}", v.vin)
             };
-            let mut lines = vehicle_profile::setup_help_lines(14);
+            let mut lines = vehicle_profile::setup_help_lines(16);
             lines.insert(0, vin_s);
             lines.insert(1, "OWN SHIP  = VIN".into());
             lines.insert(2, format!("SPD {}", v.speed_unit.name()));
-            let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
-            list_menu(
-                page.surface,
-                Rect::new(c.x, c.y, c.w, (c.h as f32 * 0.72) as i32),
-                &refs,
-                Some(0),
-                fh * 0.68,
-                pal.primary,
-                pal.readout,
-            );
-            caution_box(
-                page.surface,
-                Rect::new(
-                    c.x + 8,
-                    c.y + (c.h as f32 * 0.74) as i32,
-                    c.w - 16,
-                    (c.h as f32 * 0.24) as i32,
-                ),
-                &format!("{} · OS {}", vehicle_profile::YEAR, short_vin(&v.vin)),
-                fh * 0.75,
-                pal.nav,
-            );
+            numeric_matrix(page.surface, c.inset(2), &lines, fh * 0.65, pal.readout, 1);
         }
     }
 }

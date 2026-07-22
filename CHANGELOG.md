@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Auto-centric CMFD:** demo is vehicle-only (jet formats stay in lib). Systems pages ENG/FUEL/FLUID/ELEC/DRV/CHAS/BODY/LITE/CLIM/CAM/RNG/ATT/MAP/DTC/BUS/OWN/SET; dense numerics; channel dump. Refs #86.
+
 ### Added
 
 - **Vehicle profile:** 2019 SuperCrew 2.7 EB 4×4 · Sync 3; SETUP shows As-Built **feature labels** (read-only). `docs/vehicle.md`. Refs #84.

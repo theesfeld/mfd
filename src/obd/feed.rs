@@ -221,46 +221,55 @@ fn apply_telemetry(t: &Telemetry, v: &mut VehicleSnapshot) {
         v.load = (*load as f32 / 100.0).clamp(0.0, 1.0);
     }
     if let Some(c) = t.values.get("coolant_temp") {
+        v.coolant_c = *c as f32;
         v.coolant = ((*c as f32 + 40.0) / 160.0).clamp(0.0, 1.0);
     }
-    // Ford 0x22 DID °C → same normalized tapes
     if let Some(c) = t.values.get("coolant_temp_c") {
+        v.coolant_c = *c as f32;
         v.coolant = ((*c as f32 + 40.0) / 160.0).clamp(0.0, 1.0);
     }
     if let Some(c) = t.values.get("intake_temp") {
+        v.iat_c = *c as f32;
         v.iat = ((*c as f32 + 40.0) / 120.0).clamp(0.0, 1.0);
     }
     if let Some(c) = t.values.get("intake_temp_c") {
+        v.iat_c = *c as f32;
         v.iat = ((*c as f32 + 40.0) / 120.0).clamp(0.0, 1.0);
     }
     if let Some(c) = t.values.get("oil_temp") {
+        v.oil_temp_c = *c as f32;
+        v.oil_temp = ((*c as f32 + 40.0) / 160.0).clamp(0.0, 1.0);
+    }
+    if let Some(c) = t.values.get("oil_temp_c") {
+        v.oil_temp_c = *c as f32;
         v.oil_temp = ((*c as f32 + 40.0) / 160.0).clamp(0.0, 1.0);
     }
     if let Some(c) = t.values.get("trans_temp_c") {
+        v.trans_temp_c = *c as f32;
         v.trans_temp = ((*c as f32 + 40.0) / 160.0).clamp(0.0, 1.0);
     }
-    if let Some(c) = t.values.get("oil_temp_c") {
-        v.oil_temp = ((*c as f32 + 40.0) / 160.0).clamp(0.0, 1.0);
-    }
     if let Some(c) = t.values.get("ambient_temp_c") {
+        v.temp_out_c = *c as f32;
+    }
+    if let Some(c) = t.values.get("ambient_temp") {
         v.temp_out_c = *c as f32;
     }
     if let Some(f) = t.values.get("fuel_level_pct") {
         v.fuel = (*f as f32 / 100.0).clamp(0.0, 1.0);
     }
-    if let Some(volt) = t.values.get("battery_v") {
-        v.battery = (((*volt as f32) - 11.0) / 4.0).clamp(0.0, 1.0);
-    }
-    if let Some(c) = t.values.get("ambient_temp") {
-        v.temp_out_c = *c as f32;
-    }
     if let Some(f) = t.values.get("fuel_level") {
         v.fuel = (*f as f32 / 100.0).clamp(0.0, 1.0);
     }
+    if let Some(volt) = t.values.get("battery_v") {
+        v.battery_v = *volt as f32;
+        v.battery = (((*volt as f32) - 11.0) / 4.0).clamp(0.0, 1.0);
+    }
     if let Some(volt) = t.values.get("control_module_voltage") {
+        v.battery_v = *volt as f32;
         v.battery = (((*volt as f32) - 11.0) / 4.0).clamp(0.0, 1.0);
     }
     if let Some(maf) = t.values.get("maf") {
+        v.maf_gps = *maf as f32;
         v.maf = ((*maf as f32) / 100.0).clamp(0.0, 1.0);
     }
     if t.dtc_loaded {

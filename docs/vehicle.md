@@ -27,3 +27,11 @@ SETUP can show **feature labels** from `Common.csv` as help text only — **not*
 
 Powertrain · gear/TFT · attitude/heading · TPM · body · fault codes.  
 Attitude/heading still need deep UDS capture while the dash shows that mode.
+
+### Data stack
+
+1. **J1979 OBD-II** (Mode 01 / DTC / VIN)  
+2. **UDS/CAN** (Mode 0x22 DIDs, session, keep-alive)  
+3. **Ford-specific** DID catalog + FORScan As-Built **labels** (2019 · Sync 3)
+
+See `docs/auto-pages.md` for systems page banks.
