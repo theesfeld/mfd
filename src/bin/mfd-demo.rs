@@ -51,10 +51,17 @@ fn main() -> io::Result<()> {
     let backend = detect_backend();
     let vp = square_mfd_viewport(0.85);
     let (w, h) = square_mfd_pixels(backend);
+    let (cw, ch) = mfd::term::cell_pixel_size();
     eprintln!(
-        "surface {w}x{h}  viewport cells {}x{} @{},{}",
-        vp.cols, vp.rows, vp.col, vp.row
+        "surface {w}x{h} (1:1)  viewport cells {}x{} @{},{}  cell≈{cw:.1}x{ch:.1}px  vis≈{:.0}x{:.0}",
+        vp.cols,
+        vp.rows,
+        vp.col,
+        vp.row,
+        vp.cols as f32 * cw,
+        vp.rows as f32 * ch
     );
+    debug_assert_eq!(w, h, "framebuffer must be square");
 
     let mut panel = Surface::new(w, h);
     let mut scratch = PresentScratch::default();
