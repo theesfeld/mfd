@@ -91,6 +91,49 @@ No GO/NOGO splash on glass. DTC is a format, not cold-power BIT.
 
 GO formats only. Pick assigns into the slot that opened the menu. Duplicate on another slot → blank other (MLU habit).
 
+## Hardware I/O freeze (production)
+
+**Must have on the face:**
+
+| I/O | Role |
+|-----|------|
+| **20 OSB** | Softkeys — all format / option / menu navigation |
+| **BRT rocker** | Brightness |
+| **CON rocker** | Contrast |
+| **SYM rocker** | Symbology intensity (optional use) |
+| **GAIN rocker** | CAM/FLIR gain when GO; else no-op |
+| **ALS** (optional) | Auto brightness bias |
+
+**Forbidden as dedicated extra face buttons:**
+
+| Forbidden | Why |
+|-----------|-----|
+| n/p next-prev format keys | Not on CMFD; use slots + Master Menu |
+| Color mode dedicated button | SET → **PAL** option OSB |
+| Speed unit dedicated button | SET/DRV → **UNIT** option OSB |
+| Touch/mouse as primary | Gloved OSB muscle memory |
+
+**POC keyboard only:** maps 1:1 onto OSB/rockers (`1`–`5` top, `6`–`0` right, `qwert` bottom, `asdfg` left).  
+`n`/`p`/`m`/`c`/`u` are **lab aliases** — product acceptance = GPIO bezel only.
+
+### Reachability (hardware only)
+
+| Function | Path |
+|----------|------|
+| ENG / DRV / ATT | Default slots 14/13/12, or active slot → Master Menu |
+| Any other GO format | Active format OSB → Master Menu → pick |
+| Master Menu | Press **lit** format slot (12/13/14) |
+| DCLT | OSB 11 |
+| OWN | OSB 15 |
+| DTC | OSB 16 |
+| SET | OSB 19 |
+| BUS | OSB 20 |
+| UNIT | SET or DRV/ENG OSB **1–2** |
+| Color palette | SET OSB **3–4** **PAL/MODE** |
+| BRT | BRT rocker |
+
+**Yes — everything product-critical is reachable with 20 OSB + rockers.** No dependence on n/p/color hardware.
+
 ## Anti-patterns (rejected)
 
 - Reshuffle OSB after probe  
@@ -99,3 +142,4 @@ GO formats only. Pick assigns into the slot that opened the menu. Duplicate on a
 - Marketing-dense glass  
 - Write vehicle bus  
 - Permanent car-radio of every category on top/sides  
+- Extra permanent face buttons for scroll / color / units  

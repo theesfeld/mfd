@@ -22,6 +22,7 @@ This is intentional and permanent. The unit is safe because it is a **glass**, n
 | Face | ~**4×4 in** **color** glass (MLU **CMFD** class) — software already sizes for physical inches |
 | Bezel | **Physical OSB buttons** (20 softkeys) + corner rockers (BRT / CON / SYM / GAIN) |
 | Input ABI | `mfd::bezel` (`BezelSource`) — keyboard today; GPIO / matrix later **without page rewrites** |
+| Reachability | **All formats + prefs via OSB only** — see [`vehicle-cmfd-design.md`](reference/vehicle-cmfd-design.md) § Hardware I/O freeze. No dedicated n/p/color hardware. |
 | Link | On-unit **Bluetooth** (SPP to ELM/STN or phone path) is allowed and expected |
 | Host | Embedded Linux (or similar) driving the panel + buttons |
 

@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use mfd::auto::{
-    self, AutoFormatSelect, AutoPage, DemoProbe, FormatSelectAction, GearSelect, VehicleSnapshot,
+    self, AutoFormatSelect, AutoPage, DemoProbe, FormatSelectAction, VehicleSnapshot,
 };
 use mfd::bezel::{BezelEvent, BezelSource, BezelState, KeyboardBezel};
 use mfd::font::{draw_text, text_width};
@@ -217,10 +217,10 @@ fn main() -> io::Result<()> {
                         let _ = fmt_sel.handle_osb(fmt_sel.active.osb(), osb_tick, allow);
                     }
                 }
+                // POC aliases only (production = OSB: SET/DRV UNIT, SET PAL). Not load-bearing.
                 b'u' | b'U' => vehicle.speed_unit = vehicle.speed_unit.cycle(),
-                // All OSB / knob keys — never steal for format jumps.
-                // 1-5 = top options (Lights LO/HI/FOG…), 6-0 = right,
-                // qwert = bottom format slots + DCLT, asdfg = left BUS/SET/DTC.
+                // All OSB / rocker keys → BezelEvent (production input plane).
+                // 1-5 top · 6-0 right · qwert bottom · asdfg left · [ ] BRT …
                 _ => bezel_src.push_key_state(k, &bezel),
             }
             ki += 1;
@@ -262,6 +262,7 @@ fn main() -> io::Result<()> {
                     }
                     continue;
                 }
+                // Page-owned options only (display prefs / glass status — no vehicle write).
                 match (auto_page, osb) {
                     (
                         AutoPage::Eng
@@ -274,19 +275,20 @@ fn main() -> io::Result<()> {
                     ) => {
                         vehicle.speed_unit = vehicle.speed_unit.cycle();
                     }
-                    (AutoPage::Drive, 3) => vehicle.gear = GearSelect::Park,
-                    (AutoPage::Drive, 4) => vehicle.gear = GearSelect::Reverse,
-                    (AutoPage::Drive, 5) => vehicle.gear = GearSelect::Drive,
-                    (AutoPage::Drive, 6) => vehicle.gear = GearSelect::Neutral,
-                    (AutoPage::Drive, 7) => vehicle.gear = GearSelect::Manual,
+                    (AutoPage::Setup, 3 | 4) => {
+                        // PAL / MODE — color palette cycle (hardware path; `c` is POC alias only)
+                        color_mode = match color_mode {
+                            ColorMode::GreenMono => ColorMode::ColorMfd,
+                            ColorMode::ColorMfd => ColorMode::HighVis,
+                            ColorMode::HighVis => ColorMode::GreenMono,
+                        };
+                    }
+                    // Lights: status display toggles for glass rehearsal only (not body bus writes).
                     (AutoPage::Lights, 1) => vehicle.light_low = !vehicle.light_low,
                     (AutoPage::Lights, 2) => vehicle.light_high = !vehicle.light_high,
                     (AutoPage::Lights, 3) if fog_ok => vehicle.light_fog = !vehicle.light_fog,
                     (AutoPage::Lights, 4) => vehicle.light_drive = !vehicle.light_drive,
                     (AutoPage::Lights, 5) => vehicle.light_interior = !vehicle.light_interior,
-                    (AutoPage::Clim, 1) => vehicle.hvac_ac = !vehicle.hvac_ac,
-                    (AutoPage::Clim, 2) => vehicle.hvac_fan = (vehicle.hvac_fan + 0.1).min(1.0),
-                    (AutoPage::Clim, 3) => vehicle.hvac_defrost = !vehicle.hvac_defrost,
                     _ => {}
                 }
             }

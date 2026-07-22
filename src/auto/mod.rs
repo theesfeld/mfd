@@ -670,9 +670,10 @@ fn option_legends(
     let fog_ok = feat.map(|f| f.fog_lights).unwrap_or(true);
     let left: Osb5 = ["BUS", "SET", "", "", "DTC"];
     match page {
+        // Display-only: gear is status on glass, not OSB "control" toggles.
         AutoPage::Drive => (
-            ["UNIT", v.speed_unit.name(), "P", "R", "D"],
-            ["N", "M", "", "", ""],
+            ["UNIT", v.speed_unit.name(), "", "", ""],
+            ["", "", "", "", ""],
             left,
         ),
         AutoPage::Fuel | AutoPage::Fluid | AutoPage::Elec | AutoPage::Eng => (
@@ -686,18 +687,19 @@ fn option_legends(
             left,
         ),
         AutoPage::Cam => (
-            ["CAM", "WHOT", "GHOT", "GATE", "RNG"],
+            ["", "", "", "", ""],
             ["", "", "", "", ""],
             left,
         ),
-        AutoPage::Range => (["F", "FL", "FR", "R", "RST"], ["", "", "", "", ""], left),
-        AutoPage::Own => (["VIN", "PROF", "", "", ""], ["", "", "", "", ""], left),
+        AutoPage::Range => (["", "", "", "", ""], ["", "", "", "", ""], left),
+        AutoPage::Own => (["", "", "", "", ""], ["", "", "", "", ""], left),
+        // SET: UNIT + PAL (color mode) — production hardware path for prefs.
         AutoPage::Setup => (
-            ["UNIT", v.speed_unit.name(), "BRT", "", ""],
+            ["UNIT", v.speed_unit.name(), "PAL", "MODE", ""],
             ["", "", "", "", ""],
             left,
         ),
-        AutoPage::Clim => (["AC", "FAN+", "DEF", "", ""], ["", "", "", "", ""], left),
+        AutoPage::Clim => (["", "", "", "", ""], ["", "", "", "", ""], left),
         _ => (["", "", "", "", ""], ["", "", "", "", ""], left),
     }
 }
