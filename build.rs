@@ -27,7 +27,10 @@ fn main() {
 
     let make_lib = manifest.join("build/libvge.a");
     if make_lib.is_file() {
-        println!("cargo:rustc-link-search=native={}", manifest.join("build").display());
+        println!(
+            "cargo:rustc-link-search=native={}",
+            manifest.join("build").display()
+        );
         println!("cargo:rustc-link-lib=static=vge");
         println!("cargo:rustc-cfg=vge_asm");
         println!("cargo:warning=demo: linking make-built build/libvge.a (pure asm)");
