@@ -168,15 +168,19 @@ Centered string (baked font).
 
 | Format | Primary widgets |
 |--------|-----------------|
+| **WIDG (Gallery)** | **All public widgets** on one face (demo default) |
 | ENG | round_gauge ×2, tape_gauge ×2 |
-| FUEL | tape_gauge ×3 |
+| FUEL | tape H + tape V ×3 |
 | HSD | range_rings, bearing_pointer, readout |
-| SMS | station_grid |
+| SMS / STORES | station_grid, readout |
 | TGP/FLIR | video_frame, track_gate, crosshair |
 | FCR* | bscope_grid, readout |
 | DTE/CNI/UFC/PFL | list_menu |
 | TEST/RESET | caution_box, progress_strip |
 | TFR/HUD | horizon_cue, bearing_pointer |
-| WPN/HAD/ECM | list_menu |
+| WPN | softkey_row, list_menu |
+| HAD | range_rings, list_menu |
+| ECM | list_menu, progress_strip |
+| BLANK | dim readout only |
 
-**Demo default starts on ENG** so tapes and round gauges are visible immediately.
+**Demo default starts on WIDG (Gallery).** Press `g` or left OSB **WIDG** to return. Tab switches jet/auto.

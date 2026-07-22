@@ -36,7 +36,7 @@ cargo run --release --bin mfd-demo
 MFD_TERM=kitty cargo run --release --bin mfd-demo
 ```
 
-Default demo: **ENG** page (round gauges + tapes), **30 Hz**, square face.  
+Default demo: **WIDG** gallery (every public widget), **30 Hz**, square face.  
 `[` `]` change **real brightness** (scales RGB after draw).
 
 ### Bezel keys (events, not hard-wired pages)
@@ -95,11 +95,11 @@ Full diagrams: **[docs/widgets.md](docs/widgets.md)**
 
 `bezel_frame` · `osb_chrome` · `content_after_osb` · `softkey_row` · **`tape_gauge`** · **`round_gauge`** · `label` · `range_rings` · `bearing_pointer` · `track_gate` · `crosshair` · `bscope_grid` · `list_menu` · `station_grid` · `numeric_readout` · `caution_box` · `horizon_cue` · `progress_strip` · `video_frame`
 
-**See tapes/needles:** open demo (starts on **ENG**) or press bottom OSB for **FUEL** / top bank for other formats.
+**See all widgets:** demo starts on **WIDG** gallery (`g` key or left OSB **WIDG**). Other formats: bottom OSB **FUEL** / **ENG**, top bank for SMS/HSD/…
 
 ## Jet formats
 
-`BLANK SMS HSD TGP FCR FCR-GM FCR-SEA WPN HAD FLIR DTE TEST ENG FUEL CNI RESET ECM TFR HUD UFC PFL STORES`
+`BLANK WIDG SMS HSD TGP FCR FCR-GM FCR-SEA WPN HAD FLIR DTE TEST ENG FUEL CNI RESET ECM TFR HUD UFC PFL STORES`
 
 ## Auto formats
 

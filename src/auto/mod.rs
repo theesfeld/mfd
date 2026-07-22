@@ -5,8 +5,8 @@ use crate::geom::Rect;
 use crate::page::Page;
 use crate::palette::Palette;
 use crate::widget::{
-    content_after_osb, list_menu, numeric_readout, osb_chrome, round_gauge, tape_gauge,
-    RoundGaugeOpts, TapeOpts, TapeOrientation,
+    caution_box, content_after_osb, list_menu, numeric_readout, osb_chrome, progress_strip,
+    round_gauge, softkey_row, tape_gauge, RoundGaugeOpts, SoftkeyLayout, TapeOpts, TapeOrientation,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -189,10 +189,24 @@ pub fn draw_auto(
             }
         }
         AutoPage::Temps => {
+            let bar_h = (c.h as f32 * 0.28) as i32;
+            tape_gauge(
+                page.surface,
+                Rect::new(c.x, c.y, c.w, bar_h),
+                TapeOpts {
+                    orientation: TapeOrientation::Horizontal,
+                    font_px: page.font_px * 0.85,
+                    color: pal.warning,
+                    value: (obd.coolant + obd.trans_temp) * 0.5,
+                    label: "AVG TEMP",
+                },
+            );
+            let ty = c.y + bar_h + 6;
+            let th = c.h - bar_h - 6;
             let tw = c.w / 2 - 8;
             tape_gauge(
                 page.surface,
-                Rect::new(c.x + 4, c.y, tw, c.h),
+                Rect::new(c.x + 4, ty, tw, th),
                 TapeOpts {
                     orientation: TapeOrientation::Vertical,
                     font_px: page.font_px,
@@ -203,7 +217,7 @@ pub fn draw_auto(
             );
             tape_gauge(
                 page.surface,
-                Rect::new(c.x + tw + 12, c.y, tw, c.h),
+                Rect::new(c.x + tw + 12, ty, tw, th),
                 TapeOpts {
                     orientation: TapeOrientation::Vertical,
                     font_px: page.font_px,
@@ -234,9 +248,23 @@ pub fn draw_auto(
             );
         }
         AutoPage::Setup => {
+            softkey_row(
+                page.surface,
+                Rect::new(c.x, c.y, c.w, (page.font_px as i32) + 8),
+                &["DISP", "UNIT", "PORT", "BZL", "ABOUT"],
+                SoftkeyLayout {
+                    font_px: page.font_px * 0.75,
+                    selected: Some(0),
+                },
+            );
             list_menu(
                 page.surface,
-                c,
+                Rect::new(
+                    c.x,
+                    c.y + (page.font_px as i32) + 12,
+                    c.w,
+                    c.h / 2 - (page.font_px as i32),
+                ),
                 &[
                     "COLOR  MFD",
                     "UNITS  METRIC",
@@ -248,6 +276,29 @@ pub fn draw_auto(
                 page.font_px,
                 pal.primary,
                 pal.readout,
+            );
+            let bot = Rect::new(c.x + 12, c.y + c.h / 2 + 8, c.w - 24, c.h / 2 - 20);
+            caution_box(
+                page.surface,
+                Rect::new(bot.x, bot.y, bot.w, bot.h / 2 - 4),
+                "CFG OK",
+                page.font_px,
+                pal.primary,
+            );
+            progress_strip(
+                page.surface,
+                Rect::new(bot.x, bot.bottom() - 16, bot.w, 12),
+                bezel.brightness.clamp(0.05, 1.0),
+                pal.nav,
+                pal.structure,
+            );
+            numeric_readout(
+                page.surface,
+                bot.center().0 as f32,
+                bot.bottom() as f32 - 28.0,
+                "BRT BAR",
+                pal.dim,
+                page.font_px * 0.75,
             );
         }
     }

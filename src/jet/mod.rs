@@ -8,15 +8,18 @@ use crate::geom::Rect;
 use crate::page::Page;
 use crate::palette::Palette;
 use crate::widget::{
-    bearing_pointer, bscope_grid, caution_box, content_after_osb, crosshair, horizon_cue,
-    list_menu, numeric_readout, osb_chrome, progress_strip, range_rings, round_gauge, station_grid,
-    tape_gauge, track_gate, video_frame, RoundGaugeOpts, TapeOpts, TapeOrientation,
+    bearing_pointer, bscope_grid, caution_box, content_after_osb, crosshair, horizon_cue, label,
+    list_menu, numeric_readout, osb_chrome, progress_strip, range_rings, round_gauge, softkey_row,
+    station_grid, tape_gauge, track_gate, video_frame, RoundGaugeOpts, SoftkeyLayout, TapeOpts,
+    TapeOrientation,
 };
 
 /// Logical format id for OSB routing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     Blank,
+    /// All public widgets on one face (demo / integration).
+    Gallery,
     Sms,
     Hsd,
     Tgp,
@@ -43,6 +46,7 @@ pub enum Format {
 impl Format {
     pub const ALL: &'static [Format] = &[
         Format::Blank,
+        Format::Gallery,
         Format::Sms,
         Format::Hsd,
         Format::Tgp,
@@ -69,6 +73,7 @@ impl Format {
     pub fn name(self) -> &'static str {
         match self {
             Format::Blank => "BLANK",
+            Format::Gallery => "WIDG",
             Format::Sms => "SMS",
             Format::Hsd => "HSD",
             Format::Tgp => "TGP",
@@ -114,7 +119,7 @@ impl Format {
             Format::Test,
             Format::Ecm,
             Format::HudRpt,
-            Format::Blank,
+            Format::Gallery,
         ];
         let set = match bank % 3 {
             0 => &primary,
@@ -135,7 +140,7 @@ fn chrome(page: &mut Page, pal: &Palette, title: &str, bezel: &BezelState) {
     let top = ["SMS", "HSD", "TGP", "FCR", "WPN"];
     let right = ["DCLT", "SWAP", "CNTL", "MODE", "GAIN"];
     let bottom = ["DTE", "TEST", "ENG", "FUEL", "CNI"];
-    let left = ["HAD", "FLIR", "ECM", "HUD", "BLNK"];
+    let left = ["HAD", "FLIR", "ECM", "HUD", "WIDG"];
     osb_chrome(
         page.surface,
         b,
@@ -170,6 +175,213 @@ fn chrome(page: &mut Page, pal: &Palette, title: &str, bezel: &BezelState) {
     );
 }
 
+/// Tiny caption in a cell corner (gallery labels).
+fn cell_cap(page: &mut Page, r: Rect, text: &str, pal: &Palette) {
+    let px = (page.font_px * 0.55).max(8.0);
+    label(
+        page.surface,
+        r.x as f32 + 2.0,
+        r.y as f32 + 1.0,
+        text,
+        pal.dim,
+        px,
+    );
+}
+
+/// Draw **every** public widget type inside `c` (demo gallery).
+fn draw_gallery(page: &mut Page, pal: &Palette, c: Rect, t: f32) {
+    let fh = (page.font_px * 0.7).max(9.0);
+    let gap = 3;
+    // softkey_row (not used by osb_chrome alone — separate API)
+    let sk_h = (fh as i32) + 6;
+    softkey_row(
+        page.surface,
+        Rect::new(c.x, c.y, c.w, sk_h),
+        &["SK1", "SK2", "SK3", "SK4", "SK5"],
+        SoftkeyLayout {
+            font_px: fh,
+            selected: Some(((t * 0.5) as usize) % 5),
+        },
+    );
+    cell_cap(page, Rect::new(c.x, c.y, c.w, sk_h), "softkey_row", pal);
+
+    let body = Rect::new(c.x, c.y + sk_h + gap, c.w, (c.h - sk_h - gap).max(40));
+    // 3×3 grid of demo cells.
+    let cw = (body.w - gap * 2) / 3;
+    let ch = (body.h - gap * 2) / 3;
+    let cell = |col: i32, row: i32| -> Rect {
+        Rect::new(body.x + col * (cw + gap), body.y + row * (ch + gap), cw, ch)
+    };
+
+    // (0,0) round_gauge
+    {
+        let r = cell(0, 0);
+        cell_cap(page, r, "round", pal);
+        round_gauge(
+            page.surface,
+            r.inset(2),
+            RoundGaugeOpts {
+                value: 0.55 + 0.3 * (t * 0.8).sin(),
+                redline: Some(0.85),
+                label: "RPM",
+                color: pal.primary,
+                font_px: fh * 0.85,
+                ..Default::default()
+            },
+        );
+    }
+    // (1,0) range_rings + bearing_pointer
+    {
+        let r = cell(1, 0);
+        cell_cap(page, r, "rings+brg", pal);
+        let (cx, cy) = r.center();
+        let rad = (r.w.min(r.h) / 2 - 6).max(12);
+        range_rings(page.surface, cx, cy, rad, 3, pal.nav);
+        bearing_pointer(
+            page.surface,
+            cx,
+            cy,
+            rad as f32 * 0.9,
+            (t * 40.0) % 360.0,
+            pal.readout,
+        );
+        page.surface.circle(cx, cy, 2, pal.primary);
+    }
+    // (2,0) tape vertical
+    {
+        let r = cell(2, 0);
+        cell_cap(page, r, "tape V", pal);
+        tape_gauge(
+            page.surface,
+            r.inset(2),
+            TapeOpts {
+                orientation: TapeOrientation::Vertical,
+                font_px: fh * 0.8,
+                color: pal.caution,
+                value: 0.4 + 0.35 * (0.5 + 0.5 * (t * 0.5).sin()),
+                label: "FUEL",
+            },
+        );
+    }
+    // (0,1) tape horizontal
+    {
+        let r = cell(0, 1);
+        cell_cap(page, r, "tape H", pal);
+        tape_gauge(
+            page.surface,
+            r.inset(2),
+            TapeOpts {
+                orientation: TapeOrientation::Horizontal,
+                font_px: fh * 0.8,
+                color: pal.nav,
+                value: 0.5 + 0.3 * (t * 0.4).cos(),
+                label: "ALT",
+            },
+        );
+    }
+    // (1,1) bscope_grid
+    {
+        let r = cell(1, 1);
+        cell_cap(page, r, "bscope", pal);
+        bscope_grid(page.surface, r.inset(4), 4, pal.structure);
+        let px = r.x as f32 + (0.4 + 0.3 * (t * 0.6).sin()) * r.w as f32;
+        let py = r.y as f32 + (0.5 + 0.25 * (t * 0.45).cos()) * r.h as f32;
+        page.surface.circle(px as i32, py as i32, 3, pal.caution);
+    }
+    // (2,1) video_frame + track_gate + crosshair
+    {
+        let r = cell(2, 1);
+        cell_cap(page, r, "vid+gate", pal);
+        let inner = r.inset(6);
+        video_frame(page.surface, inner, pal.structure);
+        let (cx, cy) = inner.center();
+        crosshair(page.surface, cx, cy, 12, 3, pal.dim);
+        let tx = cx + ((t * 0.9).sin() * inner.w as f32 * 0.2) as i32;
+        let ty = cy + ((t * 0.7).cos() * inner.h as f32 * 0.15) as i32;
+        track_gate(page.surface, tx, ty, 8, pal.readout);
+    }
+    // (0,2) list_menu
+    {
+        let r = cell(0, 2);
+        cell_cap(page, r, "list", pal);
+        list_menu(
+            page.surface,
+            Rect::new(
+                r.x + 2,
+                r.y + (fh as i32) + 2,
+                r.w - 4,
+                r.h - (fh as i32) - 4,
+            ),
+            &["MODE A", "MODE B", "MODE C", "MODE D"],
+            Some(((t * 0.35) as usize) % 4),
+            fh * 0.9,
+            pal.primary,
+            pal.readout,
+        );
+    }
+    // (1,2) station_grid
+    {
+        let r = cell(1, 2);
+        cell_cap(page, r, "station", pal);
+        let labs = ["1", "2", "3", "4", "5", "6"];
+        station_grid(
+            page.surface,
+            Rect::new(
+                r.x + 2,
+                r.y + (fh as i32) + 2,
+                r.w - 4,
+                r.h - (fh as i32) - 4,
+            ),
+            &labs,
+            3,
+            ((t * 0.6) as usize) % 6,
+            fh * 0.85,
+            pal.primary,
+            pal.readout,
+        );
+    }
+    // (2,2) caution + progress + horizon + readout + label
+    {
+        let r = cell(2, 2);
+        cell_cap(page, r, "misc", pal);
+        let top = Rect::new(r.x + 2, r.y + (fh as i32) + 2, r.w - 4, r.h / 3);
+        caution_box(page.surface, top, "BIT GO", fh * 0.85, pal.primary);
+        progress_strip(
+            page.surface,
+            Rect::new(r.x + 4, top.bottom() + 2, r.w - 8, 8),
+            0.5 + 0.5 * (t * 0.9).sin(),
+            pal.nav,
+            pal.structure,
+        );
+        let hx = r.x + r.w / 2;
+        let hy = r.bottom() - r.h / 4;
+        horizon_cue(
+            page.surface,
+            hx,
+            hy,
+            (r.w / 4).max(10),
+            12.0 * (t * 0.5).sin(),
+            pal.primary,
+        );
+        numeric_readout(
+            page.surface,
+            r.x as f32 + 4.0,
+            r.bottom() as f32 - fh - 2.0,
+            "RD",
+            pal.readout,
+            fh * 0.85,
+        );
+        label(
+            page.surface,
+            r.right() as f32 - fh * 2.5,
+            r.bottom() as f32 - fh - 2.0,
+            "lbl",
+            pal.dim,
+            fh * 0.85,
+        );
+    }
+}
+
 fn content(page: &Page) -> Rect {
     let b = page.bounds.inset(2);
     let c = content_after_osb(b, page.font_px * 0.7);
@@ -189,7 +401,17 @@ pub fn draw_format(page: &mut Page, fmt: Format, pal: &Palette, bezel: &BezelSta
     chrome(page, pal, fmt.name(), bezel);
     let c = content(page);
     match fmt {
-        Format::Blank => {}
+        Format::Blank => {
+            numeric_readout(
+                page.surface,
+                c.center().0 as f32,
+                c.center().1 as f32,
+                "BLANK",
+                pal.dim,
+                page.font_px,
+            );
+        }
+        Format::Gallery => draw_gallery(page, pal, c, t),
         Format::Sms | Format::Stores => {
             let labs = [
                 "1 AIM", "2 AIM", "3 TANK", "4 GBU", "5 GUN", "6 GBU", "7 TANK", "8 AIM", "9 AIM",
@@ -292,10 +514,24 @@ pub fn draw_format(page: &mut Page, fmt: Format, pal: &Palette, bezel: &BezelSta
                 page.font_px * 0.85,
             );
         }
-        Format::Wpn | Format::Had => {
+        Format::Wpn => {
+            softkey_row(
+                page.surface,
+                Rect::new(c.x, c.y, c.w, (page.font_px as i32) + 8),
+                &["CCRP", "CCIP", "DTOS", "MAN", "RIPPLE"],
+                SoftkeyLayout {
+                    font_px: page.font_px * 0.75,
+                    selected: Some(((t * 0.35) as usize) % 5),
+                },
+            );
             list_menu(
                 page.surface,
-                c,
+                Rect::new(
+                    c.x,
+                    c.y + (page.font_px as i32) + 12,
+                    c.w,
+                    c.h - (page.font_px as i32) - 12,
+                ),
                 &[
                     "MODE  CCRP",
                     "PROFILE  1",
@@ -307,6 +543,28 @@ pub fn draw_format(page: &mut Page, fmt: Format, pal: &Palette, bezel: &BezelSta
                 page.font_px,
                 pal.primary,
                 pal.readout,
+            );
+        }
+        Format::Had => {
+            let (cx, cy) = c.center();
+            let r = (c.w.min(c.h) / 2 - 10).max(16);
+            range_rings(page.surface, cx, cy, r, 2, pal.structure);
+            list_menu(
+                page.surface,
+                Rect::new(c.x + 4, c.y + 4, c.w / 2 - 8, c.h / 2),
+                &["RWR  NORM", "THREAT  2", "PRIOR  HI", "BLANK  OFF"],
+                Some(1),
+                page.font_px * 0.85,
+                pal.primary,
+                pal.caution,
+            );
+            numeric_readout(
+                page.surface,
+                c.center().0 as f32,
+                c.bottom() as f32 - page.font_px,
+                "HAD",
+                pal.readout,
+                page.font_px,
             );
         }
         Format::Dte | Format::Cni | Format::Ufc | Format::Pfl => {
@@ -423,6 +681,20 @@ pub fn draw_format(page: &mut Page, fmt: Format, pal: &Palette, bezel: &BezelSta
             );
         }
         Format::Fuel => {
+            let bar_h = (c.h as f32 * 0.22) as i32;
+            tape_gauge(
+                page.surface,
+                Rect::new(c.x, c.y, c.w, bar_h),
+                TapeOpts {
+                    orientation: TapeOrientation::Horizontal,
+                    font_px: page.font_px * 0.8,
+                    color: pal.primary,
+                    value: 0.65 + 0.1 * (t * 0.1).cos(),
+                    label: "TOTAL",
+                },
+            );
+            let ty = c.y + bar_h + 6;
+            let th = c.h - bar_h - 6;
             let tw = c.w / 3 - 6;
             for (i, (lab, val, col)) in [
                 ("TOT", 0.7 + 0.1 * (t * 0.1).cos(), pal.primary),
@@ -434,7 +706,7 @@ pub fn draw_format(page: &mut Page, fmt: Format, pal: &Palette, bezel: &BezelSta
             {
                 tape_gauge(
                     page.surface,
-                    Rect::new(c.x + i as i32 * (tw + 6), c.y, tw, c.h),
+                    Rect::new(c.x + i as i32 * (tw + 6), ty, tw, th),
                     TapeOpts {
                         orientation: TapeOrientation::Vertical,
                         font_px: page.font_px * 0.8,
@@ -448,7 +720,7 @@ pub fn draw_format(page: &mut Page, fmt: Format, pal: &Palette, bezel: &BezelSta
         Format::Ecm => {
             list_menu(
                 page.surface,
-                c,
+                Rect::new(c.x, c.y, c.w, c.h - 40),
                 &[
                     "ECM  STBY",
                     "RWR  NORM",
@@ -460,6 +732,21 @@ pub fn draw_format(page: &mut Page, fmt: Format, pal: &Palette, bezel: &BezelSta
                 page.font_px,
                 pal.primary,
                 pal.caution,
+            );
+            progress_strip(
+                page.surface,
+                Rect::new(c.x + 16, c.bottom() - 28, c.w - 32, 14),
+                0.35 + 0.25 * (t * 0.3).sin().abs(),
+                pal.caution,
+                pal.structure,
+            );
+            numeric_readout(
+                page.surface,
+                c.center().0 as f32,
+                c.bottom() as f32 - 8.0,
+                "CHAFF LOAD",
+                pal.dim,
+                page.font_px * 0.75,
             );
         }
         Format::Tfr | Format::HudRpt => {

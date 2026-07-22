@@ -39,7 +39,8 @@ fn main() -> io::Result<()> {
     }
     eprintln!("loaded libmfd {ver} · square MFD face (~4x4 in class)");
     eprintln!("OSB 1-5 top · 6-0 right · qwert bot · asdfg left · [ ] BRT");
-    eprintln!("Tab jet/auto · c color · / bank · Esc quit");
+    eprintln!("Tab jet/auto · c color · / bank · g gallery · Esc quit");
+    eprintln!("start: WIDG gallery (every widget type)");
 
     install_sigint();
     // 30 Hz default keeps Kitty present from queuing into multi-second lag.
@@ -100,8 +101,8 @@ fn main() -> io::Result<()> {
     let mut bezel_src = KeyboardBezel::new();
     let mut bezel = BezelState::default();
     let mut domain = Domain::Jet;
-    // Start on ENG so tapes + round gauges are obvious (not only HSD rings).
-    let mut jet_fmt = Format::Eng;
+    // Start on WIDG gallery so every public widget is visible at once.
+    let mut jet_fmt = Format::Gallery;
     let mut jet_bank = 0usize;
     let mut auto_page = AutoPage::Cluster;
     let mut color_mode = ColorMode::ColorMfd;
@@ -133,6 +134,10 @@ fn main() -> io::Result<()> {
                     };
                 }
                 b'/' => jet_bank = jet_bank.wrapping_add(1),
+                b'g' | b'G' => {
+                    domain = Domain::Jet;
+                    jet_fmt = Format::Gallery;
+                }
                 _ => bezel_src.push_key_state(k, &bezel),
             }
         }
@@ -154,7 +159,7 @@ fn main() -> io::Result<()> {
                                 13 => jet_fmt = Format::Eng,
                                 14 => jet_fmt = Format::Test,
                                 15 => jet_fmt = Format::Dte,
-                                16 => jet_fmt = Format::Blank,
+                                16 => jet_fmt = Format::Gallery,
                                 17 => jet_fmt = Format::HudRpt,
                                 18 => jet_fmt = Format::Ecm,
                                 19 => jet_fmt = Format::Flir,

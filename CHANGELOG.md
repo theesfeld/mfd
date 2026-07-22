@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- **WIDG gallery** format: every public widget on one face (`softkey_row`, tapes V/H, gauges, rings, radar, video gate, list, station, caution, progress, horizon, labels). Demo starts here; `g` or left OSB **WIDG**. Refs #50.
+- Richer pages: WPN softkeys, HAD rings, FUEL horizontal tape, ECM progress; auto Setup softkeys + caution + BRT strip.
+
 ### Fixed
 
 - Ruler face size on Ghostty/Wayland: convert terminal winsize **buffer** pixels to panel **device** pixels before layout (compositor window × scale, or `MFD_PX_SCALE`). Fixes ~2–2.5″ faces when EDID PPI and winsize were mixed. Refs #48.
