@@ -156,9 +156,32 @@ fn main() -> io::Result<()> {
             raw.read_keys(&mut keybuf)?;
         }
 
-        for &k in &keybuf {
+        // Index walk: arrow keys are CSI sequences starting with ESC
+        // (`ESC [ A` …). Treating every 0x1b as quit killed the glass.
+        let mut ki = 0usize;
+        while ki < keybuf.len() {
+            let k = keybuf[ki];
+            // ESC sequences (arrows, SS3, bare Esc)
+            if k == 0x1b {
+                if let Some((consumed, act)) = parse_esc_seq(&keybuf[ki..]) {
+                    match act {
+                        EscAction::Quit => RUNNING.store(false, Ordering::Relaxed),
+                        EscAction::PageNext if boot_done => {
+                            auto_page = cycle_auto(auto_page, 1, &available_pages);
+                        }
+                        EscAction::PagePrev if boot_done => {
+                            auto_page = cycle_auto(auto_page, -1, &available_pages);
+                        }
+                        EscAction::Ignore | EscAction::PageNext | EscAction::PagePrev => {}
+                    }
+                    ki += consumed;
+                    continue;
+                }
+                // Lone ESC → quit
+                RUNNING.store(false, Ordering::Relaxed);
+                break;
+            }
             match k {
-                0x1b => RUNNING.store(false, Ordering::Relaxed),
                 b'c' | b'C' if boot_done => {
                     color_mode = match color_mode {
                         ColorMode::GreenMono => ColorMode::ColorMfd,
@@ -166,11 +189,9 @@ fn main() -> io::Result<()> {
                         ColorMode::HighVis => ColorMode::GreenMono,
                     };
                 }
-                // During BIT: only Esc / quit
+                // During BIT: only Esc / quit (arrows ignored above)
                 _ if !boot_done => {
-                    if k != 0x1b {
-                        bezel_src.push_key_state(k, &bezel);
-                    }
+                    bezel_src.push_key_state(k, &bezel);
                 }
                 // Systems page jumps (after BIT)
                 b'1' => auto_page = AutoPage::Eng,
@@ -198,6 +219,7 @@ fn main() -> io::Result<()> {
                 // [ ] ; ' - = , .  → real bezel knobs (BRT CON SYM GAIN)
                 _ => bezel_src.push_key_state(k, &bezel),
             }
+            ki += 1;
         }
         if !RUNNING.load(Ordering::Relaxed) {
             break;
@@ -375,6 +397,60 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
+/// Result of consuming an ESC / CSI / SS3 sequence from a key buffer.
+#[derive(Clone, Copy, Debug)]
+enum EscAction {
+    Quit,
+    PageNext,
+    PagePrev,
+    Ignore,
+}
+
+/// Parse terminal escape sequences starting at `buf[0] == ESC`.
+///
+/// Returns `(bytes_consumed, action)`. Arrow keys: CSI `ESC [ A/B/C/D` or
+/// SS3 `ESC O A/B/C/D` (application cursor mode). Bare Esc → Quit.
+fn parse_esc_seq(buf: &[u8]) -> Option<(usize, EscAction)> {
+    if buf.is_empty() || buf[0] != 0x1b {
+        return None;
+    }
+    if buf.len() == 1 {
+        return Some((1, EscAction::Quit));
+    }
+    // CSI: ESC [ … final
+    if buf[1] == b'[' {
+        let mut j = 2usize;
+        while j < buf.len() {
+            let b = buf[j];
+            // CSI params 0x30–0x3F, intermediates 0x20–0x2F, final 0x40–0x7E
+            if (0x40..=0x7e).contains(&b) {
+                let act = match b {
+                    b'A' | b'D' => EscAction::PagePrev, // Up / Left
+                    b'B' | b'C' => EscAction::PageNext, // Down / Right
+                    // Home/End/… and other CSI — ignore, do not quit
+                    _ => EscAction::Ignore,
+                };
+                return Some((j + 1, act));
+            }
+            j += 1;
+        }
+        // Incomplete CSI in this read — swallow ESC+rest so we don't quit
+        return Some((buf.len(), EscAction::Ignore));
+    }
+    // SS3: ESC O A/B/C/D (common for arrows in app mode)
+    if buf[1] == b'O' && buf.len() >= 3 {
+        let act = match buf[2] {
+            b'A' | b'D' => EscAction::PagePrev,
+            b'B' | b'C' => EscAction::PageNext,
+            _ => EscAction::Ignore,
+        };
+        return Some((3, act));
+    }
+    // ESC + other: ignore multi-byte (Alt-key), do not quit
+    // Only pure single-byte Esc (handled above) quits.
+    Some((2, EscAction::Ignore))
+}
+
 fn cycle_auto(cur: AutoPage, dir: i32, pages: &[AutoPage]) -> AutoPage {
     let all = if pages.is_empty() {
         AutoPage::ALL
@@ -421,8 +497,41 @@ fn print_banner(ver: &str) {
     eprintln!("    MFD_AUDIO=0 mute · needs aplay (alsa-utils)");
     eprintln!();
     eprintln!("  BEZEL  [ ] BRT  ·  MFD_OBD_BT=00:04:3E:96:B8:F1");
-    eprintln!("  Drive: ./cmfd.sh  ·  c color · Esc quit");
+    eprintln!("  Drive: ./cmfd.sh  ·  arrows n/p page · c color · Esc quit");
     eprintln!();
+}
+
+#[cfg(test)]
+mod esc_tests {
+    use super::*;
+
+    #[test]
+    fn arrow_up_is_page_prev_not_quit() {
+        let (n, a) = parse_esc_seq(b"\x1b[A").unwrap();
+        assert_eq!(n, 3);
+        assert!(matches!(a, EscAction::PagePrev));
+    }
+
+    #[test]
+    fn arrow_down_is_page_next() {
+        let (n, a) = parse_esc_seq(b"\x1b[B").unwrap();
+        assert_eq!(n, 3);
+        assert!(matches!(a, EscAction::PageNext));
+    }
+
+    #[test]
+    fn bare_esc_quits() {
+        let (n, a) = parse_esc_seq(b"\x1b").unwrap();
+        assert_eq!(n, 1);
+        assert!(matches!(a, EscAction::Quit));
+    }
+
+    #[test]
+    fn ss3_arrow_right() {
+        let (n, a) = parse_esc_seq(b"\x1bOC").unwrap();
+        assert_eq!(n, 3);
+        assert!(matches!(a, EscAction::PageNext));
+    }
 }
 
 fn log_ruler(face: &mfd::PhysicalFace, cols: u16, rows: u16, w: u32, h: u32) {
