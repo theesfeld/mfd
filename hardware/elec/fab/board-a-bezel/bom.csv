@@ -1,0 +1,9 @@
+Comment,Designator,Footprint,LCSC,Quantity,Value
+MCU,U1,LQFP-48_7x7mm_P0.5mm,C529987,1,STM32G431CBU6
+LDO,U4,SOT-23-5,C15127,1,AMS1117-3.3
+Cap 100nF,C1-C5,C_0603_1608Metric,C14663,5,100nF
+OSB switch,S1-S20,SW_PUSH_6mm_H4.3mm,C318884,20,6x6 tactile
+Rocker switch,SW1-SW4,SW_PUSH_6mm_H4.3mm,C318884,4,6x6 tactile
+B2B header,J1,PinHeader_2x10_P2.54mm,C124378,1,2x10
+SWD header,J2,PinHeader_1x04_P2.54mm,C124373,1,1x4
+M3 hole,H1-H4,MountingHole_3.2mm_M3,,4,M3
