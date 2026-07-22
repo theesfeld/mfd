@@ -1,7 +1,7 @@
 # VGE — pure assembly vector engine
 
 <!-- agents:status:begin -->
-> **Status:** active · Version: `0.1.0-dev.1` · **libvge = ASM only** · MIT
+> **Status:** active · Version: `0.1.0-dev.1` · **libvge = ASM only** · lifespan API + demo `VGE_TTL` trial · [#25](https://github.com/theesfeld/vge/issues/25) · MIT
 <!-- agents:status:end -->
 
 ## This is assembly
@@ -163,8 +163,11 @@ fb.present_from(&back);
 ## Demo
 
 ```bash
-# Default: smooth 120 Hz overlay (Ghostty / Kitty / xterm / …)
+# Default: smooth 120 Hz overlay; full clear + stroke (refresh)
 cargo run --release --bin vge-demo
+
+# Lifespan trial: motion strokes keep a TTL trail (library option)
+VGE_TTL=12 cargo run --release --bin vge-demo
 
 # 60 Hz (often smoothest on 60 Hz panels)
 VGE_HZ=60 cargo run --release --bin vge-demo
@@ -172,19 +175,15 @@ VGE_HZ=60 cargo run --release --bin vge-demo
 # Uncapped (max throughput; can look choppier in terminals)
 VGE_HZ=0 cargo run --release --bin vge-demo
 
-# Effects (optional; costs extra CPU)
-VGE_EFFECTS=glow,radar cargo run --release --bin vge-demo
-
 # Linux video RAM path
 cargo run --release --bin vge-demo -- --fb
-
-# Full alternate screen
-cargo run --release --bin vge-demo -- --full
 ```
 
 | Flag / env | Effect |
 |------------|--------|
-| (default) | Overlay viewport; text chrome around it |
+| (default) | Overlay; **refresh** (clear + stroke once per frame) |
+| `VGE_TTL=N` | Lifespan trial: motion trails for `N` frames (fade by remaining life) |
+| `VGE_SWEEP=1` | Erase previous path + stroke new (sparse motion only) |
 | `--fb` | RAM draw + blit to `/dev/fb0` |
 | `--full` | Alternate screen, full area |
 | `VGE_HZ=120` | Default: phase-lock 120 Hz (smooth) |
@@ -193,8 +192,6 @@ cargo run --release --bin vge-demo -- --full
 | `VGE_WIDTH=N` | Stroke width in pixels (default 1; no artificial max) |
 | `VGE_TERM=kitty\|half\|ascii` | Force present backend |
 | `VGE_MAX_W` / `VGE_MAX_H` | Cap pixel buffer (default 960×540) |
-| `VGE_EFFECTS=…` | `glow`, `bloom`, `radar`, `scan` |
-| `VGE_PHOSPHOR=1` | Decay trail instead of hard clear |
 
 Quit: `q`, Esc, or Ctrl+C.
 
@@ -207,11 +204,19 @@ Quit: `q`, Esc, or Ctrl+C.
 | Type / method | Description |
 |---------------|-------------|
 | `DisplayList` | Refresh memory for beam commands |
+| `TimedStroke` | Command + `born` + `ttl` (0 = immortal) |
 | `set_color` / `move_to` / `line_to` | Beam state + strokes |
 | `line` / `line_thick` / `circle` / `polyline` | Draw commands |
-| `stroke(surface)` | Execute beam (no clear) |
 | `set_width(px)` | Stroke width in pixels (≥ 1) |
-| `refresh(surface)` | Transparent clear + full retrace (overlay-ready) |
+| `set_lifespan(frames)` | Default TTL for new commands (`0` = immortal) |
+| `tick()` | Advance frame clock; drop expired strokes |
+| `stroke(surface)` | Draw living commands (full opacity) |
+| `stroke_life(surface, fade)` | Draw living commands; optional alpha by remaining life |
+| `sweep(surface, prev)` | Erase previous path, then stroke (sparse motion) |
+| `refresh(surface)` | Transparent clear + stroke living (full opacity) |
+| `refresh_life(surface, fade)` | Transparent clear + stroke with optional trail fade |
+
+**Update models:** full-scene rebuild → `refresh` (1× stroke). Few vectors move → `sweep`. CRT/radar trails → `set_lifespan` + `tick` + `refresh_life` / `stroke_life`.
 
 ### Geometry scanout (C + Rust)
 

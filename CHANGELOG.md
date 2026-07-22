@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Per-stroke lifespan** on `DisplayList`: `set_lifespan`, `tick`, `TimedStroke`, `stroke_life` / `refresh_life` (fade by remaining life)
+- Demo trial: `VGE_TTL=N` leaves motion trails; static HUD stays crisp
+
+### Changed
+
+- Default demo update is **refresh** (clear + one stroke). Full-list **sweep** is ~2× beam work; use `VGE_SWEEP=1` only for sparse motion
+
 ### Fixed
 
 - `vge-demo --fb` release segfault: do not use `dyn Canvas` with the asm FFI path (monomorphize)
