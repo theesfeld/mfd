@@ -8,11 +8,13 @@
 - Terminal default for emulators (Ghostty/Kitty/xterm); FB only on real VT or `--fb`
 - `poll_quit` ignores non-tty stdin (cargo pipes)
 - **Present path FPS**: buffered half-block/ascii (no per-cell `write!`); Kitty density capped; report draw_us vs present_us
+- **Choppy high-FPS**: absolute deadline frame lock, wall-clock animation, default 120 Hz (uncapped floods terminals)
 
 ### Changed
 
 - Default demo is **overlay** (cell viewport); text can sit around vectors
-- Default `VGE_HZ=0` (uncapped) so present rate is not artificially locked
+- Default display lock **120 Hz** phase-locked; `VGE_HZ=0` for uncapped throughput tests
+- Terminal demo default phosphor on (`VGE_PHOSPHOR=0` to disable)
 
 ### Added
 

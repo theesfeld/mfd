@@ -22,9 +22,13 @@ Other targets use a portable C path with the same C ABI.
 |-------|------|-----------------------------------------------|
 | **Raster** | Geometry → pixels in **system RAM** | Draw-only: **~10 000 FPS** at 1280×720; **~1 700 FPS** at 2560×1600 |
 | **Present** | Put pixels on glass or in a terminal | FB blit full HD: **~800 FPS**. Kitty present (capped): **thousands of FPS** at default density |
-| **Pace** | Optional lock to `VGE_HZ` | Use `VGE_HZ=0` for uncapped present rate |
+| **Pace** | **Even frame times** (absolute phase lock) | Default demo locks **120 Hz**. Uncapped max-FPS often looks choppier |
 
-**Fact:** The engine is not the bottleneck. Full-frame terminal present was the bottleneck when every cell used a slow format write or a huge base64 image. That path is fixed: one buffer, one write, capped pixel size, region overlay.
+**Smooth ≠ maximum FPS.**  
+Flooding Ghostty/Kitty with uncapped full-frame presents queues work in the emulator and motion stutters.  
+VGE locks the **display** to a fixed period (`t0 + n·Δt`) and drives animation from **wall-clock time**, so rotation stays continuous even if a frame overruns.
+
+**Fact:** The raster is not the bottleneck. Present bandwidth and **frame-time jitter** are.
 
 ```bash
 cargo run --release --example bench
@@ -122,10 +126,13 @@ fb.present_from(&back);
 ## Demo
 
 ```bash
-# Default: overlay region in the current terminal (Ghostty / Kitty / xterm / …)
+# Default: smooth 120 Hz overlay (Ghostty / Kitty / xterm / …)
 cargo run --release --bin vge-demo
 
-# Uncapped present rate (shows real draw_us / present_us / fps)
+# 60 Hz (often smoothest on 60 Hz panels)
+VGE_HZ=60 cargo run --release --bin vge-demo
+
+# Uncapped (max throughput; can look choppier in terminals)
 VGE_HZ=0 cargo run --release --bin vge-demo
 
 # Effects (optional; costs extra CPU)
@@ -143,8 +150,10 @@ cargo run --release --bin vge-demo -- --full
 | (default) | Overlay viewport; text chrome around it |
 | `--fb` | RAM draw + blit to `/dev/fb0` |
 | `--full` | Alternate screen, full area |
-| `VGE_HZ=0` | No frame sleep (max rate) |
-| `VGE_HZ=120` | Lock ~120 Hz when present is faster |
+| `VGE_HZ=120` | Default: phase-lock 120 Hz (smooth) |
+| `VGE_HZ=60` | Phase-lock 60 Hz |
+| `VGE_HZ=0` | Uncapped (throughput test; can stutter) |
+| `VGE_PHOSPHOR=0` | Disable trail fade (default on in terminal demo) |
 | `VGE_TERM=kitty\|half\|ascii` | Force present backend |
 | `VGE_MAX_W` / `VGE_MAX_H` | Cap pixel buffer (default 960×540) |
 | `VGE_EFFECTS=…` | `glow`, `bloom`, `radar`, `scan` |

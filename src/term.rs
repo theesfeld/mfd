@@ -157,14 +157,15 @@ pub fn terminal_cells() -> (u16, u16) {
 }
 
 fn max_pixels() -> (u32, u32) {
+    // Defaults keep Kitty payloads small so the terminal does not stutter.
     let mw = std::env::var("VGE_MAX_W")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(960u32);
+        .unwrap_or(640u32);
     let mh = std::env::var("VGE_MAX_H")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(540u32);
+        .unwrap_or(360u32);
     (mw.max(64), mh.max(64))
 }
 
@@ -174,8 +175,9 @@ pub fn surface_size_for_viewport(backend: TermBackend, vp: Viewport) -> (u32, u3
     let cols = vp.cols.max(1) as u32;
     let rows = vp.rows.max(1) as u32;
     let (w, h) = match backend {
-        // 4×8 device px/cell — sharp enough, present stays light.
-        TermBackend::Kitty => (cols * 4, rows * 8),
+        // Low device px/cell: terminal scales the image to the cell box.
+        // Less base64 ⇒ smoother present (less queue pressure on the emulator).
+        TermBackend::Kitty => (cols * 3, rows * 6),
         TermBackend::HalfBlock => (cols, rows * 2),
         TermBackend::Ascii => (cols, rows),
     };
