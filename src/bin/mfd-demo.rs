@@ -495,8 +495,8 @@ fn print_banner(ver: &str) {
     eprintln!("    8 CLIM   out/in temp HVAC");
     eprintln!("    9 FLIR   camera / FLIR glass");
     eprintln!("    0 RNG    collision / park ranges");
-    eprintln!("    v ATT    attitude ball + heading N/NW/… + degrees");
-    eprintln!("    x MAP    schematic line/topo (not full DEM)");
+    eprintln!("    v ATT    sphere horizon + compass on ball + HDG°/N-NW");
+    eprintln!("    x MAP    schematic topo with demo scroll (heading-up)");
     eprintln!("    o OBD    PID list");
     eprintln!("    s SET    setup / units");
     eprintln!("    n / p    next / previous auto page");

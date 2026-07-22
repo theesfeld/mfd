@@ -1,4 +1,6 @@
 //! Vertical / horizontal **tape** gauges (fuel, temp, altitude strip, …).
+//!
+//! F-16 CMFD FUEL language uses filled bars + ticks — not hairline needles only.
 
 use crate::color::{Ink, GREEN_DIM, WHITE};
 use crate::font::{draw_text, draw_text_centered};
@@ -33,7 +35,7 @@ impl Default for TapeOpts {
     }
 }
 
-/// Draw a tape gauge in `rect`.
+/// Draw a tape gauge in `rect` (filled bar + scale ticks + numeric).
 pub fn tape_gauge(s: &mut Surface, rect: Rect, opts: TapeOpts) {
     let v = opts.value.clamp(0.0, 1.0);
     let fh = opts.font_px;
@@ -48,7 +50,12 @@ pub fn tape_gauge(s: &mut Surface, rect: Rect, opts: TapeOpts) {
         );
     }
     let top = rect.y + (fh as i32) + 4;
-    let body = Rect::new(rect.x, top, rect.w, (rect.bottom() - top).max(8));
+    let body = Rect::new(
+        rect.x + 1,
+        top,
+        (rect.w - 2).max(6),
+        (rect.bottom() - top).max(8),
+    );
     // Frame
     s.line_aa(body.x, body.y, body.right(), body.y, GREEN_DIM);
     s.line_aa(body.right(), body.y, body.right(), body.bottom(), GREEN_DIM);
@@ -63,45 +70,56 @@ pub fn tape_gauge(s: &mut Surface, rect: Rect, opts: TapeOpts) {
 
     match opts.orientation {
         TapeOrientation::Vertical => {
+            // Filled column from bottom (MFD fuel / qty style)
+            let fill_h = ((body.h as f32) * v) as i32;
+            if fill_h > 0 {
+                let y0 = body.bottom() - fill_h;
+                let inset = (body.w / 5).max(2);
+                s.rect_fill(
+                    body.x + inset,
+                    y0,
+                    body.right() - inset,
+                    body.bottom() - 1,
+                    opts.color,
+                );
+            }
+            // Scale ticks
             let mid = body.x + body.w / 2;
             let n = 11;
             for i in 0..n {
                 let t = i as f32 / (n - 1) as f32;
                 let yy = body.bottom() - ((body.h as f32) * t) as i32;
-                let half = if i % 5 == 0 { body.w / 5 } else { body.w / 10 };
+                let half = if i % 5 == 0 { body.w / 3 } else { body.w / 6 };
                 s.line_aa(mid - half, yy, mid + half, yy, GREEN_DIM);
             }
-            let fill = ((body.h as f32) * v) as i32;
-            if fill > 0 {
-                s.line_aa(mid, body.bottom(), mid, body.bottom() - fill, opts.color);
-                s.line_aa(
-                    mid + 1,
-                    body.bottom(),
-                    mid + 1,
-                    body.bottom() - fill,
+            // Index arm
+            let iy = body.bottom() - fill_h;
+            let arm = (body.w / 2).max(4);
+            s.line_thick(mid - arm, iy, mid + arm, iy, Ink::Readout.color(), 2);
+        }
+        TapeOrientation::Horizontal => {
+            let fill_w = ((body.w as f32) * v) as i32;
+            if fill_w > 0 {
+                let inset = (body.h / 5).max(2);
+                s.rect_fill(
+                    body.x + 1,
+                    body.y + inset,
+                    body.x + fill_w,
+                    body.bottom() - inset,
                     opts.color,
                 );
             }
-            let iy = body.bottom() - fill;
-            let arm = (body.w / 3).max(4);
-            s.line_aa(mid - arm, iy, mid + arm, iy, opts.color);
-        }
-        TapeOrientation::Horizontal => {
             let mid = body.y + body.h / 2;
             let n = 11;
             for i in 0..n {
                 let t = i as f32 / (n - 1) as f32;
                 let xx = body.x + ((body.w as f32) * t) as i32;
-                let half = if i % 5 == 0 { body.h / 5 } else { body.h / 10 };
+                let half = if i % 5 == 0 { body.h / 3 } else { body.h / 6 };
                 s.line_aa(xx, mid - half, xx, mid + half, GREEN_DIM);
             }
-            let fill = ((body.w as f32) * v) as i32;
-            if fill > 0 {
-                s.line_aa(body.x, mid, body.x + fill, mid, opts.color);
-            }
-            let ix = body.x + fill;
-            let arm = (body.h / 3).max(4);
-            s.line_aa(ix, mid - arm, ix, mid + arm, opts.color);
+            let ix = body.x + fill_w;
+            let arm = (body.h / 2).max(4);
+            s.line_thick(ix, mid - arm, ix, mid + arm, Ink::Readout.color(), 2);
         }
     }
 
@@ -109,7 +127,7 @@ pub fn tape_gauge(s: &mut Surface, rect: Rect, opts: TapeOpts) {
     draw_text_centered(
         s,
         body.center().0 as f32,
-        body.y as f32 + fh * 0.6,
+        body.y as f32 + fh * 0.55,
         &pct,
         Ink::Readout.color(),
         fh * 0.85,

@@ -301,9 +301,10 @@ pub fn demo_vehicle(t: f32) -> VehicleSnapshot {
     v.temp_out_c = 12.0 + 8.0 * (t * 0.03).sin();
     v.temp_in_c = 20.0 + 2.0 * (t * 0.1).cos();
     v.hvac_fan = 0.3 + 0.4 * (0.5 + 0.5 * (t * 0.2).sin());
-    v.pitch_deg = 8.0 * (t * 0.45).sin();
-    v.roll_deg = 18.0 * (t * 0.35).cos();
-    v.heading_deg = (t * 12.0) % 360.0;
+    // Stronger attitude so the sphere reads as a ball in demo.
+    v.pitch_deg = 18.0 * (t * 0.45).sin();
+    v.roll_deg = 32.0 * (t * 0.35).cos();
+    v.heading_deg = (t * 18.0) % 360.0;
     v
 }
 
@@ -1019,6 +1020,7 @@ pub fn draw_auto_with_video(
                 Rect::new(c.x, c.y, ball_w, c.h - 8),
                 v.pitch_deg,
                 v.roll_deg,
+                v.heading_deg,
                 sky,
                 ground,
                 pal.readout,
@@ -1058,6 +1060,7 @@ pub fn draw_auto_with_video(
                 page.surface,
                 c.inset(4),
                 v.heading_deg,
+                v.speed_mph,
                 t,
                 pal.structure,
                 pal.nav,
@@ -1069,7 +1072,12 @@ pub fn draw_auto_with_video(
                 page.surface,
                 c.x as f32 + 4.0,
                 c.y as f32 + fh + 2.0,
-                &format!("HDG {:05.1}°", ((v.heading_deg % 360.0) + 360.0) % 360.0),
+                &format!(
+                    "HDG {:05.1}°  {:.0} {}",
+                    ((v.heading_deg % 360.0) + 360.0) % 360.0,
+                    v.speed_unit.from_mph(v.speed_mph),
+                    v.speed_unit.name()
+                ),
                 pal.readout,
                 fh * 0.75,
             );

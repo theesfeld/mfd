@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **ATT** sphere: limb shading, bank pointer, pitch ladder, **compass marks on the horizon** (N/NE/E…). **MAP** demo scrolls world under heading-up ownship. **Tape gauges** use filled bars (F-16 FUEL language — keep tapes). Refs #67.
+
 ### Added
 
 - **ATTITUDE** page: artificial horizon ball + heading (degrees + N/NNW/…). **MAP** schematic topo. Restore demo **[ ] BRT** (real CMFD rocker); page cycle is **n/p**. Refs #65.
