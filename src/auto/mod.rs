@@ -5,8 +5,8 @@ use crate::geom::Rect;
 use crate::page::Page;
 use crate::palette::Palette;
 use crate::widget::{
-    list_menu, numeric_readout, osb_chrome, round_gauge, tape_gauge, RoundGaugeOpts, TapeOpts,
-    TapeOrientation,
+    content_after_osb, list_menu, numeric_readout, osb_chrome, round_gauge, tape_gauge,
+    RoundGaugeOpts, TapeOpts, TapeOrientation,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -57,8 +57,8 @@ impl AutoPage {
 
 fn chrome(page: &mut Page, pal: &Palette, title: &str, bezel: &BezelState) {
     let b = page.bounds.inset(2);
-    let top = ["CLUST", "POWER", "TEMPS", "OBD", "SETUP"];
-    let right = ["BRT+", "CON+", "SYM+", "GAIN", "MENU"];
+    let top = ["CLST", "PWR", "TMP", "OBD", "SET"];
+    let right = ["BRT", "CON", "SYM", "GAIN", "MENU"];
     let bottom = ["P", "R", "N", "D", "S"];
     let left = ["PAGE", "ACK", "CLR", "DTC", "HOME"];
     osb_chrome(
@@ -68,29 +68,35 @@ fn chrome(page: &mut Page, pal: &Palette, title: &str, bezel: &BezelState) {
         &right,
         &bottom,
         &left,
-        page.font_px * 0.75,
+        page.font_px * 0.7,
         pal.dim,
         bezel.last_osb,
     );
+    let c = content_after_osb(b, page.font_px * 0.7);
     page.label_centered(
-        b.center().0 as f32,
-        b.y as f32 + page.font_px * 1.6,
+        c.center().0 as f32,
+        c.y as f32 + page.font_px * 0.6,
         title,
         pal.primary,
     );
     page.label_at(
-        b.x as f32 + 4.0,
-        b.bottom() as f32 - page.font_px * 2.2,
-        &format!("BRT {:.0}", bezel.brightness * 100.0),
+        c.x as f32 + 2.0,
+        c.bottom() as f32 - page.font_px * 0.9,
+        &format!("BRT{:.0}", bezel.brightness * 100.0),
         pal.dim,
-        page.font_px * 0.7,
+        page.font_px * 0.65,
     );
 }
 
 fn content(page: &Page) -> Rect {
-    let b = page.bounds.inset(4);
-    let m = (page.font_px * 1.8) as i32 + 8;
-    Rect::new(b.x + m, b.y + m, b.w - 2 * m, b.h - 2 * m - 10)
+    let b = page.bounds.inset(2);
+    let c = content_after_osb(b, page.font_px * 0.7);
+    Rect::new(
+        c.x,
+        c.y + (page.font_px as i32) + 8,
+        c.w,
+        (c.h - (page.font_px as i32) * 2 - 12).max(40),
+    )
 }
 
 pub fn draw_auto(

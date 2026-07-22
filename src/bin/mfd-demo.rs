@@ -1,12 +1,7 @@
-//! **MFD demo** — OSB bezel model + F-16 formats + automotive pages.
+//! **MFD demo** — square face, OSB bezel, F-16 formats + auto.
 //!
-//! Bezel map (plug-in later: GPIO/HID implements same events):
-//! - Top OSB `1`–`5`: format / auto page select
-//! - Right `6`–`0`: OSB 6–10
-//! - Bottom `q w e r t`: OSB 15–11
-//! - Left `a s d f g`: OSB 16–20
-//! - Knobs: `[ ]` BRT, `; '` CON, `- =` SYM, `, .` GAIN
-//! - `Tab`: jet ↔ auto domain · `c`: color mode · `Esc`: quit
+//! Physical reference: F-16 MLU color MFD ≈ **4×4 in (10×10 cm)** square glass.
+//! This demo uses a **square** framebuffer + centered terminal viewport.
 //!
 //! ```text
 //! cargo run --release --bin mfd-demo
@@ -23,8 +18,8 @@ use mfd::jet::{self, Format};
 use mfd::page::Page;
 use mfd::palette::{ColorMode, Palette};
 use mfd::term::{
-    detect_backend, enter_fullscreen, leave_fullscreen, present_at, surface_size_for_viewport,
-    terminal_cells, RawStdin, Viewport,
+    detect_backend, enter_fullscreen, leave_fullscreen, present_at_state_scratch,
+    square_mfd_pixels, square_mfd_viewport, PresentScratch, RawStdin,
 };
 use mfd::{engine_version, using_assembly, Surface};
 
@@ -42,27 +37,27 @@ fn main() -> io::Result<()> {
         eprintln!("error: mfd-demo requires pure-asm libmfd (x86_64)");
         std::process::exit(1);
     }
-    eprintln!("loaded libmfd {ver}");
-    eprintln!("OSB: 1-5 top · 6-0 right · qwert bottom · asdfg left");
-    eprintln!("knobs: [ ] BRT  ; ' CON  - = SYM  , . GAIN");
-    eprintln!("Tab jet/auto · c color · Esc quit");
+    eprintln!("loaded libmfd {ver} · square MFD face (~4x4 in class)");
+    eprintln!("OSB 1-5 top · 6-0 right · qwert bot · asdfg left · [ ] BRT");
+    eprintln!("Tab jet/auto · c color · / bank · Esc quit");
 
     install_sigint();
+    // 30 Hz default keeps Kitty present from queuing into multi-second lag.
     let hz = std::env::var("MFD_HZ")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(60u32);
+        .unwrap_or(30u32);
 
     let backend = detect_backend();
-    let (tc, tr) = terminal_cells();
-    let vp = Viewport {
-        col: 0,
-        row: 0,
-        cols: tc.max(1),
-        rows: tr.max(1),
-    };
-    let (w, h) = surface_size_for_viewport(backend, vp);
+    let vp = square_mfd_viewport(0.85);
+    let (w, h) = square_mfd_pixels(backend);
+    eprintln!(
+        "surface {w}x{h}  viewport cells {}x{} @{},{}",
+        vp.cols, vp.rows, vp.col, vp.row
+    );
+
     let mut panel = Surface::new(w, h);
+    let mut scratch = PresentScratch::default();
     let mut pacer = if hz == 0 {
         None
     } else {
@@ -80,7 +75,8 @@ fn main() -> io::Result<()> {
     let mut bezel_src = KeyboardBezel::new();
     let mut bezel = BezelState::default();
     let mut domain = Domain::Jet;
-    let mut jet_fmt = Format::Hsd;
+    // Start on ENG so tapes + round gauges are obvious (not only HSD rings).
+    let mut jet_fmt = Format::Eng;
     let mut jet_bank = 0usize;
     let mut auto_page = AutoPage::Cluster;
     let mut color_mode = ColorMode::ColorMfd;
@@ -97,7 +93,7 @@ fn main() -> io::Result<()> {
 
         for &k in &keybuf {
             match k {
-                0x1b => RUNNING.store(false, Ordering::Relaxed), // Esc
+                0x1b => RUNNING.store(false, Ordering::Relaxed),
                 b'\t' => {
                     domain = match domain {
                         Domain::Jet => Domain::Auto,
@@ -111,7 +107,6 @@ fn main() -> io::Result<()> {
                         ColorMode::HighVis => ColorMode::GreenMono,
                     };
                 }
-                // Bank cycle for jet top-row formats
                 b'/' => jet_bank = jet_bank.wrapping_add(1),
                 _ => bezel_src.push_key_state(k, &bezel),
             }
@@ -128,7 +123,6 @@ fn main() -> io::Result<()> {
                         if let Some(f) = Format::from_top_osb(osb, jet_bank) {
                             jet_fmt = f;
                         } else {
-                            // Side OSB examples — swap secondary formats without rewrite later.
                             match osb {
                                 11 => jet_fmt = Format::Cni,
                                 12 => jet_fmt = Format::Fuel,
@@ -161,7 +155,7 @@ fn main() -> io::Result<()> {
         let t = t0.elapsed().as_secs_f32();
         let pal = Palette::new(color_mode);
         let mut page = Page::new(&mut panel);
-        page.font_px = if w.min(h) >= 700 { 16.0 } else { 13.0 };
+        page.font_px = if w.min(h) >= 480 { 14.0 } else { 12.0 };
 
         match domain {
             Domain::Jet => jet::draw_format(&mut page, jet_fmt, &pal, &bezel, t),
@@ -181,7 +175,10 @@ fn main() -> io::Result<()> {
             }
         }
 
-        present_at(&panel, backend, vp)?;
+        // Real BRT: scale ink after draw.
+        panel.apply_brightness(bezel.brightness.clamp(0.05, 1.0));
+
+        present_at_state_scratch(&panel, backend, vp, None, Some(&mut scratch))?;
         if let Some(p) = pacer.as_mut() {
             p.wait_next();
         }

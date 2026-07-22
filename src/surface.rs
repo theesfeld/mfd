@@ -176,18 +176,54 @@ impl Surface {
             .saturating_mul(self.height as usize)
             .saturating_mul(4);
         let mut out = vec![0u8; n];
+        self.export_rgba32_into(&mut out);
+        out
+    }
+
+    /// Write RGBA8888 into `out` (resized as needed). Avoids alloc when reusing a buffer.
+    pub fn export_rgba32_into(&self, out: &mut Vec<u8>) {
+        let n = (self.width as usize)
+            .saturating_mul(self.height as usize)
+            .saturating_mul(4);
+        out.resize(n, 0);
+        let stride = self.stride as usize;
+        let px = &self.pixels;
         let mut i = 0usize;
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let c = self.get(x as i32, y as i32).unwrap_or(0);
-                out[i] = ((c >> 16) & 0xFF) as u8;
-                out[i + 1] = ((c >> 8) & 0xFF) as u8;
-                out[i + 2] = (c & 0xFF) as u8;
-                out[i + 3] = ((c >> 24) & 0xFF) as u8;
+        for y in 0..self.height as usize {
+            let row = y * stride;
+            for x in 0..self.width as usize {
+                let o = row + x * 4;
+                // Storage is little-endian 0xAARRGGBB as bytes B,G,R,A
+                let b = px[o];
+                let g = px[o + 1];
+                let r = px[o + 2];
+                let a = px[o + 3];
+                out[i] = r;
+                out[i + 1] = g;
+                out[i + 2] = b;
+                out[i + 3] = a;
                 i += 4;
             }
         }
-        out
+    }
+
+    /// Scale all RGB channels by `factor` (0..1+). Alpha unchanged. Used for BRT.
+    pub fn apply_brightness(&mut self, factor: f32) {
+        let f = factor.clamp(0.0, 2.0);
+        if (f - 1.0).abs() < 0.001 {
+            return;
+        }
+        let stride = self.stride as usize;
+        for y in 0..self.height as usize {
+            let row = y * stride;
+            for x in 0..self.width as usize {
+                let o = row + x * 4;
+                // LE: B G R A
+                self.pixels[o] = ((self.pixels[o] as f32) * f).min(255.0) as u8;
+                self.pixels[o + 1] = ((self.pixels[o + 1] as f32) * f).min(255.0) as u8;
+                self.pixels[o + 2] = ((self.pixels[o + 2] as f32) * f).min(255.0) as u8;
+            }
+        }
     }
 }
 

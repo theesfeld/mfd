@@ -44,10 +44,10 @@ pub use page::Page;
 pub use palette::{ColorMode, Palette};
 pub use surface::{engine_version, using_assembly, Surface, Xform};
 pub use widget::{
-    bearing_pointer, bezel_frame, bscope_grid, caution_box, crosshair, horizon_cue, label,
-    label_centered, list_menu, numeric_readout, osb_chrome, progress_strip, range_rings,
-    round_gauge, softkey_row, station_grid, tape_gauge, track_gate, video_frame, RoundGaugeOpts,
-    SoftkeyLayout, TapeOpts, TapeOrientation,
+    bearing_pointer, bezel_frame, bscope_grid, caution_box, content_after_osb, crosshair,
+    horizon_cue, label, label_centered, list_menu, numeric_readout, osb_chrome, progress_strip,
+    range_rings, round_gauge, softkey_row, station_grid, tape_gauge, track_gate, video_frame,
+    RoundGaugeOpts, SoftkeyLayout, TapeOpts, TapeOrientation,
 };
 
 /// Packed color `0xAARRGGBB`.

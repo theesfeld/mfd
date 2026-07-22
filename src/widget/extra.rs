@@ -1,7 +1,7 @@
 //! Additional MFD widgets (rings, gates, grids, lists, …).
 
-use crate::color::{GREEN, GREEN_DIM, WHITE};
-use crate::font::{draw_text, draw_text_centered};
+use crate::color::WHITE;
+use crate::font::{draw_text, draw_text_centered, text_width};
 use crate::geom::Rect;
 use crate::{Color, Surface};
 use std::f32::consts::PI;
@@ -118,10 +118,10 @@ pub fn station_grid(
         let row = (i as i32) / cols;
         let r = Rect::new(rect.x + col * cw, rect.y + row * ch, cw - 4, ch - 4);
         let c = if i == selected { sel_color } else { color };
-        s.line_aa(r.x, r.y, r.right(), r.y, GREEN_DIM);
-        s.line_aa(r.right(), r.y, r.right(), r.bottom(), GREEN_DIM);
-        s.line_aa(r.right(), r.bottom(), r.x, r.bottom(), GREEN_DIM);
-        s.line_aa(r.x, r.bottom(), r.x, r.y, GREEN_DIM);
+        s.line_aa(r.x, r.y, r.right(), r.y, color);
+        s.line_aa(r.right(), r.y, r.right(), r.bottom(), color);
+        s.line_aa(r.right(), r.bottom(), r.x, r.bottom(), color);
+        s.line_aa(r.x, r.bottom(), r.x, r.y, color);
         draw_text_centered(s, r.center().0 as f32, r.center().1 as f32, lab, c, font_px);
     }
 }
@@ -157,7 +157,6 @@ pub fn horizon_cue(s: &mut Surface, cx: i32, cy: i32, half: i32, bank_deg: f32, 
     let x1 = cx as f32 + h * c;
     let y1 = cy as f32 + h * sn;
     s.line_aa(x0 as i32, y0 as i32, x1 as i32, y1 as i32, color);
-    // Wings
     s.line_aa(cx - 8, cy, cx - 2, cy, color);
     s.line_aa(cx + 2, cy, cx + 8, cy, color);
 }
@@ -185,7 +184,11 @@ pub fn video_frame(s: &mut Surface, rect: Rect, color: Color) {
     s.line_aa(rect.x, rect.bottom(), rect.x, rect.y, color);
 }
 
-/// Full OSB chrome labels around a content rect (20 OSB).
+/// Full OSB chrome labels **inside** the face (no clip off edges).
+///
+/// Side labels use a reserved margin and short strings. Real MFD OSB text sits
+/// in the bezel outside glass; on a single square framebuffer we reserve a
+/// border so labels stay visible.
 #[allow(clippy::too_many_arguments)]
 pub fn osb_chrome(
     s: &mut Surface,
@@ -198,64 +201,70 @@ pub fn osb_chrome(
     color: Color,
     active: Option<u8>,
 ) {
-    let m = font_px as i32 + 4;
-    let tw = bounds.w / 5;
-    let th = bounds.h / 5;
+    let fp = font_px.clamp(8.0, 14.0);
+    // Margin for OSB legend strip inside the square face.
+    let margin = (fp * 2.2).ceil() as i32 + 6;
+    let margin = margin.min(bounds.w / 6).min(bounds.h / 6).max(18);
+
+    let top_y = bounds.y + margin / 2;
+    let bot_y = bounds.bottom() - margin / 2;
+    let left_x = bounds.x + margin / 2;
+    let right_x = bounds.right() - margin / 2;
+
+    let slot_w = (bounds.w - 2 * margin).max(10) / 5;
+    let slot_h = (bounds.h - 2 * margin).max(10) / 5;
+    let inner_x0 = bounds.x + margin;
+    let inner_y0 = bounds.y + margin;
+
     for i in 0..5usize {
         let ii = i as i32;
+        // Top OSB 1-5
         let col = if active == Some((i + 1) as u8) {
             WHITE
         } else {
             color
         };
-        draw_text_centered(
-            s,
-            (bounds.x + tw * ii + tw / 2) as f32,
-            (bounds.y + m / 2) as f32,
-            top[i],
-            col,
-            font_px,
-        );
-        let col = if active == Some((i + 6) as u8) {
-            WHITE
-        } else {
-            color
-        };
-        draw_text_centered(
-            s,
-            (bounds.right() - m / 2) as f32,
-            (bounds.y + th * ii + th / 2) as f32,
-            right[i],
-            col,
-            font_px * 0.85,
-        );
+        let cx = (inner_x0 + slot_w * ii + slot_w / 2) as f32;
+        draw_text_centered(s, cx, top_y as f32, top[i], col, fp);
+
+        // Bottom OSB 15..11 (left-to-right visual bottom[i])
         let col = if active == Some((15 - i) as u8) {
             WHITE
         } else {
             color
         };
-        draw_text_centered(
-            s,
-            (bounds.x + tw * ii + tw / 2) as f32,
-            (bounds.bottom() - m / 2) as f32,
-            bottom[i],
-            col,
-            font_px,
-        );
+        draw_text_centered(s, cx, bot_y as f32, bottom[i], col, fp);
+
+        // Right OSB 6-10
+        let col = if active == Some((i + 6) as u8) {
+            WHITE
+        } else {
+            color
+        };
+        let cy = (inner_y0 + slot_h * ii + slot_h / 2) as f32;
+        // Clip long labels: measure and nudge left if needed
+        let lab = right[i];
+        let tw = text_width(lab, fp * 0.8);
+        let rx = (right_x as f32).min(bounds.right() as f32 - tw * 0.5 - 2.0);
+        draw_text_centered(s, rx, cy, lab, col, fp * 0.8);
+
+        // Left OSB 20-16
         let col = if active == Some((20 - i) as u8) {
             WHITE
         } else {
             color
         };
-        draw_text_centered(
-            s,
-            (bounds.x + m / 2) as f32,
-            (bounds.y + th * ii + th / 2) as f32,
-            left[i],
-            col,
-            font_px * 0.85,
-        );
+        let lab = left[i];
+        let tw = text_width(lab, fp * 0.8);
+        let lx = (left_x as f32).max(bounds.x as f32 + tw * 0.5 + 2.0);
+        draw_text_centered(s, lx, cy, lab, col, fp * 0.8);
     }
-    let _ = GREEN;
-    let _ = GREEN_DIM;
+}
+
+/// Inner content rect after OSB margin (use with [`osb_chrome`]).
+pub fn content_after_osb(bounds: Rect, font_px: f32) -> Rect {
+    let fp = font_px.clamp(8.0, 14.0);
+    let margin = (fp * 2.2).ceil() as i32 + 6;
+    let margin = margin.min(bounds.w / 6).min(bounds.h / 6).max(18);
+    bounds.inset(margin + 4)
 }

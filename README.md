@@ -1,133 +1,125 @@
 # MFD — multi-function display library
 
 <!-- agents:status:begin -->
-> **Status:** active · Version: `0.1.0-dev.1` · Phase 0 rename from VGE · [#33](https://github.com/theesfeld/vge/issues/33) · MIT  
-> **Product:** composable aviation MFD pages + automotive reuse · **Font:** B612 Mono · **Glass:** black + fighter ink
+> **Status:** active · `0.1.0-dev.1` · square ~4×4 in face · baked B612 · OSB bezel API · [#43](https://github.com/theesfeld/mfd/issues/43) · MIT
 <!-- agents:status:end -->
 
 ## What this is
 
-**MFD** is a library for building **instrument pages** in a terminal (or later FB):
+Composable **instrument pages** for:
 
-- **Widgets:** softkeys (OSB), tape gauges, round gauges, labels, bezel  
-- **Pages:** many widgets per page  
-- **Jet calls:** F-16-class pages (`SMS`, `HSD`, `TGP`, `FCR`, `ENG`, `FUEL`, …)  
-- **Auto calls:** cluster / temps / OBD-shaped PIDs reusing the same widgets  
-- **Text:** baked **B612 Mono** bitmap atlas (sizes 12 / 16 / 20; EPL — see `NOTICE`)  
-- **Draw core:** pure x86_64 assembly **libmfd** (`mfd_line`, `mfd_circle`, …)
+- F-16-class **jet MFD formats** (SMS, HSD, TGP, FCR, ENG, FUEL, …)
+- **Automotive** cluster / OBD pages reusing the same widgets
+- A **plug-in bezel** (20 OSB + knobs) so keyboard POC and real GPIO share one path
 
-This is **not** a transparent toy overlay. Pages clear **black glass** and draw high-contrast symbology.
+**Face geometry:** real F-16 MLU color MFDs are about **4×4 inches (10×10 cm)** square. This library defaults to a **square** framebuffer (512×512), not a full-wide terminal fill.
 
-## Build
+**Text:** baked **B612 Mono** atlas (no runtime TTF).  
+**Draw core:** pure asm **libmfd** (`mfd_plot` / `mfd_line` / …).
+
+## Docs (start here)
+
+| Doc | Contents |
+|-----|----------|
+| **[docs/API.md](docs/API.md)** | Full API/ABI white paper |
+| **[docs/widgets.md](docs/widgets.md)** | Widget list + ASCII diagrams |
+| **[docs/reference/f16-mfd-catalog.md](docs/reference/f16-mfd-catalog.md)** | Formats, OSB map, public manual sources |
+| **[docs/reference/mfd-photo-index.md](docs/reference/mfd-photo-index.md)** | Public photo search index |
+
+## Build and demo
 
 ```bash
-make                 # build/libmfd.a + .so
-cargo build --release
+cd ~/Projects/mfd
+make
 cargo run --release --bin mfd-demo
+# Ghostty/Kitty:
+MFD_TERM=kitty cargo run --release --bin mfd-demo
 ```
 
-Prefer Kitty/Ghostty: `MFD_TERM=kitty cargo run --release --bin mfd-demo`
+Default demo: **ENG** page (round gauges + tapes), **30 Hz**, square face.  
+`[` `]` change **real brightness** (scales RGB after draw).
 
-### Demo keys (bezel / OSB model)
+### Bezel keys (events, not hard-wired pages)
 
-Single keypress (raw stdin). Keys emit **bezel events** — same path real OSB GPIO will use.
-
-| Key | Bezel |
+| Key | Event |
 |-----|--------|
-| `1`–`5` | Top OSB 1–5 (format / auto page) |
-| `6`–`9`, `0` | Right OSB 6–10 |
+| `1`–`5` | Top OSB 1–5 |
+| `6`–`9` `0` | Right OSB 6–10 |
 | `q w e r t` | Bottom OSB 15–11 |
 | `a s d f g` | Left OSB 16–20 |
-| `[ ]` `; '` `- =` `, .` | BRT / CON / SYM / GAIN knobs |
-| `Tab` | Jet ↔ Auto domain |
-| `/` | Jet format bank (primary/secondary/tertiary) |
-| `c` | Color mode: green mono → color MFD → high-vis |
+| `[ ]` | Brightness −/+ (**does dim/brighten**) |
+| `; '` | Contrast −/+ |
+| `- =` | Symbology −/+ |
+| `, .` | Gain −/+ |
+| `Tab` | Jet ↔ Auto |
+| `/` | Jet format bank |
+| `c` | Color mode |
 | `Esc` | Quit |
 
-Catalog: [`docs/reference/f16-mfd-catalog.md`](docs/reference/f16-mfd-catalog.md)
-
-## Library model
+## Quick model
 
 ```text
-Page (black glass)
-  ├─ softkey_row / bezel
-  ├─ round_gauge / tape_gauge / label  (any mix)
-  └─ jet::* or auto::* page call
+BezelSource ──BezelEvent──► BezelState
+                              │
+                         app loop routes OSB
+                              │
+              ┌───────────────┴───────────────┐
+              ▼                               ▼
+        jet::draw_format               auto::draw_auto
+              │                               │
+              └──────── widgets + font ───────┘
+                              │
+                         Surface (square)
+                              │
+                    apply_brightness(BRT)
+                              │
+                    term present (PresentScratch)
 ```
 
 ```rust
-use mfd::page::Page;
-use mfd::jet;
-use mfd::Surface;
+use mfd::{
+    auto, bezel, jet, page::Page, palette::{ColorMode, Palette}, Surface,
+};
 
-let mut s = Surface::new(960, 540);
+let mut s = Surface::new(512, 512);
 let mut page = Page::new(&mut s);
-jet::hsd(&mut page, 180.0, 40.0);
+let pal = Palette::new(ColorMode::ColorMfd);
+let st = bezel::BezelState::default();
+jet::draw_format(&mut page, jet::Format::Eng, &pal, &st, 0.0);
+s.apply_brightness(st.brightness);
 ```
 
-### Widgets
+## Widget list (summary)
 
-| Call | Role |
+Full diagrams: **[docs/widgets.md](docs/widgets.md)**
+
+`bezel_frame` · `osb_chrome` · `content_after_osb` · `softkey_row` · **`tape_gauge`** · **`round_gauge`** · `label` · `range_rings` · `bearing_pointer` · `track_gate` · `crosshair` · `bscope_grid` · `list_menu` · `station_grid` · `numeric_readout` · `caution_box` · `horizon_cue` · `progress_strip` · `video_frame`
+
+**See tapes/needles:** open demo (starts on **ENG**) or press bottom OSB for **FUEL** / top bank for other formats.
+
+## Jet formats
+
+`BLANK SMS HSD TGP FCR FCR-GM FCR-SEA WPN HAD FLIR DTE TEST ENG FUEL CNI RESET ECM TFR HUD UFC PFL STORES`
+
+## Auto formats
+
+`CLUSTER POWER TEMPS OBD SETUP` + `ObdSnapshot` (normalize OBD PIDs at the edge).
+
+## Color modes
+
+| Mode | Role |
 |------|------|
-| `softkey_row` | Bezel button legends (OSB) |
-| `tape_gauge` | Vertical/horizontal tape |
-| `round_gauge` | Arc + needle (tach / eng) |
-| `label` / `label_centered` | B612 text |
-| `bezel_frame` | Outer frame |
+| `GreenMono` | Classic green |
+| `ColorMfd` | Color LCD palette |
+| `HighVis` | Yellow-dominant |
 
-### Jet pages (`mfd::jet`)
+## Performance notes
 
-`blank` · `sms` · `hsd` · `tgp` · `fcr` · `eng` · `fuel` · `dte` · `test`
-
-### Auto pages (`mfd::auto`)
-
-`cluster` · `power` · `temps` · `obd_status` · `ObdSnapshot` · `rpm_norm`
-
-## Colors (fighter glass)
-
-| Token | Role |
-|-------|------|
-| `GREEN` | Primary / normal |
-| `GREEN_DIM` | Structure |
-| `CYAN` | Nav / geometry |
-| `AMBER` / `YELLOW` | Caution |
-| `RED` | Warning / redline |
-| `WHITE` | Readout |
-| `MAGENTA` | Special cue |
-| `BLACK` | Glass |
-
-## Research index
-
-Public MFD photo **search list** and page-type catalog:  
-[`docs/reference/mfd-photo-index.md`](docs/reference/mfd-photo-index.md)
-
-We do **not** vendor 50 copyrighted image binaries. We do keep a **type catalog** and public URLs for study.
-
-## Env
-
-| Env | Effect |
-|-----|--------|
-| `MFD_TERM=kitty\|half\|ascii` | Present backend |
-| `MFD_MAX_W` / `MFD_MAX_H` | Pixel cap (default 1280×720) |
-| `MFD_HZ` | Demo phase lock (default 60) |
-
-## Text / font atlas
-
-Runtime text uses a **compiled coverage atlas** (`src/font_atlas_data.rs`), not TTF.
-
-| API | Role |
-|-----|------|
-| `FontSize::Sm` / `Md` / `Lg` | Baked faces (~12 / 16 / 20 px) |
-| `draw_text_size` / `draw_text` | Draw from atlas |
-| `text_width_size` / `text_height_size` | Layout |
-
-Re-bake from source TTF (host only):
-
-```bash
-cargo run --release --bin bake-font-atlas --features bake_font
-```
+- Long crawls were from **huge full-TTY Kitty payloads every frame** + allocs.  
+- Demo now: **square ≤512**, **30 Hz**, **PresentScratch** reuse.  
+- Raise size: `MFD_MAX_W=640 MFD_MAX_H=640` · rate: `MFD_HZ=60` if the terminal keeps up.
 
 ## License
 
-- Library code: **MIT**  
-- B612 source TTF + atlas derived from it: **EPL-2.0** (PolarSys / Airbus) — see `NOTICE` and `assets/fonts/`
+- Code: **MIT**  
+- B612 + atlas: **EPL-2.0** — `NOTICE`, `assets/fonts/`

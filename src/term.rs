@@ -157,16 +157,15 @@ pub fn terminal_cells() -> (u16, u16) {
 }
 
 fn max_pixels() -> (u32, u32) {
-    // Higher defaults so instrument faces stay sharp (Kitty path).
-    // Lower with MFD_MAX_W / MFD_MAX_H if present stutters.
+    // Square MFD default 512 (keep present light). Override with MFD_MAX_*.
     let mw = std::env::var("MFD_MAX_W")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(1280u32);
+        .unwrap_or(512u32);
     let mh = std::env::var("MFD_MAX_H")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(720u32);
+        .unwrap_or(512u32);
     (mw.max(64), mh.max(64))
 }
 
@@ -176,8 +175,8 @@ pub fn surface_size_for_viewport(backend: TermBackend, vp: Viewport) -> (u32, u3
     let cols = vp.cols.max(1) as u32;
     let rows = vp.rows.max(1) as u32;
     let (w, h) = match backend {
-        // Dense enough for MFD-class hairlines; still capped by MFD_MAX_*.
-        TermBackend::Kitty => (cols * 8, rows * 16),
+        // Keep density modest — large Kitty payloads queue and crawl after minutes.
+        TermBackend::Kitty => (cols * 6, rows * 12),
         TermBackend::HalfBlock => (cols, rows * 2),
         TermBackend::Ascii => (cols, rows),
     };
@@ -187,6 +186,54 @@ pub fn surface_size_for_viewport(backend: TermBackend, vp: Viewport) -> (u32, u3
 /// Recommended full-terminal surface (capped).
 pub fn suggested_surface_size(backend: TermBackend) -> (u32, u32) {
     surface_size_for_viewport(backend, Viewport::full_terminal())
+}
+
+/// Square cell viewport (F-16 class face is square — MLU color MFD ≈ **4×4 in / 10×10 cm**).
+///
+/// Centered in the terminal. `frac` of the smaller terminal dimension (0.5–1.0).
+pub fn square_mfd_viewport(frac: f32) -> Viewport {
+    let (tc, tr) = terminal_cells();
+    let f = frac.clamp(0.4, 1.0);
+    // Cell aspect is ~0.5 width:height of a cell; for a *visual* square use more cols.
+    // Approx: square pixels when cols ≈ rows * 2 for half-block; for Kitty we map
+    // surface to cell box so use equal cell-side using min dimension in "cell units".
+    let side = ((tc.min(tr) as f32) * f) as u16;
+    let side = side.max(12);
+    // Prefer slightly wider cell box so letterboxing matches square image.
+    let cols = side.min(tc).max(10);
+    let rows = side.min(tr).max(8);
+    // Use min of square-ish cell count
+    let edge = cols.min(rows);
+    let cols = edge;
+    let rows = edge;
+    let col = tc.saturating_sub(cols) / 2;
+    let row = tr.saturating_sub(rows) / 2;
+    Viewport {
+        col,
+        row,
+        cols,
+        rows,
+    }
+}
+
+/// Square pixel size for an MFD face (default 512, square, capped).
+pub fn square_mfd_pixels(backend: TermBackend) -> (u32, u32) {
+    let (mw, mh) = max_pixels();
+    let side = mw.min(mh).min(640);
+    let side = match backend {
+        TermBackend::Ascii => side.min(120),
+        TermBackend::HalfBlock => side.min(400),
+        TermBackend::Kitty => side,
+    };
+    (side.max(128), side.max(128))
+}
+
+/// Reusable present buffers (avoids multi-MB alloc/frame → terminal crawl).
+#[derive(Default)]
+pub struct PresentScratch {
+    pub rgba: Vec<u8>,
+    pub b64: String,
+    pub out: Vec<u8>,
 }
 
 /// Hide cursor only (keep normal screen — overlay mode).
@@ -354,57 +401,78 @@ pub fn present_at_state(
     vp: Viewport,
     state: Option<&mut OverlayState>,
 ) -> io::Result<()> {
+    present_at_state_scratch(surface, backend, vp, state, None)
+}
+
+/// Present with optional reusable scratch (required for long-running demos).
+pub fn present_at_state_scratch(
+    surface: &Surface,
+    backend: TermBackend,
+    vp: Viewport,
+    state: Option<&mut OverlayState>,
+    scratch: Option<&mut PresentScratch>,
+) -> io::Result<()> {
     match backend {
-        TermBackend::Kitty => present_kitty_at(surface, vp),
+        TermBackend::Kitty => present_kitty_at(surface, vp, scratch),
         TermBackend::HalfBlock => present_halfblock_at(surface, vp, state),
         TermBackend::Ascii => present_ascii_at(surface, vp, state),
     }
 }
 
-fn present_kitty_at(surface: &Surface, vp: Viewport) -> io::Result<()> {
+fn present_kitty_at(
+    surface: &Surface,
+    vp: Viewport,
+    scratch: Option<&mut PresentScratch>,
+) -> io::Result<()> {
     let cols = vp.cols.max(1);
     let rows = vp.rows.max(1);
     let w = surface.width();
     let h = surface.height();
-    // RGBA so alpha=0 pixels leave the terminal background visible.
-    let rgba = surface.export_rgba32();
     let id = KITTY_ID.load(Ordering::Relaxed);
 
-    // Build one buffer: cursor → graphics payload.
-    let mut out = Vec::with_capacity(rgba.len() * 2 + 128);
-    // CUP is 1-based
-    push_cup(&mut out, vp.row + 1, vp.col + 1);
+    let mut local = PresentScratch::default();
+    let sc = scratch.unwrap_or(&mut local);
+    surface.export_rgba32_into(&mut sc.rgba);
 
-    // f=32 = RGBA; transparent pixels composite over terminal text.
+    // Encode base64 into reusable string.
+    sc.b64.clear();
+    // estimate 4/3
+    sc.b64.reserve(sc.rgba.len() * 4 / 3 + 8);
+    sc.b64.push_str(&b64_encode(&sc.rgba));
+
+    sc.out.clear();
+    sc.out.reserve(sc.b64.len() + 256);
+    push_cup(&mut sc.out, vp.row + 1, vp.col + 1);
+
+    // f=32 RGBA; q=2 quiet. Reuse image id so terminal replaces (less queue growth).
     let header = format!("a=T,f=32,t=d,s={w},v={h},c={cols},r={rows},i={id},q=2");
-    let b64 = b64_encode(&rgba);
     let chunk = 4096usize;
-    let bytes = b64.as_bytes();
+    let bytes = sc.b64.as_bytes();
     let mut offset = 0;
     let mut first = true;
     while offset < bytes.len() {
         let end = (offset + chunk).min(bytes.len());
         let more = if end < bytes.len() { 1 } else { 0 };
         if first {
-            out.extend_from_slice(b"\x1b_G");
-            out.extend_from_slice(header.as_bytes());
-            out.extend_from_slice(b",m=");
-            out.push(if more == 1 { b'1' } else { b'0' });
-            out.push(b';');
-            out.extend_from_slice(&bytes[offset..end]);
-            out.extend_from_slice(b"\x1b\\");
+            sc.out.extend_from_slice(b"\x1b_G");
+            sc.out.extend_from_slice(header.as_bytes());
+            sc.out.extend_from_slice(b",m=");
+            sc.out.push(if more == 1 { b'1' } else { b'0' });
+            sc.out.push(b';');
+            sc.out.extend_from_slice(&bytes[offset..end]);
+            sc.out.extend_from_slice(b"\x1b\\");
             first = false;
         } else {
-            out.extend_from_slice(b"\x1b_Gm=");
-            out.push(if more == 1 { b'1' } else { b'0' });
-            out.push(b';');
-            out.extend_from_slice(&bytes[offset..end]);
-            out.extend_from_slice(b"\x1b\\");
+            sc.out.extend_from_slice(b"\x1b_Gm=");
+            sc.out.push(if more == 1 { b'1' } else { b'0' });
+            sc.out.push(b';');
+            sc.out.extend_from_slice(&bytes[offset..end]);
+            sc.out.extend_from_slice(b"\x1b\\");
         }
         offset = end;
     }
     let mut stdout = io::stdout().lock();
-    stdout.write_all(&out)?;
+    stdout.write_all(&sc.out)?;
     stdout.flush()
 }
 

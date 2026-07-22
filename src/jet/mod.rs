@@ -8,9 +8,9 @@ use crate::geom::Rect;
 use crate::page::Page;
 use crate::palette::Palette;
 use crate::widget::{
-    bearing_pointer, bscope_grid, caution_box, crosshair, horizon_cue, list_menu, numeric_readout,
-    osb_chrome, progress_strip, range_rings, round_gauge, station_grid, tape_gauge, track_gate,
-    video_frame, RoundGaugeOpts, TapeOpts, TapeOrientation,
+    bearing_pointer, bscope_grid, caution_box, content_after_osb, crosshair, horizon_cue,
+    list_menu, numeric_readout, osb_chrome, progress_strip, range_rings, round_gauge, station_grid,
+    tape_gauge, track_gate, video_frame, RoundGaugeOpts, TapeOpts, TapeOrientation,
 };
 
 /// Logical format id for OSB routing.
@@ -131,10 +131,11 @@ impl Format {
 
 fn chrome(page: &mut Page, pal: &Palette, title: &str, bezel: &BezelState) {
     let b = page.bounds.inset(2);
+    // Short side labels so they fit the OSB margin strip.
     let top = ["SMS", "HSD", "TGP", "FCR", "WPN"];
     let right = ["DCLT", "SWAP", "CNTL", "MODE", "GAIN"];
     let bottom = ["DTE", "TEST", "ENG", "FUEL", "CNI"];
-    let left = ["HAD", "FLIR", "ECM", "HUD", "BLANK"];
+    let left = ["HAD", "FLIR", "ECM", "HUD", "BLNK"];
     osb_chrome(
         page.surface,
         b,
@@ -142,37 +143,43 @@ fn chrome(page: &mut Page, pal: &Palette, title: &str, bezel: &BezelState) {
         &right,
         &bottom,
         &left,
-        page.font_px * 0.75,
+        page.font_px * 0.7,
         pal.dim,
         bezel.last_osb,
     );
+    let c = content_after_osb(b, page.font_px * 0.7);
     page.label_centered(
-        b.center().0 as f32,
-        b.y as f32 + page.font_px * 1.6,
+        c.center().0 as f32,
+        c.y as f32 + page.font_px * 0.6,
         title,
         pal.primary,
     );
-    // Corner knob readouts (BRT/CON) — POC for real knobs later.
     page.label_at(
-        b.x as f32 + 4.0,
-        b.bottom() as f32 - page.font_px * 2.2,
-        &format!("BRT {:.0}", bezel.brightness * 100.0),
+        c.x as f32 + 2.0,
+        c.bottom() as f32 - page.font_px * 0.9,
+        &format!("BRT{:.0}", bezel.brightness * 100.0),
         pal.dim,
-        page.font_px * 0.7,
+        page.font_px * 0.65,
     );
     page.label_at(
-        b.right() as f32 - page.font_px * 6.0,
-        b.bottom() as f32 - page.font_px * 2.2,
-        &format!("CON {:.0}", bezel.contrast * 100.0),
+        c.right() as f32 - page.font_px * 4.5,
+        c.bottom() as f32 - page.font_px * 0.9,
+        &format!("CON{:.0}", bezel.contrast * 100.0),
         pal.dim,
-        page.font_px * 0.7,
+        page.font_px * 0.65,
     );
 }
 
 fn content(page: &Page) -> Rect {
-    let b = page.bounds.inset(4);
-    let m = (page.font_px * 1.8) as i32 + 8;
-    Rect::new(b.x + m, b.y + m, b.w - 2 * m, b.h - 2 * m - 10)
+    let b = page.bounds.inset(2);
+    let c = content_after_osb(b, page.font_px * 0.7);
+    // Leave room for title + BRT line.
+    Rect::new(
+        c.x,
+        c.y + (page.font_px as i32) + 8,
+        c.w,
+        (c.h - (page.font_px as i32) * 2 - 12).max(40),
+    )
 }
 
 pub fn draw_format(page: &mut Page, fmt: Format, pal: &Palette, bezel: &BezelState, t: f32) {

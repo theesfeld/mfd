@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Present crawl** after long runs: square face, 30 Hz default, reusable `PresentScratch`, lower density
+- **OSB labels** clipped: reserved margin + short side legends
+- **Brightness** knob applies `Surface::apply_brightness`
+
+### Changed
+
+- Demo face is **square** (~4×4 in class); starts on **ENG** (gauges/tapes visible)
+- API white paper `docs/API.md` · widget gallery `docs/widgets.md`
+
 ### Added
 
 - F-16 format catalog + public source notes (`docs/reference/f16-mfd-catalog.md`)
