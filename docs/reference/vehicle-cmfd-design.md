@@ -43,7 +43,7 @@
 ## OSB policy (frozen)
 
 ```
-        1   2   3   4   5     top — options for active format
+        1   2   3   4   5     top — options for **active format only**
    20                       6
    19                       7     left / right — options
    18      [  GLASS  ]      8
@@ -53,17 +53,20 @@
        OWN  A   B   C  DCLT
 ```
 
-| OSB | Legend | Function |
-|-----|--------|----------|
-| **15** | OWN | Ownship |
-| **14 / 13 / 12** | Format A/B/C | Active lit; other → switch; active → Master Menu |
-| **11** | DCLT | Density 0 → 1 → 2 |
-| **1–10** | Format options | Units, gear, lights, … (page-owned) |
-| **20 / 19 / 16** | BUS · SET · DTC | Support jumps (always labeled when formats exist) |
+| Side | OSB | POC keys | Role |
+|------|-----|----------|------|
+| **Top** | 1–5 | `1`–`5` | **Page options** (Lights: LO HI FOG DRL INT) |
+| **Right** | 6–10 | `6`–`9` `0` | **Page options** |
+| **Bottom** | 15–11 | `q` `w` `e` `r` `t` | OWN · fmtA · fmtB · fmtC · DCLT |
+| **Left** | 16–20 | `a` `s` `d` `f` `g` | DTC · · · SET · BUS |
 
-**Default slots after probe:** ENG · DRV · ATT (when all GO).
+**Hard rule:** top/right keys are **never** format jumps. Format change only via bottom slots 12–14, Master Menu (`m`), or n/p cycle.
 
-**Blank-not-repack:** missing formats omitted from Master Menu; never slide labels to fill gaps.
+**Example — LIGHTS:** `1`=LO · `2`=HI · `3`=FOG · `4`=DRL · `5`=INT. Not ENG/FUEL.
+
+**Default slots after probe:** ENG · DRV · ATT.
+
+**Blank-not-repack:** missing formats omitted from Master Menu; never slide labels.
 
 ## Widgets (discipline)
 

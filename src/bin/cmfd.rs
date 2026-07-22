@@ -199,87 +199,10 @@ fn main() -> io::Result<()> {
                 _ if !boot_done => {
                     bezel_src.push_key_state(k, &bezel);
                 }
-                // Format jumps — GO formats only (no hollow pages).
-                b'1' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Eng,
-                    &available_pages,
-                ),
-                b'2' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Fuel,
-                    &available_pages,
-                ),
-                b'3' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Fluid,
-                    &available_pages,
-                ),
-                b'4' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Elec,
-                    &available_pages,
-                ),
-                b'5' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Drive,
-                    &available_pages,
-                ),
-                b'6' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Chas,
-                    &available_pages,
-                ),
-                b'7' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Body,
-                    &available_pages,
-                ),
-                b'8' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Lights,
-                    &available_pages,
-                ),
-                b'9' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Clim,
-                    &available_pages,
-                ),
-                b'0' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Cam,
-                    &available_pages,
-                ),
-                b'r' | b'R' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Range,
-                    &available_pages,
-                ),
-                b'b' | b'B' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Bus,
-                    &available_pages,
-                ),
-                b'w' | b'W' | b'o' | b'O' => auto_page = AutoPage::Own,
-                b's' | b'S' | b'h' | b'H' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Setup,
-                    &available_pages,
-                ),
-                b'u' | b'U' => vehicle.speed_unit = vehicle.speed_unit.cycle(),
+                // Format change (not OSB option keys):
+                //   n/p  cycle · m Master Menu · Tab next format slot
+                // Dedicated OSB keys always go to bezel (see KeyboardBezel):
+                //   1-5 top options · 6-0 right · qwert bottom · asdfg left
                 b'n' | b'N' => {
                     let next = cycle_auto(auto_page, 1, &available_pages);
                     goto_format(&mut auto_page, &mut fmt_sel, next, &available_pages);
@@ -288,33 +211,16 @@ fn main() -> io::Result<()> {
                     let prev = cycle_auto(auto_page, -1, &available_pages);
                     goto_format(&mut auto_page, &mut fmt_sel, prev, &available_pages);
                 }
-                b'v' | b'V' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Attitude,
-                    &available_pages,
-                ),
-                b'x' | b'X' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Map,
-                    &available_pages,
-                ),
-                b'f' | b'F' => goto_format(
-                    &mut auto_page,
-                    &mut fmt_sel,
-                    AutoPage::Faults,
-                    &available_pages,
-                ),
-                b'm' | b'M' if boot_done => {
-                    let allow = if available_pages.is_empty() {
-                        AutoPage::ALL
-                    } else {
-                        available_pages.as_slice()
-                    };
-                    let _ = fmt_sel.handle_osb(fmt_sel.active.osb(), osb_tick, allow);
+                b'm' | b'M' => {
+                    let allow = available_pages.as_slice();
+                    if !allow.is_empty() {
+                        let _ = fmt_sel.handle_osb(fmt_sel.active.osb(), osb_tick, allow);
+                    }
                 }
-                // [ ] ; ' - = , .  → real bezel knobs (BRT CON SYM GAIN)
+                b'u' | b'U' => vehicle.speed_unit = vehicle.speed_unit.cycle(),
+                // All OSB / knob keys — never steal for format jumps.
+                // 1-5 = top options (Lights LO/HI/FOG…), 6-0 = right,
+                // qwert = bottom format slots + DCLT, asdfg = left BUS/SET/DTC.
                 _ => bezel_src.push_key_state(k, &bezel),
             }
             ki += 1;
@@ -635,19 +541,18 @@ fn print_banner(ver: &str) {
     eprintln!("  STARTUP");
     eprintln!("    CMFD power-on until capability probe finishes");
     eprintln!();
-    eprintln!("  FORMAT SELECT (MLU habit)");
-    eprintln!("    OSB 12/13/14  format slots (active lit; press active → Master Menu)");
-    eprintln!("    OSB 11 DCLT   declutter  ·  OSB 15 OWN");
-    eprintln!("    n/p / arrows  cycle format into active slot");
-    eprintln!("    Master Menu lists GO formats only (blank = no function)");
+    eprintln!("  DEDICATED OSB KEYS (page options stay on the page)");
+    eprintln!("    TOP    1 2 3 4 5     options for current format (e.g. Lights LO/HI/FOG)");
+    eprintln!("    RIGHT  6 7 8 9 0     options");
+    eprintln!("    BOTTOM q w e r t     OWN · fmtA · fmtB · fmtC · DCLT");
+    eprintln!("    LEFT   a s d f g     DTC · · · SET · BUS");
     eprintln!();
-    eprintln!("  KEYS  b BUS  f DTC  v ATT  x MAP  o OWN  s SET  r RNG  c color");
+    eprintln!("  FORMAT CHANGE");
+    eprintln!("    n/p or arrows  cycle ·  m  Master Menu ·  e/r (w/e) switch slots");
+    eprintln!("    Press active slot (lit) → Master Menu · GO formats only");
     eprintln!();
-    eprintln!("  LINK  OWN page = BT MAC · adapter · protocol");
-    eprintln!();
-    eprintln!("  WARN  BINGO / ALERT  ·  MFD_AUDIO=0 mute");
-    eprintln!("  BEZEL [ ] BRT  ·  MFD_OBD_BT=00:04:3E:96:B8:F1");
-    eprintln!("  Drive: ./cmfd.sh  ·  Esc quit");
+    eprintln!("  OTHER  u unit · c color · [ ] BRT · Esc quit");
+    eprintln!("  Drive: ./cmfd.sh  ·  MFD_OBD_BT=00:04:3E:96:B8:F1");
     eprintln!();
 }
 

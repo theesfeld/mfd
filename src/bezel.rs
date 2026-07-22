@@ -103,23 +103,20 @@ impl BezelSource for NullBezel {
     }
 }
 
-/// POC: map ASCII keys → OSB / knobs.
+/// POC: map ASCII keys → **dedicated OSB sides** (real bezel later).
 ///
-/// | Keys | OSB |
-/// |------|-----|
-/// | `1`–`5` | top 1–5 |
-/// | `6`–`0` | right 6–10 (`0` → 10) |
-/// | `!@#$%` (shift 1–5) or `u i o p [` | bottom 15–11 (see map) |
-/// | `y h n b v` | left 16–20 (approx) |
+/// | Side | Keys | OSB |
+/// |------|------|-----|
+/// | **Top options** | `1` `2` `3` `4` `5` | 1–5 |
+/// | **Right options** | `6` `7` `8` `9` `0` | 6–10 |
+/// | **Bottom** | `q` `w` `e` `r` `t` | 15–11 (OWN · slotA · slotB · slotC · DCLT) |
+/// | **Left** | `a` `s` `d` `f` `g` | 16–20 (DTC · · · SET · BUS bottom→top) |
 ///
-/// Simplified POC map (easy to type):
-/// - `1`..=`5` → OSB 1–5 (top)
-/// - `6`..=`9`, `0` → OSB 6–10 (right)
-/// - `q` `w` `e` `r` `t` → OSB 15–11 (bottom, left-to-right q=15 … t=11)
-/// - `a` `s` `d` `f` `g` → OSB 16–20 (left, bottom-to-top a=16 … g=20)
-/// - `[` `]` `;` `'` → knobs BRT CON SYM GAIN nudge
+/// Knobs: `[` `]` BRT · `;` `'` CON · `-` `=` SYM · `,` `.` GAIN
 ///
-/// Page formats often bind **top OSB** to format select — demo uses that.
+/// **Hard rule:** these keys are **never** format-select shortcuts.
+/// Format change is Master Menu / n·p / bottom slots 12–14 only.
+/// On LIGHTS, `1`=`LO` … `5`=`INT` — not ENG/FUEL jumps.
 #[derive(Default)]
 pub struct KeyboardBezel {
     pending: Vec<BezelEvent>,
