@@ -30,7 +30,8 @@ MFD_TERM=kitty cargo run --release --bin mfd-demo
 - `src/auto/` — automotive pages + `VehicleSnapshot`
 - `src/obd/` — native ELM/BT/J1979/UDS + Ford DID catalog (no obdtui; display-only)
 - `docs/reference/ford-f150-uds-readonly.md` — UDS/CAN read path for truck
-- Truck: **2019** F-150 · **APIM = Sync 3** · As-Built CSVs under `docs/reference/ford-f150-forscan/`
+- Truck: **2019 SuperCrew 4×4 · 2.7L EcoBoost · APIM Sync 3** · BT ELM `00:04:3E:96:B8:F1`
+- As-Built CSVs (2019/Sync3): `docs/reference/ford-f150-forscan/` · profile `docs/vehicle.md`
 - `docs/hardware.md` — physical MFD + sensor hierarchy
 - `docs/auto-sensors.md` — env and feeds
 - `docs/reference/mfd-photo-index.md` — public study index

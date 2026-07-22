@@ -4,6 +4,7 @@
 
 ### Added
 
+- **Vehicle profile:** 2019 SuperCrew 2.7 EB 4×4 · Sync 3; SETUP shows As-Built **feature labels** (read-only). `docs/vehicle.md`. Refs #84.
 - **FORScan As-Built export:** **2019-only**; **APIM = Sync 3** (drop non–Sync 3 APIM tabs) + `live_parameters.csv`. Expanded Ford DID catalog. Refs #79.
 - **Ford F-150 UDS (read-only):** DID catalog, Mode 0x22 poll/decode, doc `ford-f150-uds-readonly.md`, capture probe, UDS `0x19` allow. Refs #79.
 - **VIN / ownship:** `VehicleSnapshot.vin` from Mode 09; chrome `OS ……` + SETUP/OBD full VIN. Refs #77.
