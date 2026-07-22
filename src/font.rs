@@ -1,713 +1,109 @@
-//! Instrument text: **stroke** (drawn) and optional **bitmap** glyphs.
+//! **B612** cockpit font (Airbus / PolarSys) rasterized with fontdue.
 //!
-//! # Drawn text (default for MFD)
-//!
-//! Stroke glyphs are polylines in unit space, rendered with **Xiaolin Wu AA**
-//! (`line_aa`). Edges are smooth — not 5×7 stair-steps. This matches how
-//! many panel legends and HUD symbols are built: the character is a path.
-//!
-//! # Bitmap text
-//!
-//! Solid 5×7 pixels remain for tiny labels when scale must be 1 cell.
+//! Smooth anti-aliased glyphs on black glass — not 5×7 stair-steps.
+//! Font files: `assets/fonts/B612Mono-Regular.ttf` (EPL-2.0; see NOTICE).
 
 use crate::{Color, Surface};
+use fontdue::Font;
+use std::sync::OnceLock;
 
-// ---------------------------------------------------------------------------
-// Stroke font (drawn, AA)
-// ---------------------------------------------------------------------------
+static FONT_MONO: OnceLock<Font> = OnceLock::new();
 
-/// Nominal advance width in unit glyph space (height = 1.0).
-const STROKE_ADVANCE: f32 = 0.72;
-/// Extra gap between characters as a fraction of height.
-const STROKE_GAP: f32 = 0.18;
+fn mono() -> &'static Font {
+    FONT_MONO.get_or_init(|| {
+        let bytes = include_bytes!("../assets/fonts/B612Mono-Regular.ttf");
+        Font::from_bytes(bytes.as_slice(), fontdue::FontSettings::default())
+            .expect("B612 Mono must load")
+    })
+}
 
-/// Pixel width of stroke text for character height `px_h`.
-pub fn stroke_text_width(text: &str, px_h: f32) -> f32 {
-    let h = px_h.max(4.0);
-    let n = text.chars().count() as f32;
-    if n <= 0.0 {
-        return 0.0;
+/// Measure text width in pixels at `px` size.
+pub fn text_width(text: &str, px: f32) -> f32 {
+    let font = mono();
+    let mut w = 0.0f32;
+    for ch in text.chars() {
+        let m = font.metrics(ch, px);
+        w += m.advance_width;
     }
-    n * STROKE_ADVANCE * h + (n - 1.0) * STROKE_GAP * h
+    w
 }
 
-/// Pixel height of a stroke line (same as `px_h`).
-pub fn stroke_text_height(px_h: f32) -> f32 {
-    px_h.max(4.0)
+pub fn text_height(px: f32) -> f32 {
+    px * 1.15
 }
 
-/// Draw text as AA stroke paths. `px_h` is capital height in pixels.
-///
-/// Origin `(x, y)` is the **top-left** of the first glyph cell.
-pub fn draw_text_stroke(
+/// Draw B612 text with coverage AA into the surface.
+/// `(x, y)` is baseline-ish top-left of the line box (top of em).
+pub fn draw_text(surface: &mut Surface, x: f32, y: f32, text: &str, color: Color, px: f32) {
+    let font = mono();
+    let size = px.max(8.0);
+    let mut pen_x = x;
+    let baseline = y + size * 0.85;
+
+    for ch in text.chars() {
+        if ch == ' ' {
+            let m = font.metrics(' ', size);
+            pen_x += m.advance_width;
+            continue;
+        }
+        let (metrics, bitmap) = font.rasterize(ch, size);
+        blit_glyph(
+            surface,
+            pen_x + metrics.xmin as f32,
+            baseline - metrics.height as f32 - metrics.ymin as f32,
+            metrics.width,
+            metrics.height,
+            &bitmap,
+            color,
+        );
+        pen_x += metrics.advance_width;
+    }
+}
+
+pub fn draw_text_centered(surface: &mut Surface, cx: f32, cy: f32, text: &str, color: Color, px: f32) {
+    let w = text_width(text, px);
+    let h = text_height(px);
+    draw_text(surface, cx - w * 0.5, cy - h * 0.5, text, color, px);
+}
+
+fn blit_glyph(
     surface: &mut Surface,
     x: f32,
     y: f32,
-    text: &str,
+    w: usize,
+    h: usize,
+    coverage: &[u8],
     color: Color,
-    px_h: f32,
 ) {
-    let h = px_h.max(4.0);
-    let mut cx = x;
-    for ch in text.chars() {
-        if ch == ' ' {
-            cx += (STROKE_ADVANCE + STROKE_GAP) * h;
-            continue;
-        }
-        if let Some(strokes) = stroke_glyph(ch) {
-            for poly in strokes {
-                draw_poly_unit(surface, cx, y, h, poly, color);
+    let base_a = (color >> 24) & 0xFF;
+    let r = (color >> 16) & 0xFF;
+    let g = (color >> 8) & 0xFF;
+    let b = color & 0xFF;
+    for row in 0..h {
+        for col in 0..w {
+            let cov = coverage[row * w + col] as u32;
+            if cov < 8 {
+                continue;
             }
-        }
-        cx += (STROKE_ADVANCE + STROKE_GAP) * h;
-    }
-}
-
-/// Center stroke text on `(cx, cy)`.
-pub fn draw_text_stroke_centered(
-    surface: &mut Surface,
-    cx: f32,
-    cy: f32,
-    text: &str,
-    color: Color,
-    px_h: f32,
-) {
-    let h = px_h.max(4.0);
-    let w = stroke_text_width(text, h);
-    draw_text_stroke(surface, cx - w * 0.5, cy - h * 0.5, text, color, h);
-}
-
-fn draw_poly_unit(
-    surface: &mut Surface,
-    ox: f32,
-    oy: f32,
-    h: f32,
-    poly: &[(f32, f32)],
-    color: Color,
-) {
-    if poly.len() < 2 {
-        return;
-    }
-    // Unit glyph: x in 0..STROKE_ADVANCE, y in 0..1 (top → bottom).
-    let mut prev = (
-        (ox + poly[0].0 * h).round() as i32,
-        (oy + poly[0].1 * h).round() as i32,
-    );
-    for p in &poly[1..] {
-        let cur = ((ox + p.0 * h).round() as i32, (oy + p.1 * h).round() as i32);
-        if cur != prev {
-            surface.line_aa(prev.0, prev.1, cur.0, cur.1, color);
-        }
-        prev = cur;
-    }
-}
-
-/// Unit-space polylines. y=0 top, y=1 bottom, x≈0..0.62.
-fn stroke_glyph(ch: char) -> Option<&'static [&'static [(f32, f32)]]> {
-    let c = if ch.is_ascii_lowercase() {
-        ch.to_ascii_uppercase()
-    } else {
-        ch
-    };
-    Some(match c {
-        // Digits
-        '0' => &[&[
-            (0.08, 0.12),
-            (0.08, 0.88),
-            (0.54, 0.88),
-            (0.54, 0.12),
-            (0.08, 0.12),
-        ]],
-        '1' => &[
-            &[(0.18, 0.28), (0.31, 0.12), (0.31, 0.88)],
-            &[(0.12, 0.88), (0.50, 0.88)],
-        ],
-        '2' => &[&[
-            (0.08, 0.22),
-            (0.08, 0.12),
-            (0.54, 0.12),
-            (0.54, 0.40),
-            (0.08, 0.70),
-            (0.08, 0.88),
-            (0.54, 0.88),
-        ]],
-        '3' => &[
-            &[(0.08, 0.12), (0.54, 0.12), (0.54, 0.50), (0.20, 0.50)],
-            &[(0.54, 0.50), (0.54, 0.88), (0.08, 0.88)],
-        ],
-        '4' => &[
-            &[(0.08, 0.12), (0.08, 0.52), (0.54, 0.52)],
-            &[(0.42, 0.12), (0.42, 0.88)],
-        ],
-        '5' => &[&[
-            (0.54, 0.12),
-            (0.08, 0.12),
-            (0.08, 0.48),
-            (0.48, 0.48),
-            (0.54, 0.55),
-            (0.54, 0.82),
-            (0.48, 0.88),
-            (0.08, 0.88),
-        ]],
-        '6' => &[&[
-            (0.50, 0.12),
-            (0.12, 0.12),
-            (0.08, 0.20),
-            (0.08, 0.80),
-            (0.12, 0.88),
-            (0.50, 0.88),
-            (0.54, 0.80),
-            (0.54, 0.52),
-            (0.08, 0.52),
-        ]],
-        '7' => &[&[(0.08, 0.12), (0.54, 0.12), (0.22, 0.88)]],
-        '8' => &[
-            &[
-                (0.12, 0.12),
-                (0.50, 0.12),
-                (0.54, 0.20),
-                (0.54, 0.42),
-                (0.50, 0.50),
-                (0.12, 0.50),
-                (0.08, 0.42),
-                (0.08, 0.20),
-                (0.12, 0.12),
-            ],
-            &[
-                (0.12, 0.50),
-                (0.50, 0.50),
-                (0.54, 0.58),
-                (0.54, 0.80),
-                (0.50, 0.88),
-                (0.12, 0.88),
-                (0.08, 0.80),
-                (0.08, 0.58),
-                (0.12, 0.50),
-            ],
-        ],
-        '9' => &[&[
-            (0.54, 0.48),
-            (0.12, 0.48),
-            (0.08, 0.40),
-            (0.08, 0.20),
-            (0.12, 0.12),
-            (0.50, 0.12),
-            (0.54, 0.20),
-            (0.54, 0.80),
-            (0.50, 0.88),
-            (0.12, 0.88),
-        ]],
-        // Letters
-        'A' => &[
-            &[(0.08, 0.88), (0.31, 0.12), (0.54, 0.88)],
-            &[(0.18, 0.58), (0.44, 0.58)],
-        ],
-        'B' => &[
-            &[(0.08, 0.12), (0.08, 0.88)],
-            &[
-                (0.08, 0.12),
-                (0.42, 0.12),
-                (0.50, 0.18),
-                (0.50, 0.40),
-                (0.42, 0.48),
-                (0.08, 0.48),
-            ],
-            &[
-                (0.08, 0.48),
-                (0.44, 0.48),
-                (0.54, 0.56),
-                (0.54, 0.80),
-                (0.44, 0.88),
-                (0.08, 0.88),
-            ],
-        ],
-        'C' => &[&[
-            (0.54, 0.22),
-            (0.46, 0.12),
-            (0.16, 0.12),
-            (0.08, 0.22),
-            (0.08, 0.78),
-            (0.16, 0.88),
-            (0.46, 0.88),
-            (0.54, 0.78),
-        ]],
-        'D' => &[
-            &[(0.08, 0.12), (0.08, 0.88)],
-            &[
-                (0.08, 0.12),
-                (0.38, 0.12),
-                (0.54, 0.28),
-                (0.54, 0.72),
-                (0.38, 0.88),
-                (0.08, 0.88),
-            ],
-        ],
-        'E' => &[
-            &[(0.54, 0.12), (0.08, 0.12), (0.08, 0.88), (0.54, 0.88)],
-            &[(0.08, 0.50), (0.42, 0.50)],
-        ],
-        'F' => &[
-            &[(0.08, 0.88), (0.08, 0.12), (0.54, 0.12)],
-            &[(0.08, 0.50), (0.42, 0.50)],
-        ],
-        'G' => &[&[
-            (0.54, 0.22),
-            (0.46, 0.12),
-            (0.16, 0.12),
-            (0.08, 0.22),
-            (0.08, 0.78),
-            (0.16, 0.88),
-            (0.46, 0.88),
-            (0.54, 0.78),
-            (0.54, 0.50),
-            (0.34, 0.50),
-        ]],
-        'H' => &[
-            &[(0.08, 0.12), (0.08, 0.88)],
-            &[(0.54, 0.12), (0.54, 0.88)],
-            &[(0.08, 0.50), (0.54, 0.50)],
-        ],
-        'I' => &[
-            &[(0.16, 0.12), (0.46, 0.12)],
-            &[(0.31, 0.12), (0.31, 0.88)],
-            &[(0.16, 0.88), (0.46, 0.88)],
-        ],
-        'J' => &[&[
-            (0.20, 0.12),
-            (0.54, 0.12),
-            (0.54, 0.72),
-            (0.46, 0.88),
-            (0.16, 0.88),
-            (0.08, 0.78),
-        ]],
-        'K' => &[
-            &[(0.08, 0.12), (0.08, 0.88)],
-            &[(0.54, 0.12), (0.08, 0.50), (0.54, 0.88)],
-        ],
-        'L' => &[&[(0.08, 0.12), (0.08, 0.88), (0.54, 0.88)]],
-        'M' => &[&[
-            (0.08, 0.88),
-            (0.08, 0.12),
-            (0.31, 0.55),
-            (0.54, 0.12),
-            (0.54, 0.88),
-        ]],
-        'N' => &[&[(0.08, 0.88), (0.08, 0.12), (0.54, 0.88), (0.54, 0.12)]],
-        'O' => &[&[
-            (0.16, 0.12),
-            (0.46, 0.12),
-            (0.54, 0.22),
-            (0.54, 0.78),
-            (0.46, 0.88),
-            (0.16, 0.88),
-            (0.08, 0.78),
-            (0.08, 0.22),
-            (0.16, 0.12),
-        ]],
-        'P' => &[&[
-            (0.08, 0.88),
-            (0.08, 0.12),
-            (0.42, 0.12),
-            (0.54, 0.22),
-            (0.54, 0.42),
-            (0.42, 0.52),
-            (0.08, 0.52),
-        ]],
-        'Q' => &[
-            &[
-                (0.16, 0.12),
-                (0.46, 0.12),
-                (0.54, 0.22),
-                (0.54, 0.70),
-                (0.46, 0.80),
-                (0.16, 0.80),
-                (0.08, 0.70),
-                (0.08, 0.22),
-                (0.16, 0.12),
-            ],
-            &[(0.34, 0.62), (0.54, 0.88)],
-        ],
-        'R' => &[
-            &[
-                (0.08, 0.88),
-                (0.08, 0.12),
-                (0.42, 0.12),
-                (0.54, 0.22),
-                (0.54, 0.40),
-                (0.42, 0.50),
-                (0.08, 0.50),
-            ],
-            &[(0.28, 0.50), (0.54, 0.88)],
-        ],
-        'S' => &[&[
-            (0.54, 0.22),
-            (0.46, 0.12),
-            (0.16, 0.12),
-            (0.08, 0.22),
-            (0.08, 0.40),
-            (0.16, 0.48),
-            (0.46, 0.52),
-            (0.54, 0.60),
-            (0.54, 0.78),
-            (0.46, 0.88),
-            (0.16, 0.88),
-            (0.08, 0.78),
-        ]],
-        'T' => &[&[(0.08, 0.12), (0.54, 0.12)], &[(0.31, 0.12), (0.31, 0.88)]],
-        'U' => &[&[
-            (0.08, 0.12),
-            (0.08, 0.72),
-            (0.16, 0.88),
-            (0.46, 0.88),
-            (0.54, 0.72),
-            (0.54, 0.12),
-        ]],
-        'V' => &[&[(0.08, 0.12), (0.31, 0.88), (0.54, 0.12)]],
-        'W' => &[&[
-            (0.08, 0.12),
-            (0.16, 0.88),
-            (0.31, 0.40),
-            (0.46, 0.88),
-            (0.54, 0.12),
-        ]],
-        'X' => &[&[(0.08, 0.12), (0.54, 0.88)], &[(0.54, 0.12), (0.08, 0.88)]],
-        'Y' => &[
-            &[(0.08, 0.12), (0.31, 0.48), (0.54, 0.12)],
-            &[(0.31, 0.48), (0.31, 0.88)],
-        ],
-        'Z' => &[&[(0.08, 0.12), (0.54, 0.12), (0.08, 0.88), (0.54, 0.88)]],
-        // Punctuation
-        '-' => &[&[(0.12, 0.50), (0.50, 0.50)]],
-        '+' => &[&[(0.12, 0.50), (0.50, 0.50)], &[(0.31, 0.28), (0.31, 0.72)]],
-        '.' => &[&[
-            (0.28, 0.82),
-            (0.34, 0.82),
-            (0.34, 0.88),
-            (0.28, 0.88),
-            (0.28, 0.82),
-        ]],
-        ':' => &[
-            &[
-                (0.28, 0.28),
-                (0.34, 0.28),
-                (0.34, 0.34),
-                (0.28, 0.34),
-                (0.28, 0.28),
-            ],
-            &[
-                (0.28, 0.66),
-                (0.34, 0.66),
-                (0.34, 0.72),
-                (0.28, 0.72),
-                (0.28, 0.66),
-            ],
-        ],
-        '/' => &[&[(0.50, 0.12), (0.12, 0.88)]],
-        '%' => &[
-            &[
-                (0.08, 0.20),
-                (0.20, 0.12),
-                (0.28, 0.20),
-                (0.20, 0.28),
-                (0.08, 0.20),
-            ],
-            &[(0.50, 0.12), (0.12, 0.88)],
-            &[
-                (0.34, 0.72),
-                (0.46, 0.64),
-                (0.54, 0.72),
-                (0.46, 0.80),
-                (0.34, 0.72),
-            ],
-        ],
-        '#' => &[
-            &[(0.18, 0.12), (0.18, 0.88)],
-            &[(0.44, 0.12), (0.44, 0.88)],
-            &[(0.08, 0.35), (0.54, 0.35)],
-            &[(0.08, 0.65), (0.54, 0.65)],
-        ],
-        '*' => &[
-            &[(0.31, 0.22), (0.31, 0.78)],
-            &[(0.12, 0.35), (0.50, 0.65)],
-            &[(0.50, 0.35), (0.12, 0.65)],
-        ],
-        '<' => &[&[(0.50, 0.12), (0.12, 0.50), (0.50, 0.88)]],
-        '>' => &[&[(0.12, 0.12), (0.50, 0.50), (0.12, 0.88)]],
-        '=' => &[&[(0.12, 0.38), (0.50, 0.38)], &[(0.12, 0.62), (0.50, 0.62)]],
-        '\'' => &[&[(0.28, 0.12), (0.28, 0.32), (0.22, 0.40)]],
-        _ => return None,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Bitmap font (optional, pixel blocks)
-// ---------------------------------------------------------------------------
-
-/// Glyph width in pixels at scale 1.
-pub const GLYPH_W: i32 = 5;
-/// Glyph height in pixels at scale 1.
-pub const GLYPH_H: i32 = 7;
-/// Horizontal gap between glyphs at scale 1.
-pub const GLYPH_GAP: i32 = 1;
-
-/// Pixel width of bitmap `text` at the given scale (including gaps).
-pub fn text_width(text: &str, scale: i32) -> i32 {
-    let s = scale.max(1);
-    let n = text.chars().count() as i32;
-    if n == 0 {
-        return 0;
-    }
-    n * (GLYPH_W * s) + (n - 1) * (GLYPH_GAP * s)
-}
-
-/// Pixel height of a bitmap line at the given scale.
-pub fn text_height(scale: i32) -> i32 {
-    GLYPH_H * scale.max(1)
-}
-
-/// Draw a single line of **bitmap** text (pixel blocks — can stair-step).
-pub fn draw_text(surface: &mut Surface, x: i32, y: i32, text: &str, color: Color, scale: i32) {
-    let s = scale.max(1);
-    let mut cx = x;
-    for ch in text.chars() {
-        if ch == ' ' {
-            cx += (GLYPH_W + GLYPH_GAP) * s;
-            continue;
-        }
-        if let Some(rows) = bitmap_glyph(ch) {
-            blit_glyph(surface, cx, y, rows, color, s);
-        }
-        cx += (GLYPH_W + GLYPH_GAP) * s;
-    }
-}
-
-/// Center bitmap text on `(cx, cy)`.
-pub fn draw_text_centered(
-    surface: &mut Surface,
-    cx: i32,
-    cy: i32,
-    text: &str,
-    color: Color,
-    scale: i32,
-) {
-    let s = scale.max(1);
-    let w = text_width(text, s);
-    let h = text_height(s);
-    draw_text(surface, cx - w / 2, cy - h / 2, text, color, s);
-}
-
-fn blit_glyph(surface: &mut Surface, x: i32, y: i32, rows: [u8; 7], color: Color, scale: i32) {
-    for (row, bits) in rows.iter().enumerate() {
-        for col in 0..5 {
-            if (bits >> (4 - col)) & 1 == 1 {
-                let px = x + col * scale;
-                let py = y + row as i32 * scale;
-                if scale == 1 {
-                    surface.plot(px, py, color);
-                } else {
-                    surface.rect_fill(px, py, px + scale - 1, py + scale - 1, color);
+            let a = (base_a * cov / 255).min(255);
+            let c = (a << 24) | (r << 16) | (g << 8) | b;
+            let px = (x + col as f32).round() as i32;
+            let py = (y + row as f32).round() as i32;
+            // Simple max-alpha plot (black bg).
+            if let Some(old) = surface.get(px, py) {
+                let oa = (old >> 24) & 0xFF;
+                if a >= oa {
+                    surface.plot(px, py, c);
                 }
+            } else {
+                surface.plot(px, py, c);
             }
         }
     }
 }
 
-fn bitmap_glyph(ch: char) -> Option<[u8; 7]> {
-    let c = if ch.is_ascii_lowercase() {
-        ch.to_ascii_uppercase()
-    } else {
-        ch
-    };
-    Some(match c {
-        '0' => [
-            0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
-        ],
-        '1' => [
-            0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
-        ],
-        '2' => [
-            0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111,
-        ],
-        '3' => [
-            0b01110, 0b10001, 0b00001, 0b00110, 0b00001, 0b10001, 0b01110,
-        ],
-        '4' => [
-            0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
-        ],
-        '5' => [
-            0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
-        ],
-        '6' => [
-            0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
-        ],
-        '7' => [
-            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
-        ],
-        '8' => [
-            0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
-        ],
-        '9' => [
-            0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100,
-        ],
-        'A' => [
-            0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
-        ],
-        'B' => [
-            0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110,
-        ],
-        'C' => [
-            0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110,
-        ],
-        'D' => [
-            0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110,
-        ],
-        'E' => [
-            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111,
-        ],
-        'F' => [
-            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000,
-        ],
-        'G' => [
-            0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01110,
-        ],
-        'H' => [
-            0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
-        ],
-        'I' => [
-            0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
-        ],
-        'J' => [
-            0b00001, 0b00001, 0b00001, 0b00001, 0b10001, 0b10001, 0b01110,
-        ],
-        'K' => [
-            0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001,
-        ],
-        'L' => [
-            0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111,
-        ],
-        'M' => [
-            0b10001, 0b11011, 0b10101, 0b10001, 0b10001, 0b10001, 0b10001,
-        ],
-        'N' => [
-            0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001,
-        ],
-        'O' => [
-            0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
-        ],
-        'P' => [
-            0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000,
-        ],
-        'Q' => [
-            0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101,
-        ],
-        'R' => [
-            0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001,
-        ],
-        'S' => [
-            0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110,
-        ],
-        'T' => [
-            0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100,
-        ],
-        'U' => [
-            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
-        ],
-        'V' => [
-            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100,
-        ],
-        'W' => [
-            0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b10101, 0b01010,
-        ],
-        'X' => [
-            0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001,
-        ],
-        'Y' => [
-            0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100,
-        ],
-        'Z' => [
-            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111,
-        ],
-        '-' => [
-            0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000,
-        ],
-        '+' => [
-            0b00000, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0b00000,
-        ],
-        '.' => [
-            0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00100, 0b00100,
-        ],
-        ':' => [
-            0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b00000,
-        ],
-        '/' => [
-            0b00001, 0b00010, 0b00100, 0b00100, 0b01000, 0b10000, 0b10000,
-        ],
-        '%' => [
-            0b11001, 0b11010, 0b00010, 0b00100, 0b01000, 0b01011, 0b10011,
-        ],
-        '#' => [
-            0b01010, 0b01010, 0b11111, 0b01010, 0b11111, 0b01010, 0b01010,
-        ],
-        '*' => [
-            0b00000, 0b00100, 0b10101, 0b01110, 0b10101, 0b00100, 0b00000,
-        ],
-        '<' => [
-            0b00010, 0b00100, 0b01000, 0b10000, 0b01000, 0b00100, 0b00010,
-        ],
-        '>' => [
-            0b01000, 0b00100, 0b00010, 0b00001, 0b00010, 0b00100, 0b01000,
-        ],
-        '=' => [
-            0b00000, 0b00000, 0b11111, 0b00000, 0b11111, 0b00000, 0b00000,
-        ],
-        '\'' => [
-            0b00100, 0b00100, 0b01000, 0b00000, 0b00000, 0b00000, 0b00000,
-        ],
-        _ => return None,
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{alpha, GREEN};
-
-    #[test]
-    fn bitmap_digit_lights_pixels() {
-        let mut s = Surface::new(40, 20);
-        s.clear(0);
-        draw_text(&mut s, 1, 1, "RPM", GREEN, 1);
-        let mut lit = 0u32;
-        for y in 1..10 {
-            for x in 1..30 {
-                if s.get(x, y).map(alpha).unwrap_or(0) > 0 {
-                    lit += 1;
-                }
-            }
-        }
-        assert!(lit > 20, "expected glyph pixels, got {lit}");
-    }
-
-    #[test]
-    fn stroke_digit_lights_pixels() {
-        let mut s = Surface::new(120, 40);
-        s.clear(0);
-        draw_text_stroke(&mut s, 4.0, 4.0, "RPM 12", GREEN, 18.0);
-        let mut lit = 0u32;
-        for y in 0..40 {
-            for x in 0..120 {
-                if s.get(x, y).map(alpha).unwrap_or(0) > 0 {
-                    lit += 1;
-                }
-            }
-        }
-        assert!(lit > 40, "expected stroke pixels, got {lit}");
-    }
-
-    #[test]
-    fn width_scales() {
-        assert_eq!(text_width("A", 1), 5);
-        assert_eq!(text_width("AB", 1), 5 + 1 + 5);
-        assert!(stroke_text_width("AB", 20.0) > stroke_text_width("A", 20.0));
-    }
-}
+// Keep stroke helpers as aliases for callers that want drawn thin labels.
+pub use draw_text as draw_text_stroke;
+pub use draw_text_centered as draw_text_stroke_centered;
+pub use text_height as stroke_text_height;
+pub use text_width as stroke_text_width;

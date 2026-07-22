@@ -1,4 +1,4 @@
-/* Pure-asm smoke: no C, no Rust, no libc. Links only libvge objects.
+/* Pure-asm smoke: no C, no Rust, no libc. Links only libmfd objects.
  * exit 0 = pass, exit 2 = fail
  */
         .intel_syntax noprefix
@@ -11,7 +11,7 @@ _start:
         and     rsp, -16
         sub     rsp, 16448                     /* surface 32 + pixels 16384 + pad */
 
-        /* VgeSurface at [rsp]: w,h,stride,pad,pixels* */
+        /* MfdSurface at [rsp]: w,h,stride,pad,pixels* */
         lea     rax, [rsp + 32]                /* pixel buffer */
         mov     dword ptr [rsp], 64            /* width */
         mov     dword ptr [rsp + 4], 64        /* height */
@@ -22,7 +22,7 @@ _start:
         /* clear black opaque */
         mov     rdi, rsp
         mov     esi, 0xFF000000
-        call    vge_clear
+        call    mfd_clear
 
         /* green line along top */
         mov     rdi, rsp
@@ -31,7 +31,7 @@ _start:
         mov     ecx, 63
         xor     r8d, r8d
         mov     r9d, 0xFF00FF46
-        call    vge_line
+        call    mfd_line
 
         /* check pixel (0,0) */
         mov     eax, dword ptr [rsp + 32]

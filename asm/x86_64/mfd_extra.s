@@ -4,16 +4,16 @@
  */
         .text
         .intel_syntax noprefix
-        .file   "vge_extra.s"
+        .file   "mfd_extra.s"
 
 /*--------------------------------------------------------------------
- * vge_line_thick(s, x0, y0, x1, y1, color, thickness)
+ * mfd_line_thick(s, x0, y0, x1, y1, color, thickness)
  * rdi=s esi=x0 edx=y0 ecx=x1 r8d=y1 r9d=color  [rbp+16]=thickness
  *------------------------------------------------------------------*/
-        .globl  vge_line_thick
-        .type   vge_line_thick, @function
+        .globl  mfd_line_thick
+        .type   mfd_line_thick, @function
         .align  16
-vge_line_thick:
+mfd_line_thick:
         push    rbp
         mov     rbp, rsp
         push    r12
@@ -38,7 +38,7 @@ vge_line_thick:
         mov     ecx, dword ptr [rbp - 56]
         mov     r8d, dword ptr [rbp - 60]
         mov     r9d, r13d
-        call    vge_line
+        call    mfd_line
         jmp     .Llt_done
 .Llt_multi:
         mov     r14d, eax                      /* thick */
@@ -58,7 +58,7 @@ vge_line_thick:
         add     ecx, r15d
         mov     r8d, dword ptr [rbp - 60]
         mov     r9d, r13d
-        call    vge_line
+        call    mfd_line
         mov     rdi, r12
         mov     esi, dword ptr [rbp - 48]
         mov     edx, dword ptr [rbp - 52]
@@ -67,7 +67,7 @@ vge_line_thick:
         mov     r8d, dword ptr [rbp - 60]
         add     r8d, r15d
         mov     r9d, r13d
-        call    vge_line
+        call    mfd_line
         inc     r15d
         jmp     .Llt_o
 .Llt_done:
@@ -79,15 +79,15 @@ vge_line_thick:
         pop     r12
         pop     rbp
         ret
-        .size   vge_line_thick, .-vge_line_thick
+        .size   mfd_line_thick, .-mfd_line_thick
 
 /*--------------------------------------------------------------------
- * vge_rect_fill(s, x0, y0, x1, y1, color)
+ * mfd_rect_fill(s, x0, y0, x1, y1, color)
  *------------------------------------------------------------------*/
-        .globl  vge_rect_fill
-        .type   vge_rect_fill, @function
+        .globl  mfd_rect_fill
+        .type   mfd_rect_fill, @function
         .align  16
-vge_rect_fill:
+mfd_rect_fill:
         push    rbp
         mov     rbp, rsp
         push    r12
@@ -140,7 +140,7 @@ vge_rect_fill:
         mov     esi, ebx
         mov     edx, r14d
         mov     ecx, r13d
-        call    vge_plot
+        call    mfd_plot
         inc     ebx
         jmp     .Lrf_x
 .Lrf_yn:
@@ -155,15 +155,15 @@ vge_rect_fill:
         pop     r12
         pop     rbp
         ret
-        .size   vge_rect_fill, .-vge_rect_fill
+        .size   mfd_rect_fill, .-mfd_rect_fill
 
 /*--------------------------------------------------------------------
- * vge_blit(dst, src)  rdi=dst rsi=src
+ * mfd_blit(dst, src)  rdi=dst rsi=src
  *------------------------------------------------------------------*/
-        .globl  vge_blit
-        .type   vge_blit, @function
+        .globl  mfd_blit
+        .type   mfd_blit, @function
         .align  16
-vge_blit:
+mfd_blit:
         push    r12
         push    r13
         push    r14
@@ -218,15 +218,15 @@ vge_blit:
         pop     r13
         pop     r12
         ret
-        .size   vge_blit, .-vge_blit
+        .size   mfd_blit, .-mfd_blit
 
 /*--------------------------------------------------------------------
- * vge_decay(s, factor_256)  rdi=s  esi=factor
+ * mfd_decay(s, factor_256)  rdi=s  esi=factor
  *------------------------------------------------------------------*/
-        .globl  vge_decay
-        .type   vge_decay, @function
+        .globl  mfd_decay
+        .type   mfd_decay, @function
         .align  16
-vge_decay:
+mfd_decay:
         push    rbx
         push    r12
         push    r13
@@ -287,15 +287,15 @@ vge_decay:
         pop     r12
         pop     rbx
         ret
-        .size   vge_decay, .-vge_decay
+        .size   mfd_decay, .-mfd_decay
 
 /*--------------------------------------------------------------------
- * vge_export_rgb24(s, dest)  rdi=s  rsi=dest
+ * mfd_export_rgb24(s, dest)  rdi=s  rsi=dest
  *------------------------------------------------------------------*/
-        .globl  vge_export_rgb24
-        .type   vge_export_rgb24, @function
+        .globl  mfd_export_rgb24
+        .type   mfd_export_rgb24, @function
         .align  16
-vge_export_rgb24:
+mfd_export_rgb24:
         push    rbx
         push    r12
         test    rdi, rdi
@@ -343,16 +343,16 @@ vge_export_rgb24:
         pop     r12
         pop     rbx
         ret
-        .size   vge_export_rgb24, .-vge_export_rgb24
+        .size   mfd_export_rgb24, .-mfd_export_rgb24
 
 /*--------------------------------------------------------------------
- * vge_polyline(s, xy, n, color)
+ * mfd_polyline(s, xy, n, color)
  * rdi=s rsi=xy edx=n ecx=color
  *------------------------------------------------------------------*/
-        .globl  vge_polyline
-        .type   vge_polyline, @function
+        .globl  mfd_polyline
+        .type   mfd_polyline, @function
         .align  16
-vge_polyline:
+mfd_polyline:
         push    rbp
         mov     rbp, rsp
         push    r12
@@ -383,7 +383,7 @@ vge_polyline:
         mov     ecx, dword ptr [r13 + rbx*8 + 8]
         mov     r8d, dword ptr [r13 + rbx*8 + 12]
         mov     r9d, r15d
-        call    vge_line
+        call    mfd_line
         inc     ebx
         jmp     .Lpl_loop
 .Lpl_done:
@@ -395,7 +395,7 @@ vge_polyline:
         pop     r12
         pop     rbp
         ret
-        .size   vge_polyline, .-vge_polyline
+        .size   mfd_polyline, .-mfd_polyline
 
 /*--------------------------------------------------------------------
  * Pure-asm sin/cos (no libc). Taylor on reduced angle.
@@ -484,11 +484,11 @@ vge_polyline:
 
 /*--------------------------------------------------------------------
  * Transforms — float SSE, pure asm (no C, no libm)
- * VgeXform: a b tx c d ty  at offsets 0 4 8 12 16 20
+ * MfdXform: a b tx c d ty  at offsets 0 4 8 12 16 20
  *------------------------------------------------------------------*/
-        .globl  vge_xform_identity
-        .type   vge_xform_identity, @function
-vge_xform_identity:
+        .globl  mfd_xform_identity
+        .type   mfd_xform_identity, @function
+mfd_xform_identity:
         test    rdi, rdi
         jz      1f
         mov     dword ptr [rdi], 0x3F800000    /* 1.0f a */
@@ -498,11 +498,11 @@ vge_xform_identity:
         mov     dword ptr [rdi + 16], 0x3F800000 /* 1.0f d */
         mov     dword ptr [rdi + 20], 0
 1:      ret
-        .size   vge_xform_identity, .-vge_xform_identity
+        .size   mfd_xform_identity, .-mfd_xform_identity
 
-        .globl  vge_xform_translate
-        .type   vge_xform_translate, @function
-vge_xform_translate:
+        .globl  mfd_xform_translate
+        .type   mfd_xform_translate, @function
+mfd_xform_translate:
         /* rdi=m  xmm0=tx xmm1=ty ; tx' = a*tx + b*ty + tx_old */
         test    rdi, rdi
         jz      1f
@@ -521,11 +521,11 @@ vge_xform_translate:
         addss   xmm2, dword ptr [rdi + 20]
         movss   dword ptr [rdi + 20], xmm2
 1:      ret
-        .size   vge_xform_translate, .-vge_xform_translate
+        .size   mfd_xform_translate, .-mfd_xform_translate
 
-        .globl  vge_xform_scale
-        .type   vge_xform_scale, @function
-vge_xform_scale:
+        .globl  mfd_xform_scale
+        .type   mfd_xform_scale, @function
+mfd_xform_scale:
         test    rdi, rdi
         jz      1f
         /* a*=sx c*=sx  b*=sy d*=sy */
@@ -542,11 +542,11 @@ vge_xform_scale:
         mulss   xmm2, xmm1
         movss   dword ptr [rdi + 16], xmm2
 1:      ret
-        .size   vge_xform_scale, .-vge_xform_scale
+        .size   mfd_xform_scale, .-mfd_xform_scale
 
-        .globl  vge_xform_rotate
-        .type   vge_xform_rotate, @function
-vge_xform_rotate:
+        .globl  mfd_xform_rotate
+        .type   mfd_xform_rotate, @function
+mfd_xform_rotate:
         /* rdi=m  xmm0=radians — pure asm, no libm */
         push    r12
         sub     rsp, 24
@@ -597,11 +597,11 @@ vge_xform_rotate:
         add     rsp, 24
         pop     r12
         ret
-        .size   vge_xform_rotate, .-vge_xform_rotate
+        .size   mfd_xform_rotate, .-mfd_xform_rotate
 
-        .globl  vge_xform_apply
-        .type   vge_xform_apply, @function
-vge_xform_apply:
+        .globl  mfd_xform_apply
+        .type   mfd_xform_apply, @function
+mfd_xform_apply:
         /* rdi=m xmm0=x xmm1=y rsi=ox rdx=oy */
         test    rdi, rdi
         jz      1f
@@ -624,11 +624,11 @@ vge_xform_apply:
         addss   xmm2, dword ptr [rdi + 20]
         movss   dword ptr [rdx], xmm2
 1:      ret
-        .size   vge_xform_apply, .-vge_xform_apply
+        .size   mfd_xform_apply, .-mfd_xform_apply
 
-        .globl  vge_line_xf
-        .type   vge_line_xf, @function
-vge_line_xf:
+        .globl  mfd_line_xf
+        .type   mfd_line_xf, @function
+mfd_line_xf:
         /* rdi=s rsi=m  xmm0..3 = x0 y0 x1 y1  r8d? color is 7th arg
          * SysV: color after 6 float? Actually floats in xmm, color is next GP: rdx?
          * Args: s, m, x0, y0, x1, y1, color
@@ -652,7 +652,7 @@ vge_line_xf:
         cvtss2si r8d, xmm3
         mov     rdi, r12
         mov     r9d, r14d
-        call    vge_line_aa
+        call    mfd_line_aa
         jmp     .Lxf_done
 .Lxf_m:
         /* apply m to (x0,y0) and (x1,y1) */
@@ -665,13 +665,13 @@ vge_line_xf:
         mov     rdi, r13
         movss   xmm0, dword ptr [rsp]
         movss   xmm1, dword ptr [rsp + 4]
-        call    vge_xform_apply
+        call    mfd_xform_apply
         lea     rsi, [rsp + 24]
         lea     rdx, [rsp + 28]
         mov     rdi, r13
         movss   xmm0, dword ptr [rsp + 8]
         movss   xmm1, dword ptr [rsp + 12]
-        call    vge_xform_apply
+        call    mfd_xform_apply
         movss   xmm0, dword ptr [rsp + 16]
         cvtss2si esi, xmm0
         movss   xmm0, dword ptr [rsp + 20]
@@ -682,7 +682,7 @@ vge_line_xf:
         cvtss2si r8d, xmm0
         mov     rdi, r12
         mov     r9d, r14d
-        call    vge_line_aa
+        call    mfd_line_aa
 .Lxf_done:
         add     rsp, 40
         pop     r14
@@ -690,21 +690,21 @@ vge_line_xf:
         pop     r12
         pop     rbp
         ret
-        .size   vge_line_xf, .-vge_line_xf
+        .size   mfd_line_xf, .-mfd_line_xf
 
 /*--------------------------------------------------------------------
- * vge_version → pointer to rodata string
+ * mfd_version → pointer to rodata string
  *------------------------------------------------------------------*/
         .section .rodata
         .align  8
 .Lver:
         .asciz  "0.1.0-dev.1-asm"
         .text
-        .globl  vge_version
-        .type   vge_version, @function
-vge_version:
+        .globl  mfd_version
+        .type   mfd_version, @function
+mfd_version:
         lea     rax, [rip + .Lver]
         ret
-        .size   vge_version, .-vge_version
+        .size   mfd_version, .-mfd_version
 
         .section .note.GNU-stack, "", @progbits

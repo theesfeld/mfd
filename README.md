@@ -1,308 +1,117 @@
-# VGE — pure assembly vector engine
+# MFD — multi-function display library
 
 <!-- agents:status:begin -->
-> **Status:** active · Version: `0.1.0-dev.1` · **libvge = ASM only** · MFD panel demo + bitmap font · [#29](https://github.com/theesfeld/vge/issues/29) · MIT
+> **Status:** active · Version: `0.1.0-dev.1` · Phase 0 rename from VGE · [#33](https://github.com/theesfeld/vge/issues/33) · MIT  
+> **Product:** composable aviation MFD pages + automotive reuse · **Font:** B612 Mono · **Glass:** black + fighter ink
 <!-- agents:status:end -->
 
-## This is assembly
+## What this is
 
-**The library is only `asm/x86_64/*.s`.**  
-No C in the library. No Rust in the library. No libc. No libm.
+**MFD** is a library for building **instrument pages** in a terminal (or later FB):
 
-```bash
-make && make test     # pure-asm smoke (examples/asm/smoke.s)
-make install          # libvge.a / libvge.so + vge.h
-```
+- **Widgets:** softkeys (OSB), tape gauges, round gauges, labels, bezel  
+- **Pages:** many widgets per page  
+- **Jet calls:** F-16-class pages (`SMS`, `HSD`, `TGP`, `FCR`, `ENG`, `FUEL`, …)  
+- **Auto calls:** cluster / temps / OBD-shaped PIDs reusing the same widgets  
+- **Text:** Airbus **B612** cockpit font (embedded; EPL — see `NOTICE`)  
+- **Draw core:** pure x86_64 assembly **libmfd** (`mfd_line`, `mfd_circle`, …)
 
-```
-include/vge.h          calling convention (System V AMD64)
-asm/x86_64/vge.s       plot clear line circle
-asm/x86_64/vge_extra.s thick rect blit decay export xform polyline …
-build/libvge.a         static
-build/libvge.so        shared
-```
+This is **not** a transparent toy overlay. Pages clear **black glass** and draw high-contrast symbology.
 
-Any language: load `libvge`, call the symbols in `vge.h`.
-
-### Demo (Rust loads libvge only)
+## Build
 
 ```bash
-make                    # build/libvge.a
-cargo run --release --bin vge-demo
+make                 # build/libmfd.a + .so
+cargo build --release
+cargo run --release --bin mfd-demo
 ```
 
-The demo **links pure-asm libvge** and draws a full-screen **MFD-style panel**.
-It does not reimplement the engine.
+Prefer Kitty/Ghostty: `MFD_TERM=kitty cargo run --release --bin mfd-demo`
 
-**Honest model:** geometry lights **pixels** in a RAM surface (`vge_line`, `vge_circle`,
-bitmap `draw_text`, …). The terminal shows that surface (Kitty / half-block / FB).
-This is a **pixel instrument face**, not glass vectors in air.
+### Demo keys
 
-**Demo (black glass, high contrast):**
-- Full alternate screen (not a transparent overlay)
-- Softkey legend row + status strip (**stroke** / drawn AA text)
-- Large F-150 style tach **0–7000 RPM**, redline arc **~5500+**, scale digits
-- Tapes with labels: **FUEL**, **COOL**, **TRNS**, **BATT**
+| Key | Page |
+|-----|------|
+| `1` | Jet SMS |
+| `2` | Jet HSD |
+| `3` | Jet TGP |
+| `4` | Jet FCR |
+| `5` | Jet ENG |
+| `6` | Jet FUEL |
+| `7` | Jet DTE |
+| `8` | Jet TEST |
+| `a` | Auto cluster |
+| `s` | Auto power |
+| `d` | Auto temps |
+| `f` | Auto OBD |
+| `q` | Quit |
 
-
-## Performance (read this first)
-
-| Stage | Role | Measured rate (release, this class of host) |
-|-------|------|-----------------------------------------------|
-| **Raster** | Geometry → pixels in **system RAM** | Draw-only: **~10 000 FPS** at 1280×720; **~1 700 FPS** at 2560×1600 |
-| **Present** | Put pixels on glass or in a terminal | FB blit full HD: **~800 FPS**. Kitty present (capped): **thousands of FPS** at default density |
-| **Pace** | **Even frame times** (absolute phase lock) | Default demo locks **120 Hz**. Uncapped max-FPS often looks choppier |
-
-**Smooth ≠ maximum FPS.**  
-Flooding Ghostty/Kitty with uncapped full-frame presents queues work in the emulator and motion stutters.  
-VGE locks the **display** to a fixed period (`t0 + n·Δt`) and drives animation from **wall-clock time**, so rotation stays continuous even if a frame overruns.
-
-**Fact:** The raster is not the bottleneck. Present bandwidth and **frame-time jitter** are.
-
-```bash
-cargo run --release --example bench
-cargo run --release --example profile_present   # present FPS by backend
-```
-
-| Present backend | Size (80×24 cells) | Present rate (order of) |
-|-----------------|--------------------|-------------------------|
-| ASCII | 80×24 | >100 000 FPS |
-| Half-block | 80×48 | >50 000 FPS |
-| Kitty | 320×192 (capped density) | >3 000 FPS |
-
----
-
-## Overlay model (vectors on top of text)
-
-VGE can fill a **cell rectangle** only. Text and inputs stay around that region.
+## Library model
 
 ```text
-┌ status / keys ─────────────────────────────┐
-│  [  vector viewport — Kitty or half-block ] │
-│  [  present_at(surface, backend, viewport) ]│
-└ draw_us / present_us / fps ────────────────┘
+Page (black glass)
+  ├─ softkey_row / bezel
+  ├─ round_gauge / tape_gauge / label  (any mix)
+  └─ jet::* or auto::* page call
 ```
 
 ```rust
-use vge::term::{detect_backend, enter_overlay, leave_overlay, present_at, Viewport,
-                surface_size_for_viewport};
-use vge::{Surface, BLACK, GREEN};
+use mfd::page::Page;
+use mfd::jet;
+use mfd::Surface;
 
-let backend = detect_backend();
-let vp = Viewport::centered_frac(0.7, 0.65); // cells
-let (w, h) = surface_size_for_viewport(backend, vp);
-let mut s = Surface::new(w, h);
-s.clear(BLACK);
-s.line(0, 0, w as i32 - 1, h as i32 - 1, GREEN);
-
-enter_overlay()?;
-present_at(&s, backend, vp)?;   // does not wipe the whole TTY chrome
-// … print text at other cell positions …
-leave_overlay()?;
+let mut s = Surface::new(960, 540);
+let mut page = Page::new(&mut s);
+jet::hsd(&mut page, 180.0, 40.0);
 ```
 
-| API | Purpose |
-|-----|---------|
-| `Viewport { col, row, cols, rows }` | Cell box (0-based origin) |
-| `Viewport::centered_frac(fw, fh)` | Centered box as a fraction of the terminal |
-| `present_at(surface, backend, vp)` | Place pixels in that box only |
-| `enter_overlay` / `leave_overlay` | Hide cursor; keep main screen |
-| `enter_fullscreen` / `leave_fullscreen` | Alternate screen (optional) |
+### Widgets
 
----
+| Call | Role |
+|------|------|
+| `softkey_row` | Bezel button legends (OSB) |
+| `tape_gauge` | Vertical/horizontal tape |
+| `round_gauge` | Arc + needle (tach / eng) |
+| `label` / `label_centered` | B612 text |
+| `bezel_frame` | Outer frame |
 
-## Install
+### Jet pages (`mfd::jet`)
 
-### Primary (assembly library)
+`blank` · `sms` · `hsd` · `tgp` · `fcr` · `eng` · `fuel` · `dte` · `test`
 
-```bash
-git clone https://github.com/theesfeld/vge
-cd vge && make && make install
-# CFLAGS: -I$HOME/.local/include
-# LDFLAGS: -L$HOME/.local/lib -lvge -lm
-```
+### Auto pages (`mfd::auto`)
 
-### Optional Rust bindings (FFI only)
+`cluster` · `power` · `temps` · `obd_status` · `ObdSnapshot` · `rpm_norm`
 
-```toml
-vge = { git = "https://github.com/theesfeld/vge" }
-```
+## Colors (fighter glass)
 
-The Rust package **links** the assembly objects; it does not reimplement the engine.
+| Token | Role |
+|-------|------|
+| `GREEN` | Primary / normal |
+| `GREEN_DIM` | Structure |
+| `CYAN` | Nav / geometry |
+| `AMBER` / `YELLOW` | Caution |
+| `RED` | Warning / redline |
+| `WHITE` | Readout |
+| `MAGENTA` | Special cue |
+| `BLACK` | Glass |
 
----
+## Research index
 
-## Quick start (Rust) — stroke list
+Public MFD photo **search list** and page-type catalog:  
+[`docs/reference/mfd-photo-index.md`](docs/reference/mfd-photo-index.md)
 
-```rust
-use vge::{DisplayList, Surface, GREEN, CYAN};
+We do **not** vendor 50 copyrighted image binaries. We do keep a **type catalog** and public URLs for study.
 
-let mut list = DisplayList::new();
-list.set_width(1); // hairline; any integer ≥ 1
-list.set_color(GREEN);
-list.line(10, 10, 630, 350);
-list.set_color(CYAN);
-list.circle(320, 180, 80);
+## Env
 
-let mut scanout = Surface::new(640, 360);
-// Transparent clear + crisp strokes only (no black fill, no trail)
-list.refresh(&mut scanout);
-// present_at_state: paints opaque pixels only over the terminal
-```
-
-Immediate beam (no list) still works:
-
-```rust
-use vge::{Surface, GREEN, BLACK};
-let mut s = Surface::new(640, 360);
-s.clear(BLACK);
-s.line(10, 10, 630, 350, GREEN);
-```
-
-Linux frame buffer (direct glass):
-
-```rust
-// Draw in RAM, blit once per frame (do not plot into FB per pixel).
-let mut fb = vge::fb::Framebuffer::open_default()?;
-let mut back = Surface::new(fb.width(), fb.height());
-// … draw into `back` …
-fb.present_from(&back);
-```
-
----
-
-## Demo
-
-```bash
-# Default: full-screen MFD panel (60 Hz)
-cargo run --release --bin vge-demo
-
-# Prefer Kitty / Ghostty for sharp present
-VGE_TERM=kitty cargo run --release --bin vge-demo
-
-# Cap density if the terminal stutters
-VGE_MAX_W=960 VGE_MAX_H=540 cargo run --release --bin vge-demo
-```
-
-| Flag / env | Effect |
-|------------|--------|
-| (default) | Full-screen black MFD: tach + labeled tapes + text |
-| `VGE_HZ=60` | Default phase-lock 60 Hz |
-| `VGE_HZ=0` | Uncapped (throughput test) |
-| `VGE_TERM=kitty\|half\|ascii` | Force present backend (Kitty is sharpest) |
-| `VGE_MAX_W` / `VGE_MAX_H` | Cap pixel buffer (default 1280×720) |
-
-Quit: `q`, Esc, or Ctrl+C.
-
----
-
-## API surface
-
-### Stroke display list (calligraphic core)
-
-| Type / method | Description |
-|---------------|-------------|
-| `DisplayList` | Refresh memory for beam commands |
-| `TimedStroke` | Command + `born` + `ttl` (0 = immortal) |
-| `set_color` / `move_to` / `line_to` | Beam state + strokes |
-| `line` / `line_thick` / `circle` / `polyline` | Draw commands |
-| `set_width(px)` | Stroke width in pixels (≥ 1) |
-| `set_lifespan(frames)` | Default TTL for new commands (`0` = immortal) |
-| `tick()` | Advance frame clock; drop expired strokes |
-| `stroke(surface)` | Draw living commands (full opacity) |
-| `stroke_life(surface, fade)` | Draw living commands; optional alpha by remaining life |
-| `sweep(surface, prev)` | Erase previous path, then stroke (sparse motion) |
-| `refresh(surface)` | Transparent clear + stroke living (full opacity) |
-| `refresh_life(surface, fade)` | Transparent clear + stroke with optional trail fade |
-
-### Text (MFD legends)
-
-| Function | Description |
-|----------|-------------|
-| `draw_text_stroke(…, px_h)` | **Drawn** glyphs: AA polylines (smooth; no pixel stair-steps) |
-| `draw_text_stroke_centered(…)` | Center stroke text |
-| `stroke_text_width` / `stroke_text_height` | Layout for stroke text |
-| `draw_text(…, scale)` | Optional 5×7 **bitmap** blocks (tiny UI only) |
-
-Prefer **stroke** text on instrument faces. Bitmap text is for extreme size only.
-
-**Update models:** full-scene rebuild → `refresh` or `clear` + draws. Sparse motion → `sweep`. Optional trails → lifespan API.
-
-### Geometry scanout (C + Rust)
-
-| Function | Description |
-|----------|-------------|
-| `vge_clear` / `Surface::clear` | Fill all pixels |
-| `vge_plot` / `plot` | One pixel |
-| `vge_line` / `line` | Bresenham (inlined stores in asm) |
-| `vge_line_thick` / `line_thick` | Multi-pass thick line |
-| `vge_circle` / `circle` | Midpoint circle |
-| `vge_rect_fill` / `rect_fill` | Filled rectangle |
-| `vge_line_xf` / `line_xf` | Line after affine transform |
-| `vge_polyline` / `polyline` | Connected segments |
-| `vge_xform_*` / `Xform` | Translate, scale, rotate |
-
-### Present / buffer
-
-| Function | Description |
-|----------|-------------|
-| `vge_blit` / `blit_to` / `present_from` | Copy RAM → RAM or RAM → FB |
-| `vge_decay` / `decay` | Phosphor fade (`factor_256` / 256) |
-| `vge_export_rgb24` | Tight RGB for protocols |
-| `term::present` / `present_at` | Terminal present |
-| `frame::FramePacer` | Optional target Hz |
-
-### Effects (`vge::effects`)
-
-| Function | Description |
-|----------|-------------|
-| `glow` | Expand bright pixels with falloff |
-| `bloom` | Threshold + box blur add-back |
-| `radar_fade` | Angular sector fade (radar beam) |
-| `scanlines` | Dim every other row |
-
-Effects run **after** geometry. They cost CPU. Leave them off for maximum rate.
-
----
-
-## C API
-
-```c
-#include "vge.h"
-
-uint8_t buf[640 * 360 * 4];
-VgeSurface s = { .width = 640, .height = 360, .stride = 640 * 4, .pixels = buf };
-vge_clear(&s, 0x000000);
-vge_line(&s, 0, 0, 639, 359, 0x00FF46);
-```
-
----
-
-## Layout
-
-```
-include/vge.h              public C ABI
-asm/x86_64/vge.s           plot/clear/line/circle
-asm/x86_64/vge_extra.s     thick/rect/blit/decay/export/xform/…
-Makefile                   builds libvge.a / libvge.so
-examples/c/smoke.c         pure-C link test
-c/vge_portable.c           reference only (non-x86_64 / VGE_FORCE_C)
-src/                       optional Rust FFI + demos (not the engine)
-```
-
-## Architecture note
-
-This is intentional innovation on a known foundation: **refresh vector / calligraphic** display lists (see vector CRT / aircraft HUD stroke generators).  
-VGE reimplements that control path in software with a modern present stage (terminal graphics protocol or Linux frame buffer). The list is the picture. Pixels are only the scanout of the beam.
-
----
-
-## SemVer
-
-Version is `0.1.0-dev.1`. **0.x minors may include breaking changes.**
-
----
+| Env | Effect |
+|-----|--------|
+| `MFD_TERM=kitty\|half\|ascii` | Present backend |
+| `MFD_MAX_W` / `MFD_MAX_H` | Pixel cap (default 1280×720) |
+| `MFD_HZ` | Demo phase lock (default 60) |
 
 ## License
 
-MIT. See `LICENSE`.
+- Library code: **MIT**  
+- B612 fonts: **EPL-2.0** (PolarSys / Airbus) — see `NOTICE` and `assets/fonts/`

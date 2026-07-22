@@ -1,37 +1,39 @@
 [package]
-name = "vge"
+name = "mfd"
 version = "0.1.0-dev.1"
 edition = "2021"
 license = "MIT"
-description = "Thin Rust FFI for libvge (standalone x86_64 assembly vector engine)"
-repository = "https://github.com/theesfeld/vge"
-homepage = "https://theesfeld.github.io/vge/"
+description = "MFD — multi-function display library for aviation instrument pages and automotive reuse"
+repository = "https://github.com/theesfeld/mfd"
+homepage = "https://theesfeld.github.io/mfd/"
 authors = ["theesfeld"]
 rust-version = "1.74"
 readme = "README.md"
-keywords = ["vector", "graphics", "rasterizer", "bresenham", "assembly"]
-categories = ["graphics", "rendering", "no-std"]
+keywords = ["mfd", "avionics", "instrument", "gauge", "cockpit"]
+categories = ["graphics", "rendering", "gui"]
 include = [
     "src/**/*",
     "asm/**/*",
-    "c/**/*",
     "include/**/*",
+    "assets/fonts/**/*",
     "build.rs",
     "LICENSE",
+    "NOTICE",
     "README.md",
     "CHANGELOG.md",
 ]
 
 [lib]
-name = "vge"
+name = "mfd"
 crate-type = ["rlib", "staticlib", "cdylib"]
 
 [[bin]]
-name = "vge-demo"
-path = "src/bin/vge-demo.rs"
+name = "mfd-demo"
+path = "src/bin/mfd-demo.rs"
 
 [dependencies]
 libc = "0.2"
+fontdue = "0.9"
 
 [build-dependencies]
 cc = "1"

@@ -1,16 +1,16 @@
 # =============================================================================
-# VGE — PURE ASSEMBLY LIBRARY
+# MFD — PURE ASSEMBLY LIBRARY
 # =============================================================================
 # Source of the product: asm/x86_64/*.s ONLY.
 # No C. No Rust. No libc in the library.
 #
-#   make            → build/libvge.a  build/libvge.so
+#   make            → build/libmfd.a  build/libmfd.so
 #   make test       → pure-asm smoke (no C runtime)
 #   make install    → PREFIX (default ~/.local)
 #
 # Any language that can call the System V AMD64 C ABI can load this:
-#   #include "vge.h"
-#   -lvge
+#   #include "mfd.h"
+#   -lmfd
 # =============================================================================
 
 PREFIX  ?= $(HOME)/.local
@@ -20,15 +20,15 @@ AR      ?= ar
 CC      ?= cc
 
 ASFLAGS ?= --64
-ASM_SRC := asm/x86_64/vge.s asm/x86_64/vge_extra.s asm/x86_64/vge_aa.s
+ASM_SRC := asm/x86_64/mfd.s asm/x86_64/mfd_extra.s asm/x86_64/mfd_aa.s
 ASM_OBJ := $(patsubst asm/x86_64/%.s,build/%.o,$(ASM_SRC))
 
 .PHONY: all clean test install static shared
 
 all: static shared
 
-static: build/libvge.a
-shared: build/libvge.so
+static: build/libmfd.a
+shared: build/libmfd.so
 
 build:
 	mkdir -p build
@@ -36,12 +36,12 @@ build:
 build/%.o: asm/x86_64/%.s | build
 	$(AS) $(ASFLAGS) -o $@ $<
 
-build/libvge.a: $(ASM_OBJ)
+build/libmfd.a: $(ASM_OBJ)
 	$(AR) rcs $@ $(ASM_OBJ)
 	@echo "OK  $@"
 
 # Shared object: pure asm, no -lc -lm
-build/libvge.so: $(ASM_OBJ)
+build/libmfd.so: $(ASM_OBJ)
 	$(LD) -shared -o $@ $(ASM_OBJ)
 	@echo "OK  $@"
 
@@ -61,10 +61,10 @@ test: build/smoke_asm
 
 install: all
 	install -d $(PREFIX)/lib $(PREFIX)/include
-	install -m 644 build/libvge.a $(PREFIX)/lib/
-	install -m 755 build/libvge.so $(PREFIX)/lib/
-	install -m 644 include/vge.h $(PREFIX)/include/
-	@echo "installed libvge → $(PREFIX)"
+	install -m 644 build/libmfd.a $(PREFIX)/lib/
+	install -m 755 build/libmfd.so $(PREFIX)/lib/
+	install -m 644 include/mfd.h $(PREFIX)/include/
+	@echo "installed libmfd → $(PREFIX)"
 
 clean:
 	rm -rf build

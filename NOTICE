@@ -1,0 +1,11 @@
+MFD library
+Copyright (c) theesfeld
+
+This product embeds the B612 font family for cockpit legibility.
+
+B612 font files under assets/fonts/ are from:
+  https://github.com/polarsys/b612
+License: Eclipse Public License 2.0 (see upstream)
+Copyright: Airbus / Intactile DESIGN / PolarSys contributors
+
+Low-level pixel stroke assembly (libmfd) is MIT as part of this project.
