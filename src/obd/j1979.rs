@@ -19,19 +19,25 @@ pub struct PidDef {
     pub bytes: u8,
 }
 
-/// Priority poll order for live dashboards.
+/// Priority poll order for live dashboards (high rate first — drive glass).
 pub const PRIORITY_PIDS: &[u8] = &[
     0x0C, // RPM
     0x0D, // Speed
+    0x0C, // RPM again (weight)
+    0x0D, // Speed again
     0x11, // TPS
+    0x2F, // Fuel level
+    0x42, // Control module voltage
     0x04, // Load
     0x05, // Coolant
     0x0F, // IAT
-    0x2F, // Fuel level
-    0x42, // Control module voltage
     0x5C, // Oil temp
     0x10, // MAF
     0x46, // Ambient
+    0x0B, // MAP
+    0x49, // Accel D
+    0x4A, // Accel E
+    0x4C, // Throttle cmd
 ];
 
 /// Mode 01 support PIDs used to discover available channels (J1979).
@@ -243,6 +249,55 @@ pub fn pid_def(pid: u8) -> Option<PidDef> {
             unit: "L/h",
             bytes: 2,
         },
+        // Additional PIDs seen live on 2019 2.7 F-150 capture
+        0x2E => PidDef {
+            pid,
+            name: "evap_purge",
+            unit: "%",
+            bytes: 1,
+        },
+        0x30 => PidDef {
+            pid,
+            name: "warmups_cleared",
+            unit: "",
+            bytes: 1,
+        },
+        0x31 => PidDef {
+            pid,
+            name: "distance_cleared",
+            unit: "km",
+            bytes: 2,
+        },
+        0x3C => PidDef {
+            pid,
+            name: "catalyst_temp_b1s1",
+            unit: "C",
+            bytes: 2,
+        },
+        0x3D => PidDef {
+            pid,
+            name: "catalyst_temp_b2s1",
+            unit: "C",
+            bytes: 2,
+        },
+        0x44 => PidDef {
+            pid,
+            name: "cmd_equiv_ratio",
+            unit: "",
+            bytes: 2,
+        },
+        0x51 => PidDef {
+            pid,
+            name: "fuel_type",
+            unit: "",
+            bytes: 1,
+        },
+        0x1C => PidDef {
+            pid,
+            name: "obd_standard",
+            unit: "",
+            bytes: 1,
+        },
         _ => return None,
     })
 }
@@ -268,8 +323,8 @@ pub fn decode_mode01(payload: &[u8]) -> Result<LiveValue> {
             )));
         }
         let value = match pid {
-            0x03 => data[0] as f64,
-            0x04 | 0x11 | 0x2F | 0x45 | 0x47 | 0x49 | 0x4A | 0x4C | 0x5A => {
+            0x03 | 0x1C | 0x30 | 0x51 => data[0] as f64,
+            0x04 | 0x11 | 0x2E | 0x2F | 0x45 | 0x47 | 0x49 | 0x4A | 0x4C | 0x5A => {
                 data[0] as f64 * 100.0 / 255.0
             }
             0x05 | 0x0F | 0x46 | 0x5C => data[0] as f64 - 40.0,
@@ -279,8 +334,14 @@ pub fn decode_mode01(payload: &[u8]) -> Result<LiveValue> {
             0x0C => ((data[0] as u16) << 8 | data[1] as u16) as f64 / 4.0,
             0x0E => data[0] as f64 / 2.0 - 64.0,
             0x10 => ((data[0] as u16) << 8 | data[1] as u16) as f64 / 100.0,
-            0x1F | 0x21 => ((data[0] as u16) << 8 | data[1] as u16) as f64,
+            0x1F | 0x21 | 0x31 => ((data[0] as u16) << 8 | data[1] as u16) as f64,
             0x23 => ((data[0] as u16) << 8 | data[1] as u16) as f64 * 10.0,
+            // Catalyst temp: (A*256+B)/10 - 40
+            0x3C | 0x3D => {
+                ((data[0] as u16) << 8 | data[1] as u16) as f64 / 10.0 - 40.0
+            }
+            // Equiv ratio: (A*256+B)/32768
+            0x44 => ((data[0] as u16) << 8 | data[1] as u16) as f64 / 32768.0,
             0x42 => ((data[0] as u16) << 8 | data[1] as u16) as f64 / 1000.0,
             0x43 => ((data[0] as u16) << 8 | data[1] as u16) as f64 * 100.0 / 255.0,
             0x5E => ((data[0] as u16) << 8 | data[1] as u16) as f64 / 20.0,

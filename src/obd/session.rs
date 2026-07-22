@@ -381,20 +381,47 @@ impl Session {
     }
 
     pub fn read_vin_mode09(&mut self) -> Result<String> {
-        // Mode 09 PID 02 — VIN (often multi-frame; ELM may return concatenated)
+        // Mode 09 PID 02 — VIN (multi-frame). Prefer UDS F190 if Mode 09 is noisy.
         let raw = self.elm.cmd("0902")?;
         let bytes = crate::obd::elm::parse_elm_hex_payload(&raw)?;
-        let ascii: String = bytes
+        // Strip Mode 09 framing: 49 02 … then ASCII
+        let data = if bytes.len() >= 3 && bytes[0] == 0x49 {
+            &bytes[2..]
+        } else {
+            bytes.as_slice()
+        };
+        let ascii: String = data
             .iter()
             .filter(|b| b.is_ascii_alphanumeric())
             .map(|b| *b as char)
             .collect();
-        if ascii.len() >= 17 {
-            Ok(ascii.chars().take(17).collect())
-        } else if !ascii.is_empty() {
-            Ok(ascii)
+        // Drop leading junk digit if present (legacy bad parse produced "I1FTE…")
+        let vin = if ascii.len() >= 18 && ascii.as_bytes()[0].is_ascii_digit() {
+            ascii.chars().skip(1).take(17).collect()
+        } else if ascii.len() >= 17 {
+            ascii.chars().take(17).collect()
         } else {
-            Err(Error::NoData)
+            ascii
+        };
+        if vin.len() >= 11 {
+            Ok(vin)
+        } else {
+            // Fallback UDS DID F190 (fixed multi-line ELM parse)
+            match self.read_did("7E0", 0xF190) {
+                Ok(b) => {
+                    let s: String = b
+                        .iter()
+                        .filter(|c| c.is_ascii_alphanumeric())
+                        .map(|c| *c as char)
+                        .collect();
+                    if s.len() >= 11 {
+                        Ok(s.chars().take(17).collect())
+                    } else {
+                        Err(Error::NoData)
+                    }
+                }
+                Err(_) => Err(Error::NoData),
+            }
         }
     }
 

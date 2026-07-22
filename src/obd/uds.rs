@@ -61,7 +61,11 @@ pub fn request(elm: &mut Elm, payload: &[u8]) -> Result<Vec<u8>> {
         return Err(Error::NoData);
     }
     let bytes = crate::obd::elm::parse_elm_hex_payload(&raw)?;
-    isotp::reassemble(&bytes).or(Ok(bytes))
+    // Prefer ISO-TP reassembly; if that fails, use raw (already-stripped ELM stream).
+    match isotp::reassemble(&bytes) {
+        Ok(p) => Ok(p),
+        Err(_) => Ok(bytes),
+    }
 }
 
 /// `0x10` DiagnosticSessionControl — e.g. `0x01` default, `0x03` extended (for reads).
@@ -86,9 +90,18 @@ pub fn read_data_by_identifier(elm: &mut Elm, did: u16) -> Result<Vec<u8>> {
     if resp.first() == Some(&0x7F) {
         return Err(Error::Protocol(format!("UDS NRC: {resp:02X?}")));
     }
+    // Positive response may be bare 62 DID_H DID_L data… or still have PCI.
+    let resp = match isotp::reassemble(&resp) {
+        Ok(p) if !p.is_empty() => p,
+        _ => resp,
+    };
+    if resp.first() == Some(&0x7F) {
+        return Err(Error::Protocol(format!("UDS NRC: {resp:02X?}")));
+    }
     if resp.len() >= 3 && resp[0] == 0x62 {
         return Ok(resp[3..].to_vec());
     }
+    // Sometimes ELM already stripped SID+DID
     Ok(resp)
 }
 

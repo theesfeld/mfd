@@ -579,7 +579,7 @@ fn run_session(
     load_dtcs(&mut session, tele, cap);
     let _ = ford::prepare_pcm_read(&mut session);
 
-    // Discover Mode 01 PIDs (always when live; essential for crush)
+    // Discover Mode 01 PIDs; **priority first** for glass rate (RPM/speed/fuel).
     let mut poll_pids: Vec<u8> = session
         .discover_mode01_pids()
         .unwrap_or_else(|_| PRIORITY_PIDS.to_vec());
@@ -587,6 +587,20 @@ fn run_session(
         if !poll_pids.contains(&p) {
             poll_pids.push(p);
         }
+    }
+    {
+        let mut ordered = Vec::with_capacity(poll_pids.len());
+        for &p in PRIORITY_PIDS {
+            if poll_pids.contains(&p) && !ordered.contains(&p) {
+                ordered.push(p);
+            }
+        }
+        for &p in &poll_pids {
+            if !ordered.contains(&p) {
+                ordered.push(p);
+            }
+        }
+        poll_pids = ordered;
     }
     {
         let list = poll_pids
@@ -798,38 +812,20 @@ fn run_session(
             }
         }
 
-        // Mode 01 (primary high-rate path)
+        // Mode 01 (primary high-rate path) — glass truth for RPM/speed/fuel/…
         let pid = poll_pids[i % poll_pids.len()];
         i = i.wrapping_add(1);
         let cmd = j1979::mode01_command(pid);
         cap_frame(cap, "tx", &cmd, None);
         match session.read_pid(pid) {
             Ok(v) => {
-                let key: &str = if v.name == "pid_raw" {
-                    // Fixed slots for raw PIDs — avoid unbounded "pid_XX" String growth.
-                    // Map into a few rotating keys by pid nibble.
-                    static RAW: [&str; 16] = [
-                        "pid_raw_0",
-                        "pid_raw_1",
-                        "pid_raw_2",
-                        "pid_raw_3",
-                        "pid_raw_4",
-                        "pid_raw_5",
-                        "pid_raw_6",
-                        "pid_raw_7",
-                        "pid_raw_8",
-                        "pid_raw_9",
-                        "pid_raw_a",
-                        "pid_raw_b",
-                        "pid_raw_c",
-                        "pid_raw_d",
-                        "pid_raw_e",
-                        "pid_raw_f",
-                    ];
-                    RAW[(v.pid as usize) & 0x0f]
+                // Unique key per PID (nibble slots collided and mixed values).
+                let key_owned: Option<String> = if v.name == "pid_raw" {
+                    Some(format!("pid_{:02X}", v.pid))
                 } else {
-                    v.name
+                    None
                 };
+                let key: &str = key_owned.as_deref().unwrap_or(v.name);
                 cap_frame(cap, "rx", &format!("OK:{:02X}", v.pid), Some(key));
                 cap_signal(cap, key, v.value, v.unit, v.mode, v.pid);
                 hard_fails = 0;
@@ -979,78 +975,99 @@ fn apply_telemetry(t: &Telemetry, v: &mut VehicleSnapshot) {
         v.bus_error.clear();
     }
 
+    // ── Mode 01 first (trusted on morning capture); UDS only as fill-in ──
     if let Some(rpm) = t.values.get("engine_rpm") {
         v.rpm = *rpm as f32;
     }
     if let Some(kmh) = t.values.get("vehicle_speed") {
         v.speed_mph = (*kmh as f32) / 1.60934;
     }
+    // Throttle: prefer TPS, then commanded / pedal
     if let Some(th) = t.values.get("throttle") {
         v.throttle = (*th as f32 / 100.0).clamp(0.0, 1.0);
-    }
-    if let Some(th) = t.values.get("accel_pedal") {
+    } else if let Some(th) = t.values.get("throttle_cmd") {
+        v.throttle = (*th as f32 / 100.0).clamp(0.0, 1.0);
+    } else if let Some(th) = t.values.get("accel_pedal_e") {
+        v.throttle = (*th as f32 / 100.0).clamp(0.0, 1.0);
+    } else if let Some(th) = t.values.get("accel_pedal") {
         v.throttle = (*th as f32 / 100.0).clamp(0.0, 1.0);
     }
     if let Some(load) = t.values.get("engine_load") {
         v.load = (*load as f32 / 100.0).clamp(0.0, 1.0);
+    } else if let Some(load) = t.values.get("abs_load") {
+        v.load = (*load as f32 / 100.0).clamp(0.0, 1.0);
     }
+    // Coolant: Mode 01 0x05 (76–91 °C on capture) beats UDS F405 spikes
     if let Some(c) = t.values.get("coolant_temp") {
         v.coolant_c = *c as f32;
         v.coolant = ((*c as f32 + 40.0) / 160.0).clamp(0.0, 1.0);
-    }
-    if let Some(c) = t.values.get("coolant_temp_c") {
-        v.coolant_c = *c as f32;
-        v.coolant = ((*c as f32 + 40.0) / 160.0).clamp(0.0, 1.0);
+    } else if let Some(c) = t.values.get("coolant_temp_c") {
+        let c = *c as f32;
+        if ( -40.0..150.0).contains(&c) {
+            v.coolant_c = c;
+            v.coolant = ((c + 40.0) / 160.0).clamp(0.0, 1.0);
+        }
     }
     if let Some(c) = t.values.get("intake_temp") {
         v.iat_c = *c as f32;
         v.iat = ((*c as f32 + 40.0) / 120.0).clamp(0.0, 1.0);
-    }
-    if let Some(c) = t.values.get("intake_temp_c") {
+    } else if let Some(c) = t.values.get("intake_temp_c") {
         v.iat_c = *c as f32;
         v.iat = ((*c as f32 + 40.0) / 120.0).clamp(0.0, 1.0);
     }
     if let Some(c) = t.values.get("oil_temp") {
         v.oil_temp_c = *c as f32;
         v.oil_temp = ((*c as f32 + 40.0) / 160.0).clamp(0.0, 1.0);
-    }
-    if let Some(c) = t.values.get("oil_temp_c") {
-        v.oil_temp_c = *c as f32;
-        v.oil_temp = ((*c as f32 + 40.0) / 160.0).clamp(0.0, 1.0);
+    } else if let Some(c) = t.values.get("oil_temp_c") {
+        // Only if Mode 01 missing and value is sane
+        let c = *c as f32;
+        if (0.0..160.0).contains(&c) {
+            v.oil_temp_c = c;
+            v.oil_temp = ((c + 40.0) / 160.0).clamp(0.0, 1.0);
+        }
     }
     if let Some(c) = t.values.get("trans_temp_c") {
-        v.trans_temp_c = *c as f32;
-        v.trans_temp = ((*c as f32 + 40.0) / 160.0).clamp(0.0, 1.0);
-    }
-    if let Some(c) = t.values.get("ambient_temp_c") {
-        v.temp_out_c = *c as f32;
+        let c = *c as f32;
+        if (0.0..160.0).contains(&c) {
+            v.trans_temp_c = c;
+            v.trans_temp = ((c + 40.0) / 160.0).clamp(0.0, 1.0);
+        }
     }
     if let Some(c) = t.values.get("ambient_temp") {
         v.temp_out_c = *c as f32;
+    } else if let Some(c) = t.values.get("ambient_temp_c") {
+        v.temp_out_c = *c as f32;
     }
-    if let Some(f) = t.values.get("fuel_level_pct") {
-        v.fuel = (*f as f32 / 100.0).clamp(0.0, 1.0);
-    }
+    // Fuel: Mode 01 0x2F only (UDS F41F was 0–2% garbage on capture)
     if let Some(f) = t.values.get("fuel_level") {
-        v.fuel = (*f as f32 / 100.0).clamp(0.0, 1.0);
-    }
-    if let Some(fp) = t.values.get("fuel_pressure") {
-        v.fuel_pressure_kpa = *fp as f32;
+        let pct = *f as f32;
+        if (0.0..=100.0).contains(&pct) {
+            v.fuel = (pct / 100.0).clamp(0.0, 1.0);
+        }
     }
     if let Some(fp) = t.values.get("fuel_rail_pressure") {
         v.fuel_pressure_kpa = *fp as f32;
+    } else if let Some(fp) = t.values.get("fuel_pressure") {
+        v.fuel_pressure_kpa = *fp as f32;
     }
-    if let Some(volt) = t.values.get("battery_v") {
-        v.battery_v = *volt as f32;
-        v.battery = (((*volt as f32) - 11.0) / 4.0).clamp(0.0, 1.0);
-    }
+    // Voltage: Mode 01 0x42 (12.6–14.4 V on capture)
     if let Some(volt) = t.values.get("control_module_voltage") {
         v.battery_v = *volt as f32;
         v.battery = (((*volt as f32) - 11.0) / 4.0).clamp(0.0, 1.0);
+    } else if let Some(volt) = t.values.get("battery_v") {
+        let volt = *volt as f32;
+        if (8.0..18.0).contains(&volt) {
+            v.battery_v = volt;
+            v.battery = ((volt - 11.0) / 4.0).clamp(0.0, 1.0);
+        }
     }
     if let Some(maf) = t.values.get("maf") {
         v.maf_gps = *maf as f32;
         v.maf = ((*maf as f32) / 100.0).clamp(0.0, 1.0);
+    }
+    if let Some(map) = t.values.get("map") {
+        // MAP kPa → crude exhaust/load proxy already covered; store via load if empty
+        let _ = map;
     }
     if t.dtc_loaded {
         // Clone DTC list only when length/content may change (cheap check).

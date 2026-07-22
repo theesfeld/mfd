@@ -81,6 +81,7 @@ pub const F150_DIDS: &[DidDef] = &[
         unit: "C",
         priority: 1,
     },
+    // Oil/ambient UDS often NRC 31 on this PCM — Mode 01 0x5C / 0x46 preferred.
     DidDef {
         did: 0xF45C,
         name: "oil_temp_c",
@@ -90,7 +91,7 @@ pub const F150_DIDS: &[DidDef] = &[
             mul: 1.0,
         },
         unit: "C",
-        priority: 1,
+        priority: 0,
     },
     DidDef {
         did: 0xF457,
@@ -103,6 +104,7 @@ pub const F150_DIDS: &[DidDef] = &[
         unit: "C",
         priority: 0,
     },
+    // Works on truck capture (≈3–60 °C early drive).
     DidDef {
         did: 0x1E1C,
         name: "trans_temp_c",
@@ -115,6 +117,7 @@ pub const F150_DIDS: &[DidDef] = &[
         priority: 1,
     },
     // ── Fuel / battery ────────────────────────────────────────────────────
+    // F41F returned 0–2% on MX+ capture — not trustworthy; use Mode 01 0x2F.
     DidDef {
         did: 0xF41F,
         name: "fuel_level_pct",
@@ -123,31 +126,32 @@ pub const F150_DIDS: &[DidDef] = &[
         unit: "%",
         priority: 0,
     },
+    // 402C NRC 31 on capture — use Mode 01 0x42 control_module_voltage.
     DidDef {
         did: 0x402C,
         name: "battery_v",
         header: HDR_PCM,
         scale: DidScale::U8Mul { mul: 0.1 },
         unit: "V",
-        priority: 1,
+        priority: 0,
     },
-    // ── Gear ──────────────────────────────────────────────────────────────
+    // ── Gear (raw until PRNDL map verified) ───────────────────────────────
     DidDef {
         did: 0x1E12,
         name: "gear_raw",
         header: HDR_PCM,
-        scale: DidScale::Raw,
+        scale: DidScale::U8Mul { mul: 1.0 },
         unit: "",
-        priority: 2,
+        priority: 1,
     },
-    // ── ABS / body (headers are hints) ────────────────────────────────────
+    // ── ABS / body — NO DATA on morning capture; demote (verify later) ────
     DidDef {
         did: 0x2B00,
         name: "brake_park_raw",
         header: HDR_ABS,
         scale: DidScale::Raw,
         unit: "",
-        priority: 2,
+        priority: 0,
     },
     DidDef {
         did: 0x2B06,
@@ -155,7 +159,7 @@ pub const F150_DIDS: &[DidDef] = &[
         header: HDR_ABS,
         scale: DidScale::Raw,
         unit: "",
-        priority: 2,
+        priority: 0,
     },
     DidDef {
         did: 0x2813,
@@ -163,7 +167,7 @@ pub const F150_DIDS: &[DidDef] = &[
         header: HDR_PSCM,
         scale: DidScale::Raw,
         unit: "",
-        priority: 1,
+        priority: 0,
     },
     DidDef {
         did: 0x03DC,
@@ -175,7 +179,7 @@ pub const F150_DIDS: &[DidDef] = &[
     },
 ];
 
-/// DIDs to cycle in the live feed (priority ≥ 1).
+/// DIDs to cycle in the live feed (priority ≥ 1). Dead channels stay priority 0.
 pub fn feed_poll_dids() -> impl Iterator<Item = &'static DidDef> {
     F150_DIDS.iter().filter(|d| d.priority >= 1)
 }
