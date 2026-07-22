@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Long-run slowdown / host bog:** capture uses BufWriter + sampled continuous frames (default) and change-gated signals; less flush thrash. HashMap keys reused; Kitty base64 encode-into; SIM in-place update; GO page list cached; caps frozen after BIT (no HashSet clone every frame). Demo probe no longer rebuilds `demo_complete` every tick. Full wire log: `MFD_OBD_CAPTURE_FULL=1`. Refs #117.
+
 ### Added
 
 - **Hardware bezel SoT:** `docs/hardware-bezel.md` — OSB 1–20 types, rocker types, GPIO ABI, POC key map, production reachability. Rust `mfd::osb_role` constants. Refs #113.

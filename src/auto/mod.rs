@@ -441,6 +441,24 @@ pub const DEMO_VIN: &str = "1FTEW1EP9KFC73499";
 /// Animated demo vehicle (sinusoids) — host replaces with OBD/CAN.
 pub fn demo_vehicle(t: f32) -> VehicleSnapshot {
     let mut v = VehicleSnapshot::default();
+    demo_vehicle_into(&mut v, t);
+    v
+}
+
+/// Update SIM snapshot **in place** (no full struct rebuild every frame).
+///
+/// Preserves user toggles: `speed_unit`, light/HVAC overrides from OSB options.
+pub fn demo_vehicle_into(v: &mut VehicleSnapshot, t: f32) {
+    let unit = v.speed_unit;
+    let light_low = v.light_low;
+    let light_high = v.light_high;
+    let light_drive = v.light_drive;
+    let light_fog = v.light_fog;
+    let light_interior = v.light_interior;
+    let hvac_ac = v.hvac_ac;
+    let hvac_defrost = v.hvac_defrost;
+    let hvac_fan_user = v.hvac_fan;
+
     v.rpm = 900.0 + 2800.0 * (0.5 + 0.5 * (t * 0.55).sin());
     v.speed_mph = 25.0 + 40.0 * (0.5 + 0.5 * (t * 0.35).sin());
     v.throttle = 0.2 + 0.5 * (0.5 + 0.5 * (t * 0.8).sin());
@@ -474,7 +492,12 @@ pub fn demo_vehicle(t: f32) -> VehicleSnapshot {
     } else {
         DriveMode::TwoHigh
     };
-    v.light_low = true;
+    // Preserve OSB light toggles (default light_low is true on VehicleSnapshot).
+    v.light_low = light_low;
+    v.light_high = light_high;
+    v.light_drive = light_drive;
+    v.light_fog = light_fog;
+    v.light_interior = light_interior;
     v.light_turn_l = (t * 2.0).sin() > 0.3 && (t as i32 % 4 < 2);
     v.light_brake = v.throttle < 0.15 && v.speed_mph > 10.0;
     v.brake_pedal = v.light_brake;
@@ -490,37 +513,51 @@ pub fn demo_vehicle(t: f32) -> VehicleSnapshot {
     v.tire_rl.alert = (t * 0.05).sin() > 0.92;
     if v.tire_rl.alert {
         v.tire_rl.pressure = 22.0;
+    } else {
+        v.tire_rl.pressure = 34.0;
     }
     v.door_fr = (t * 0.04).sin() < 0.95;
     v.temp_out_c = 12.0 + 8.0 * (t * 0.03).sin();
     v.temp_in_c = 20.0 + 2.0 * (t * 0.1).cos();
-    v.hvac_fan = 0.3 + 0.4 * (0.5 + 0.5 * (t * 0.2).sin());
-    // Stronger attitude so the sphere reads as a ball in demo.
+    v.hvac_ac = hvac_ac;
+    v.hvac_defrost = hvac_defrost;
+    v.hvac_fan = if hvac_fan_user > 0.01 {
+        hvac_fan_user
+    } else {
+        0.3 + 0.4 * (0.5 + 0.5 * (t * 0.2).sin())
+    };
     v.pitch_deg = 18.0 * (t * 0.45).sin();
     v.roll_deg = 32.0 * (t * 0.35).cos();
     v.heading_deg = (t * 18.0) % 360.0;
-    // Demo fault inventory (shows until live OBD replaces the list).
-    v.dtcs = vec![
-        DtcEntry {
+    // DTC list: update only when empty-path toggles (avoid realloc every frame).
+    let empty_bank = (t as i32 / 8) % 5 == 4;
+    if empty_bank {
+        v.dtcs.clear();
+    } else if v.dtcs.is_empty() {
+        v.dtcs.push(DtcEntry {
             code: "P0420".into(),
             kind: DtcKind::Stored,
-        },
-        DtcEntry {
+        });
+        v.dtcs.push(DtcEntry {
             code: "P0171".into(),
             kind: DtcKind::Stored,
-        },
-        DtcEntry {
+        });
+        v.dtcs.push(DtcEntry {
             code: "C1234".into(),
             kind: DtcKind::Pending,
-        },
-    ];
-    // Alternate empty bank briefly so "NONE" path is visible.
-    if (t as i32 / 8) % 5 == 4 {
-        v.dtcs.clear();
+        });
     }
     v.dtc_count = v.dtcs.len() as u32;
-    v.vin = DEMO_VIN.into();
-    v
+    if v.vin != DEMO_VIN {
+        v.vin.clear();
+        v.vin.push_str(DEMO_VIN);
+    }
+    if v.bus_state != "SIM" {
+        v.bus_state.clear();
+        v.bus_state.push_str("SIM");
+    }
+    v.speed_unit = unit;
+    v.bus_ticks = v.bus_ticks.wrapping_add(1);
 }
 
 /// Back-compat thin OBD view (older API).
@@ -911,9 +948,14 @@ pub fn draw_auto_with_video(
     page.clear();
     page.surface.clear(pal.glass);
     page.bezel();
-    let allowed_pages: Option<Vec<AutoPage>> =
-        caps.and_then(|c| if c.ready { Some(c.pages()) } else { None });
-    let allowed_slice = allowed_pages.as_deref();
+    // Use cached page list — never rebuild Vec every frame.
+    let allowed_slice = caps.and_then(|c| {
+        if c.ready && !c.page_list.is_empty() {
+            Some(c.pages_cached())
+        } else {
+            None
+        }
+    });
     let feat = caps.map(|c| &c.features);
     let dclt = fmt.map(|f| f.dclt).unwrap_or(0);
     chrome(

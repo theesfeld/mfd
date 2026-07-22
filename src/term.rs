@@ -1006,11 +1006,10 @@ fn present_kitty_at(
     let sc = scratch.unwrap_or(&mut local);
     surface.export_rgba32_into(&mut sc.rgba);
 
-    // Encode base64 into reusable string.
+    // Encode base64 into reusable string (no per-frame heap String from encoder).
     sc.b64.clear();
-    // estimate 4/3
-    sc.b64.reserve(sc.rgba.len() * 4 / 3 + 8);
-    sc.b64.push_str(&b64_encode(&sc.rgba));
+    sc.b64.reserve(sc.rgba.len().div_ceil(3) * 4 + 8);
+    b64_encode_into(&sc.rgba, &mut sc.b64);
 
     sc.out.clear();
     sc.out.reserve(sc.b64.len() + 256);
@@ -1257,9 +1256,9 @@ fn push_u16(buf: &mut Vec<u8>, n: u16) {
     }
 }
 
-fn b64_encode(data: &[u8]) -> String {
+/// Encode base64 into `out` without allocating a temporary String.
+fn b64_encode_into(data: &[u8], out: &mut String) {
     const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     let mut i = 0;
     while i + 3 <= data.len() {
         let n = ((data[i] as u32) << 16) | ((data[i + 1] as u32) << 8) | (data[i + 2] as u32);
@@ -1287,7 +1286,6 @@ fn b64_encode(data: &[u8]) -> String {
             out.push('=');
         }
     }
-    out
 }
 
 #[cfg(test)]
@@ -1296,7 +1294,9 @@ mod tests {
 
     #[test]
     fn b64_hello() {
-        assert_eq!(b64_encode(b"hello"), "aGVsbG8=");
+        let mut s = String::new();
+        b64_encode_into(b"hello", &mut s);
+        assert_eq!(s, "aGVsbG8=");
     }
 
     #[test]

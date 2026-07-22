@@ -251,6 +251,21 @@ fn cap_frame(cap: &mut Option<CaptureWriter>, dir: &str, data: &str, note: Optio
     }
 }
 
+fn cap_frame_always(cap: &mut Option<CaptureWriter>, dir: &str, data: &str, note: Option<&str>) {
+    if let Some(c) = cap.as_mut() {
+        let _ = c.log_frame_always(dir, "hs", data, note);
+    }
+}
+
+fn set_value(t: &mut Telemetry, name: &str, value: f64) {
+    // Avoid allocating a new String key every poll when the key already exists.
+    if let Some(v) = t.values.get_mut(name) {
+        *v = value;
+    } else {
+        t.values.insert(name.to_string(), value);
+    }
+}
+
 fn cap_signal(
     cap: &mut Option<CaptureWriter>,
     name: &str,
@@ -268,7 +283,7 @@ fn load_dtcs(session: &mut Session, tele: &Arc<Mutex<Telemetry>>, cap: &mut Opti
     match session.read_all_dtcs() {
         Ok(list) => {
             for d in &list {
-                cap_frame(cap, "rx", &d.code, Some(&format!("dtc {}", d.kind.label())));
+                cap_frame_always(cap, "rx", &d.code, Some(&format!("dtc {}", d.kind.label())));
             }
             if let Ok(mut t) = tele.lock() {
                 t.dtcs = list
@@ -283,7 +298,7 @@ fn load_dtcs(session: &mut Session, tele: &Arc<Mutex<Telemetry>>, cap: &mut Opti
             }
         }
         Err(e) => {
-            cap_frame(cap, "rx", &format!("ERR:{e}"), Some("dtc"));
+            cap_frame_always(cap, "rx", &format!("ERR:{e}"), Some("dtc"));
             if let Ok(mut t) = tele.lock() {
                 let msg = e.to_string();
                 if !msg.contains("NO DATA") {
@@ -328,10 +343,18 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
             t.capture_dir = Some(c.dir().display().to_string());
         }
     }
+    // Discover phase: full wire log; continuous poll samples frames (signals always).
+    if let Some(c) = cap.as_mut() {
+        c.set_log_all_frames(true);
+    }
     let crush = env_truthy("MFD_OBD_CRUSH");
 
     // ── BIT / capability probe first ──────────────────────────────────────
-    let caps = probe::run_live_probe(&mut session);
+    let mut caps = probe::run_live_probe(&mut session);
+    // run_live_probe already finalizes pages; ensure cache even if path changes.
+    if caps.page_list.is_empty() {
+        caps.finalize_pages();
+    }
     if let Ok(mut t) = tele.lock() {
         t.caps = caps;
         t.status = format!("live {}", session.name());
@@ -493,6 +516,7 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
     }
 
     if let Some(c) = cap.as_mut() {
+        c.set_log_all_frames(false); // continuous: sample frames, keep signals
         let _ = c.flush();
     }
 
@@ -500,9 +524,14 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
     let mut fi = 0usize;
     let mut di = 0usize;
     let mut keep = 0u32;
+    let link_name = session.name().to_string();
     while !stop.load(Ordering::Relaxed) {
         keep = keep.wrapping_add(1);
-        if keep % 50 == 1 {
+        if let Some(c) = cap.as_mut() {
+            c.tick_poll();
+        }
+        // DTC refresh less often — expensive and allocates.
+        if keep % 200 == 1 {
             load_dtcs(&mut session, &tele, &mut cap);
         }
         if keep % 40 == 0 {
@@ -521,7 +550,7 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
                     cap_frame(&mut cap, "rx", &format!("{value}"), Some(name));
                     cap_signal(&mut cap, name, value, unit, 0x22, (def.did & 0xFF) as u8);
                     if let Ok(mut t) = tele.lock() {
-                        t.values.insert(name.to_string(), value);
+                        set_value(&mut t, name, value);
                         t.ticks = t.ticks.wrapping_add(1);
                     }
                 }
@@ -584,21 +613,47 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
         cap_frame(&mut cap, "tx", &cmd, None);
         match session.read_pid(pid) {
             Ok(v) => {
-                let key = if v.name == "pid_raw" {
-                    format!("pid_{:02X}", v.pid)
+                let key: &str = if v.name == "pid_raw" {
+                    // Fixed slots for raw PIDs — avoid unbounded "pid_XX" String growth.
+                    // Map into a few rotating keys by pid nibble.
+                    static RAW: [&str; 16] = [
+                        "pid_raw_0",
+                        "pid_raw_1",
+                        "pid_raw_2",
+                        "pid_raw_3",
+                        "pid_raw_4",
+                        "pid_raw_5",
+                        "pid_raw_6",
+                        "pid_raw_7",
+                        "pid_raw_8",
+                        "pid_raw_9",
+                        "pid_raw_a",
+                        "pid_raw_b",
+                        "pid_raw_c",
+                        "pid_raw_d",
+                        "pid_raw_e",
+                        "pid_raw_f",
+                    ];
+                    RAW[(v.pid as usize) & 0x0f]
                 } else {
-                    v.name.to_string()
+                    v.name
                 };
-                cap_frame(&mut cap, "rx", &format!("OK:{:02X}", v.pid), Some(&key));
-                cap_signal(&mut cap, &key, v.value, v.unit, v.mode, v.pid);
+                cap_frame(&mut cap, "rx", &format!("OK:{:02X}", v.pid), Some(key));
+                cap_signal(&mut cap, key, v.value, v.unit, v.mode, v.pid);
                 if let Ok(mut t) = tele.lock() {
-                    t.values.insert(key, v.value);
+                    set_value(&mut t, key, v.value);
                     t.ticks = t.ticks.wrapping_add(1);
                     t.error = None;
-                    t.status = format!("live {}", session.name());
+                    // Avoid format! every poll — reuse status when stable.
+                    if !t.status.starts_with("live ") {
+                        t.status.clear();
+                        t.status.push_str("live ");
+                        t.status.push_str(&link_name);
+                    }
                 }
             }
             Err(e) => {
+                // Only log continuous errors sparsely (sampled frames handle this).
                 cap_frame(&mut cap, "rx", &format!("ERR:{e}"), None);
                 if let Ok(mut t) = tele.lock() {
                     let msg = e.to_string();
@@ -609,12 +664,13 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
             }
         }
 
-        if keep % 25 == 0 {
+        // Flush at most ~every few seconds (BufWriter + FLUSH_EVERY also apply).
+        if keep % 500 == 0 {
             if let Some(c) = cap.as_mut() {
                 let _ = c.flush();
             }
         }
-        thread::sleep(Duration::from_millis(if crush { 12 } else { 20 }));
+        thread::sleep(Duration::from_millis(if crush { 15 } else { 25 }));
     }
 
     finish_cap(cap);
@@ -632,43 +688,68 @@ fn finish_cap(cap: Option<CaptureWriter>) {
     }
 }
 
+fn assign_str(dst: &mut String, src: &str) {
+    if dst != src {
+        dst.clear();
+        dst.push_str(src);
+    }
+}
+
 fn apply_telemetry(t: &Telemetry, v: &mut VehicleSnapshot) {
-    // Always refresh bus / Bluetooth block for OWN · SETUP · BUS glass.
-    v.bus_kind = if t.link_kind.is_empty() {
-        "OBD".into()
-    } else {
-        t.link_kind.clone()
-    };
-    v.bus_addr = t.link_addr.clone();
-    v.bus_channel = if t.link_channel.is_empty() {
-        "-".into()
-    } else {
-        t.link_channel.clone()
-    };
-    v.bus_adapter = if t.adapter_id.is_empty() {
-        "—".into()
-    } else {
-        t.adapter_id.clone()
-    };
-    v.bus_proto = if t.protocol.is_empty() {
-        "—".into()
-    } else {
-        t.protocol.clone()
-    };
+    // Bus block: copy only when changed (avoids heap churn every frame).
+    assign_str(
+        &mut v.bus_kind,
+        if t.link_kind.is_empty() {
+            "OBD"
+        } else {
+            &t.link_kind
+        },
+    );
+    assign_str(&mut v.bus_addr, &t.link_addr);
+    assign_str(
+        &mut v.bus_channel,
+        if t.link_channel.is_empty() {
+            "-"
+        } else {
+            &t.link_channel
+        },
+    );
+    assign_str(
+        &mut v.bus_adapter,
+        if t.adapter_id.is_empty() {
+            "—"
+        } else {
+            &t.adapter_id
+        },
+    );
+    assign_str(
+        &mut v.bus_proto,
+        if t.protocol.is_empty() {
+            "—"
+        } else {
+            &t.protocol
+        },
+    );
     v.bus_ticks = t.ticks;
-    v.bus_capture = t
+    let cap = t
         .capture_dir
         .as_ref()
         .map(|p| short_path(p))
         .unwrap_or_default();
-    if !t.caps.ready {
-        v.bus_state = "BIT".into();
+    assign_str(&mut v.bus_capture, &cap);
+    let state = if !t.caps.ready {
+        "BIT"
     } else if t.error.is_some() {
-        v.bus_state = "ERR".into();
+        "ERR"
     } else {
-        v.bus_state = "LIVE".into();
+        "LIVE"
+    };
+    assign_str(&mut v.bus_state, state);
+    if let Some(e) = &t.error {
+        assign_str(&mut v.bus_error, e);
+    } else if !v.bus_error.is_empty() {
+        v.bus_error.clear();
     }
-    v.bus_error = t.error.clone().unwrap_or_default();
 
     if let Some(rpm) = t.values.get("engine_rpm") {
         v.rpm = *rpm as f32;
@@ -744,12 +825,20 @@ fn apply_telemetry(t: &Telemetry, v: &mut VehicleSnapshot) {
         v.maf = ((*maf as f32) / 100.0).clamp(0.0, 1.0);
     }
     if t.dtc_loaded {
-        v.dtcs = t.dtcs.clone();
+        // Clone DTC list only when length/content may change (cheap check).
+        if v.dtcs.len() != t.dtcs.len()
+            || v.dtcs
+                .iter()
+                .zip(t.dtcs.iter())
+                .any(|(a, b)| a.code != b.code)
+        {
+            v.dtcs = t.dtcs.clone();
+        }
         v.dtc_count = t.dtcs.len() as u32;
     }
     if let Some(vin) = &t.vin {
         if !vin.is_empty() {
-            v.vin = vin.clone();
+            assign_str(&mut v.vin, vin);
         }
     }
 }

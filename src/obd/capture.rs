@@ -2,15 +2,20 @@
 //!
 //! Compatible with the truck dump under `docs/odbii-session/` (obdtui origin;
 //! we only **read** that layout — writer is new).
+//!
+//! **IO discipline:** buffered writers; flush every `FLUSH_EVERY` frames (not
+//! every few polls) so long drives do not bog the host.
 
 use crate::obd::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const CAPTURE_FORMAT_VERSION: u32 = 1;
+/// Flush capture files every N frames (balance durability vs disk thrash).
+const FLUSH_EVERY: u64 = 256;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Frame {
@@ -44,22 +49,41 @@ pub struct SessionMeta {
 #[derive(Debug)]
 pub struct CaptureWriter {
     dir: PathBuf,
-    frames: File,
-    signals: File,
+    frames: BufWriter<File>,
+    signals: BufWriter<File>,
     meta: SessionMeta,
     frame_count: u64,
+    signal_count: u64,
+    /// When true, every TX/RX is written (discover phase / MFD_OBD_CAPTURE_FULL).
+    log_all_frames: bool,
+    /// Continuous poll: log at most 1 frame pair per this many poll ticks (0 = all).
+    frame_sample: u32,
+    /// Continuous poll: log signal at most 1/N ticks unless value changes enough (0 = all).
+    signal_sample: u32,
+    poll_tick: u32,
+    /// Last logged signal value by name (for change-gated signal CSV).
+    last_signal: std::collections::HashMap<String, f64>,
 }
 
 impl CaptureWriter {
     pub fn create(dir: impl Into<PathBuf>, software: &str, adapter: &str) -> Result<Self> {
         let dir = dir.into();
         fs::create_dir_all(&dir)?;
-        let frames = File::create(dir.join("frames.ndjson"))?;
+        let frames = BufWriter::with_capacity(64 * 1024, File::create(dir.join("frames.ndjson"))?);
         let signals = {
-            let mut f = File::create(dir.join("signals.csv"))?;
+            let mut f = BufWriter::with_capacity(32 * 1024, File::create(dir.join("signals.csv"))?);
             writeln!(f, "ts,name,value,unit,mode,pid,bus")?;
             f
         };
+        // Full wire log only when explicitly requested (huge on long drives).
+        let log_all = matches!(
+            std::env::var("MFD_OBD_CAPTURE_FULL").ok().as_deref(),
+            Some("1") | Some("true") | Some("TRUE") | Some("yes")
+        );
+        // Sample continuous frames ~1/8 polls unless full.
+        let frame_sample = if log_all { 0 } else { 8 };
+        // Signals: change-gated + ~1/4 sample (still dense enough for crush charts).
+        let signal_sample = if log_all { 0 } else { 4 };
         let meta = SessionMeta {
             format_version: CAPTURE_FORMAT_VERSION,
             software: software.into(),
@@ -68,7 +92,11 @@ impl CaptureWriter {
             vin: String::new(),
             adapter_path: adapter.into(),
             profile_id: "mfd_native".into(),
-            notes: String::new(),
+            notes: if log_all {
+                "full_frames".into()
+            } else {
+                "sampled_frames+change_signals".into()
+            },
             capabilities: serde_json::json!({}),
         };
         Ok(Self {
@@ -77,6 +105,12 @@ impl CaptureWriter {
             signals,
             meta,
             frame_count: 0,
+            signal_count: 0,
+            log_all_frames: log_all,
+            frame_sample,
+            signal_sample,
+            poll_tick: 0,
+            last_signal: std::collections::HashMap::new(),
         })
     }
 
@@ -88,13 +122,17 @@ impl CaptureWriter {
         self.meta.capabilities = caps;
     }
 
-    pub fn log_frame(
-        &mut self,
-        dir: &str,
-        bus: &str,
-        data: &str,
-        note: Option<&str>,
-    ) -> Result<()> {
+    /// Force full wire logging (discover phase).
+    pub fn set_log_all_frames(&mut self, all: bool) {
+        self.log_all_frames = all;
+    }
+
+    /// Call once per continuous poll iteration for sample pacing.
+    pub fn tick_poll(&mut self) {
+        self.poll_tick = self.poll_tick.wrapping_add(1);
+    }
+
+    fn write_frame(&mut self, dir: &str, bus: &str, data: &str, note: Option<&str>) -> Result<()> {
         let f = Frame {
             ts: now_rfc3339(),
             dir: dir.into(),
@@ -105,12 +143,37 @@ impl CaptureWriter {
         serde_json::to_writer(&mut self.frames, &f).map_err(|e| Error::Protocol(e.to_string()))?;
         writeln!(self.frames)?;
         self.frame_count += 1;
-        // Keep capture durable on kill / power loss (drive logs).
-        if self.frame_count % 8 == 0 {
+        if self.frame_count % FLUSH_EVERY == 0 {
             let _ = self.frames.flush();
             let _ = self.signals.flush();
         }
         Ok(())
+    }
+
+    /// Continuous-poll frame log (sampled unless `MFD_OBD_CAPTURE_FULL=1`).
+    pub fn log_frame(
+        &mut self,
+        dir: &str,
+        bus: &str,
+        data: &str,
+        note: Option<&str>,
+    ) -> Result<()> {
+        if !self.log_all_frames && self.frame_sample != 0 && self.poll_tick % self.frame_sample != 0
+        {
+            return Ok(());
+        }
+        self.write_frame(dir, bus, data, note)
+    }
+
+    /// Always log (discover phase / DTC / important events).
+    pub fn log_frame_always(
+        &mut self,
+        dir: &str,
+        bus: &str,
+        data: &str,
+        note: Option<&str>,
+    ) -> Result<()> {
+        self.write_frame(dir, bus, data, note)
     }
 
     pub fn log_signal(
@@ -122,6 +185,22 @@ impl CaptureWriter {
         pid: u8,
         bus: &str,
     ) -> Result<()> {
+        // Skip near-duplicate samples during continuous poll (disk thrash on long drives).
+        if !self.log_all_frames && self.signal_sample != 0 {
+            let changed = match self.last_signal.get(name) {
+                Some(&prev) => {
+                    let d = (value - prev).abs();
+                    // Absolute or relative change (handles near-zero gauges).
+                    d > 0.05 && d > prev.abs() * 0.002
+                }
+                None => true,
+            };
+            let sample_ok = self.poll_tick % self.signal_sample == 0;
+            if !changed && !sample_ok {
+                return Ok(());
+            }
+            self.last_signal.insert(name.to_string(), value);
+        }
         writeln!(
             self.signals,
             "{},{},{},{},{},{},{}",
@@ -133,6 +212,10 @@ impl CaptureWriter {
             pid,
             bus
         )?;
+        self.signal_count += 1;
+        if self.signal_count % FLUSH_EVERY == 0 {
+            let _ = self.signals.flush();
+        }
         Ok(())
     }
 
@@ -153,7 +236,8 @@ impl CaptureWriter {
 
     pub fn finish(mut self) -> Result<PathBuf> {
         self.meta.ended_at = now_rfc3339();
-        // meta.toml (simple)
+        self.frames.flush()?;
+        self.signals.flush()?;
         let mut t = File::create(self.dir.join("meta.toml"))?;
         writeln!(t, "format_version = {}", self.meta.format_version)?;
         writeln!(t, "software = {:?}", self.meta.software)?;
@@ -163,12 +247,12 @@ impl CaptureWriter {
         writeln!(t, "adapter_path = {:?}", self.meta.adapter_path)?;
         writeln!(t, "profile_id = {:?}", self.meta.profile_id)?;
         writeln!(t, "notes = {:?}", self.meta.notes)?;
-        // session.json with empty frames array (frames live in ndjson for size)
         let session = serde_json::json!({
             "meta": self.meta,
             "frames": [],
             "frame_file": "frames.ndjson",
             "frame_count": self.frame_count,
+            "signal_count": self.signal_count,
         });
         let mut s = File::create(self.dir.join("session.json"))?;
         serde_json::to_writer_pretty(&mut s, &session)
@@ -207,7 +291,6 @@ pub fn load_frames(path: &Path) -> Result<Vec<Frame>> {
     {
         return load_session_json(path);
     }
-    // try as ndjson anyway
     load_ndjson(path)
 }
 
@@ -248,7 +331,6 @@ fn now_rfc3339() -> String {
     let dur = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    // Simple UTC timestamp (good enough for capture ordering)
     format!("{}.{:09}Z", dur.as_secs(), dur.subsec_nanos())
 }
 

@@ -105,6 +105,8 @@ fn main() -> io::Result<()> {
     let mut demo_probe = DemoProbe::start();
     let mut boot_done = false;
     let mut available_pages: Vec<AutoPage> = Vec::new();
+    // Frozen after BIT — avoid cloning VehicleCaps (HashSets) every frame.
+    let mut caps_cached: Option<mfd::auto::VehicleCaps> = None;
     let mut fmt_sel = AutoFormatSelect::default();
     let mut warn_eng = WarningEngine::new();
     let mut fog_ok = true;
@@ -302,37 +304,49 @@ fn main() -> io::Result<()> {
         #[cfg(not(feature = "obd"))]
         let use_obd = false;
 
-        let caps_now = {
+        // After BIT, reuse frozen caps (no HashSet clone / page rebuild per frame).
+        // During BIT only: clone probe progress for the status screen.
+        let mut bit_caps: Option<mfd::auto::VehicleCaps> = None;
+        if caps_cached.is_none() {
             #[cfg(feature = "obd")]
-            {
-                if let Some(ref feed) = obd_feed {
-                    feed.caps()
-                } else {
-                    demo_probe.tick().clone()
-                }
-            }
-            #[cfg(not(feature = "obd"))]
-            {
+            let polled = if let Some(ref feed) = obd_feed {
+                feed.caps()
+            } else {
                 demo_probe.tick().clone()
+            };
+            #[cfg(not(feature = "obd"))]
+            let polled = demo_probe.tick().clone();
+
+            if polled.ready {
+                boot_done = true;
+                available_pages = if !polled.page_list.is_empty() {
+                    polled.page_list.clone()
+                } else {
+                    polled.pages()
+                };
+                fmt_sel = AutoFormatSelect::from_allowed(&available_pages);
+                auto_page = fmt_sel.current();
+                if !available_pages.is_empty() && !available_pages.contains(&auto_page) {
+                    auto_page = available_pages[0];
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                fog_ok = polled.features.fog_lights;
+                eprintln!(
+                    "BIT COMPLETE · {} formats · {} · slots {:?}",
+                    available_pages.len(),
+                    polled.link,
+                    fmt_sel.slot_labels()
+                );
+                caps_cached = Some(polled);
+            } else {
+                fog_ok = polled.features.fog_lights;
+                bit_caps = Some(polled);
             }
-        };
-        if !boot_done && caps_now.ready {
-            boot_done = true;
-            available_pages = caps_now.pages();
-            fmt_sel = AutoFormatSelect::from_allowed(&available_pages);
-            auto_page = fmt_sel.current();
-            if !available_pages.is_empty() && !available_pages.contains(&auto_page) {
-                auto_page = available_pages[0];
-                fmt_sel.assign(fmt_sel.active, auto_page);
-            }
-            eprintln!(
-                "BIT COMPLETE · {} formats · {} · slots {:?}",
-                available_pages.len(),
-                caps_now.link,
-                fmt_sel.slot_labels()
-            );
         }
-        fog_ok = caps_now.features.fog_lights;
+        let caps_now: &mfd::auto::VehicleCaps = caps_cached
+            .as_ref()
+            .or(bit_caps.as_ref())
+            .expect("caps available during BIT or after");
 
         if use_obd {
             #[cfg(feature = "obd")]
@@ -340,20 +354,8 @@ fn main() -> io::Result<()> {
                 feed.apply_to(&mut vehicle);
             }
         } else if boot_done {
-            let mut live = auto::demo_vehicle(t);
-            live.speed_unit = vehicle.speed_unit;
-            live.gear = vehicle.gear;
-            live.gear_num = vehicle.gear_num;
-            live.drive = vehicle.drive;
-            live.light_low = vehicle.light_low;
-            live.light_high = vehicle.light_high;
-            live.light_drive = vehicle.light_drive;
-            live.light_fog = vehicle.light_fog;
-            live.light_interior = vehicle.light_interior;
-            live.hvac_ac = vehicle.hvac_ac;
-            live.hvac_defrost = vehicle.hvac_defrost;
-            live.hvac_fan = vehicle.hvac_fan;
-            vehicle = live;
+            // In-place SIM update — avoid full VehicleSnapshot rebuild every frame.
+            auto::demo_vehicle_into(&mut vehicle, t);
         }
 
         #[cfg(target_os = "linux")]
@@ -374,7 +376,7 @@ fn main() -> io::Result<()> {
         page.font_px = if w.min(h) >= 480 { 14.0 } else { 12.0 };
 
         if !boot_done {
-            auto::draw_bit_screen(&mut page, &pal, &caps_now, t);
+            auto::draw_bit_screen(&mut page, &pal, caps_now, t);
         } else {
             let font_px = page.font_px;
             // Offline SIM only: force brief alerts so flash/bingo can be checked
@@ -397,7 +399,7 @@ fn main() -> io::Result<()> {
                 &vehicle,
                 t,
                 cam_frame.as_ref(),
-                Some(&caps_now),
+                Some(caps_now),
                 Some(&active),
                 Some(&fmt_sel),
             );
@@ -568,39 +570,6 @@ fn print_banner(ver: &str) {
     eprintln!();
 }
 
-#[cfg(test)]
-mod esc_tests {
-    use super::*;
-
-    #[test]
-    fn arrow_up_is_page_prev_not_quit() {
-        let (n, a) = parse_esc_seq(b"\x1b[A").unwrap();
-        assert_eq!(n, 3);
-        assert!(matches!(a, EscAction::PagePrev));
-    }
-
-    #[test]
-    fn arrow_down_is_page_next() {
-        let (n, a) = parse_esc_seq(b"\x1b[B").unwrap();
-        assert_eq!(n, 3);
-        assert!(matches!(a, EscAction::PageNext));
-    }
-
-    #[test]
-    fn bare_esc_quits() {
-        let (n, a) = parse_esc_seq(b"\x1b").unwrap();
-        assert_eq!(n, 1);
-        assert!(matches!(a, EscAction::Quit));
-    }
-
-    #[test]
-    fn ss3_arrow_right() {
-        let (n, a) = parse_esc_seq(b"\x1bOC").unwrap();
-        assert_eq!(n, 3);
-        assert!(matches!(a, EscAction::PageNext));
-    }
-}
-
 fn log_ruler(face: &mfd::PhysicalFace, cols: u16, rows: u16, w: u32, h: u32) {
     let src = match face.ppi_source {
         PpiSource::Env => "MFD_PPI",
@@ -636,5 +605,38 @@ fn install_sigint() {
         #[allow(unknown_lints, function_casts_as_integer)]
         let handler = on_sigint as *const () as libc::sighandler_t;
         libc::signal(libc::SIGINT, handler);
+    }
+}
+
+#[cfg(test)]
+mod esc_tests {
+    use super::*;
+
+    #[test]
+    fn arrow_up_is_page_prev_not_quit() {
+        let (n, a) = parse_esc_seq(b"\x1b[A").unwrap();
+        assert_eq!(n, 3);
+        assert!(matches!(a, EscAction::PagePrev));
+    }
+
+    #[test]
+    fn arrow_down_is_page_next() {
+        let (n, a) = parse_esc_seq(b"\x1b[B").unwrap();
+        assert_eq!(n, 3);
+        assert!(matches!(a, EscAction::PageNext));
+    }
+
+    #[test]
+    fn bare_esc_quits() {
+        let (n, a) = parse_esc_seq(b"\x1b").unwrap();
+        assert_eq!(n, 1);
+        assert!(matches!(a, EscAction::Quit));
+    }
+
+    #[test]
+    fn ss3_arrow_right() {
+        let (n, a) = parse_esc_seq(b"\x1bOC").unwrap();
+        assert_eq!(n, 3);
+        assert!(matches!(a, EscAction::PageNext));
     }
 }

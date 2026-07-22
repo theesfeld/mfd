@@ -63,6 +63,7 @@ One ELM Bluetooth SPP client at a time. Drive mode runs **capture inside `cmfd`*
 | `MFD_OBD_BT` | `00:04:3E:96:B8:F1` |
 | `MFD_OBD_BT_CHANNEL` | `1` |
 | `MFD_OBD_CRUSH` | `1` (drive mode) |
+| `MFD_OBD_CAPTURE_FULL` | unset = sample wire frames + change-gated signals (default; keeps long drives light). Set `1` for every TX/RX and every signal sample |
 | `MFD_HZ` | `30` |
 | `MFD_CAMERA` | optional `/dev/videoN` or `auto` |
 | `MFD_SKIP_BUILD=1` | skip cargo when bins are already built |
@@ -77,7 +78,7 @@ One ELM Bluetooth SPP client at a time. Drive mode runs **capture inside `cmfd`*
 4. Mode 01 PID support discover + continuous poll
 5. Multi-module UDS known DIDs (PCM, BCM, ABS, IPC, PSCM)
 6. Ford catalog DIDs on continuous rotation
-7. All frames → capture dir (flushed often)
+7. Capture → `captures/…` (`frames.ndjson` sampled unless `MFD_OBD_CAPTURE_FULL=1`; `signals.csv` change-gated; buffered flush)
 
 **Headless `./cmfd.sh capture`**
 

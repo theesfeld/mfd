@@ -65,6 +65,8 @@ pub struct VehicleCaps {
     pub dids: HashSet<u16>,
     pub modules: HashSet<&'static str>,
     pub link: String,
+    /// Cached GO format list (filled when probe completes — avoid realloc every frame).
+    pub page_list: Vec<crate::auto::AutoPage>,
 }
 
 impl Default for VehicleCaps {
@@ -79,6 +81,7 @@ impl Default for VehicleCaps {
             dids: HashSet::new(),
             modules: HashSet::new(),
             link: "NONE".into(),
+            page_list: Vec::new(),
         }
     }
 }
@@ -182,6 +185,7 @@ impl VehicleCaps {
                 state: BitState::Go,
             },
         ];
+        c.finalize_pages();
         c
     }
 
@@ -230,5 +234,15 @@ impl VehicleCaps {
         p.push(AutoPage::Own);
         p.push(AutoPage::Setup);
         p
+    }
+
+    /// Compute and cache GO page list (call once when probe finishes).
+    pub fn finalize_pages(&mut self) {
+        self.page_list = self.pages();
+    }
+
+    /// Cached GO pages after [`finalize_pages`]; empty until probe finishes.
+    pub fn pages_cached(&self) -> &[crate::auto::AutoPage] {
+        &self.page_list
     }
 }

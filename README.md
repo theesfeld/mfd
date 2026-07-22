@@ -90,6 +90,7 @@ OSB (auto): top CLST…LITE · right TPM/BODY/CLIM/FLIR/**RNG** · left OBD/SET/
 | `MFD_FLIR_PATH=grey.pgm` | Still greyscale |
 | `MFD_OBD_BT` / `MFD_OBD_PORT` / `MFD_OBD_REPLAY` | Live OBD (native stack) → vehicle pages |
 | `MFD_OBD_CAPTURE=dir` | Log frames/signals while glass runs (one BT client) |
+| `MFD_OBD_CAPTURE_FULL=1` | Log every TX/RX + every signal (heavy; long drives bog the host) |
 | `MFD_OBD_CRUSH=1` | Discover all Mode 01 PIDs + multi-module UDS |
 | `MFD_RANGE=2.1,3,2.8,1.2` | Range page (m) |
 | `MFD_AUTO_PAGE=FLIR` | Start page |

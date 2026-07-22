@@ -9,6 +9,8 @@ use std::time::Instant;
 pub struct DemoProbe {
     t0: Instant,
     caps: VehicleCaps,
+    /// Once true, tick is a no-op (caps frozen — no per-frame rebuild).
+    done: bool,
 }
 
 impl DemoProbe {
@@ -25,10 +27,15 @@ impl DemoProbe {
         Self {
             t0: Instant::now(),
             caps,
+            done: false,
         }
     }
 
     pub fn tick(&mut self) -> &VehicleCaps {
+        // Freeze after BIT — never reallocate demo_complete every frame.
+        if self.done {
+            return &self.caps;
+        }
         let t = self.t0.elapsed().as_secs_f32();
         // ~2.8 s full BIT (feels like CMFD power-up, not endless)
         let steps: &[(&str, f32, BitState)] = &[
@@ -49,38 +56,42 @@ impl DemoProbe {
             ("BIT", 2.8, BitState::Go),
         ];
         self.caps.progress = (t / 2.8).clamp(0.0, 1.0);
-        self.caps.phase = if t < 0.2 {
-            "POWER ON".into()
+        let phase = if t < 0.2 {
+            "POWER ON"
         } else if t < 2.8 {
-            "BIT IN PROGRESS".into()
+            "BIT IN PROGRESS"
         } else {
-            "BIT COMPLETE".into()
+            "BIT COMPLETE"
         };
+        if self.caps.phase != phase {
+            self.caps.phase.clear();
+            self.caps.phase.push_str(phase);
+        }
 
-        let mut lines = Vec::new();
+        self.caps.lines.clear();
         for &(name, at, st) in steps {
             if t >= at {
-                lines.push(BitLine {
+                self.caps.lines.push(BitLine {
                     name: name.into(),
                     state: st,
                 });
             } else if t >= at - 0.2 {
-                lines.push(BitLine {
+                self.caps.lines.push(BitLine {
                     name: name.into(),
                     state: BitState::Rdy,
                 });
             }
         }
-        if lines.is_empty() {
-            lines.push(BitLine {
+        if self.caps.lines.is_empty() {
+            self.caps.lines.push(BitLine {
                 name: "MFDS".into(),
                 state: BitState::Rdy,
             });
         }
-        self.caps.lines = lines;
 
         if t >= 2.85 {
             self.caps = VehicleCaps::demo_complete();
+            self.done = true;
         }
         &self.caps
     }
@@ -237,5 +248,6 @@ pub fn run_live_probe(session: &mut crate::obd::session::Session) -> VehicleCaps
     caps.progress = 1.0;
     caps.phase = "BIT COMPLETE".into();
     caps.ready = true;
+    caps.finalize_pages();
     caps
 }
