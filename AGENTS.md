@@ -6,7 +6,7 @@ User-global process: `~/.config/agents/AGENTS.md`.
 
 - **Name:** mfd (multi-function display library)
 - **Low-level draw:** pure asm `libmfd` (`make` → `build/libmfd.a`)
-- **Text:** B612 Mono in `assets/fonts/` (EPL; see NOTICE)
+- **Text:** baked atlas `src/font_atlas_data.rs` from B612 Mono; re-bake with `--features bake_font`
 - **Demo:** `cargo run --release --bin mfd-demo`
 
 ## Commands

@@ -31,9 +31,19 @@ crate-type = ["rlib", "staticlib", "cdylib"]
 name = "mfd-demo"
 path = "src/bin/mfd-demo.rs"
 
+[[bin]]
+name = "bake-font-atlas"
+path = "src/bin/bake-font-atlas.rs"
+required-features = ["bake_font"]
+
+[features]
+default = []
+## Host-only: regenerate `src/font_atlas_data.rs` from B612 TTF.
+bake_font = ["dep:fontdue"]
+
 [dependencies]
 libc = "0.2"
-fontdue = "0.9"
+fontdue = { version = "0.9", optional = true }
 
 [build-dependencies]
 cc = "1"

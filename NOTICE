@@ -8,4 +8,7 @@ B612 font files under assets/fonts/ are from:
 License: Eclipse Public License 2.0 (see upstream)
 Copyright: Airbus / Intactile DESIGN / PolarSys contributors
 
+Baked glyph atlas `src/font_atlas_data.rs` is generated from B612 Mono and
+is subject to the same EPL-2.0 terms as the source font.
+
 Low-level pixel stroke assembly (libmfd) is MIT as part of this project.

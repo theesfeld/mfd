@@ -13,7 +13,7 @@
 - **Pages:** many widgets per page  
 - **Jet calls:** F-16-class pages (`SMS`, `HSD`, `TGP`, `FCR`, `ENG`, `FUEL`, …)  
 - **Auto calls:** cluster / temps / OBD-shaped PIDs reusing the same widgets  
-- **Text:** Airbus **B612** cockpit font (embedded; EPL — see `NOTICE`)  
+- **Text:** baked **B612 Mono** bitmap atlas (sizes 12 / 16 / 20; EPL — see `NOTICE`)  
 - **Draw core:** pure x86_64 assembly **libmfd** (`mfd_line`, `mfd_circle`, …)
 
 This is **not** a transparent toy overlay. Pages clear **black glass** and draw high-contrast symbology.
@@ -113,7 +113,23 @@ We do **not** vendor 50 copyrighted image binaries. We do keep a **type catalog*
 | `MFD_MAX_W` / `MFD_MAX_H` | Pixel cap (default 1280×720) |
 | `MFD_HZ` | Demo phase lock (default 60) |
 
+## Text / font atlas
+
+Runtime text uses a **compiled coverage atlas** (`src/font_atlas_data.rs`), not TTF.
+
+| API | Role |
+|-----|------|
+| `FontSize::Sm` / `Md` / `Lg` | Baked faces (~12 / 16 / 20 px) |
+| `draw_text_size` / `draw_text` | Draw from atlas |
+| `text_width_size` / `text_height_size` | Layout |
+
+Re-bake from source TTF (host only):
+
+```bash
+cargo run --release --bin bake-font-atlas --features bake_font
+```
+
 ## License
 
 - Library code: **MIT**  
-- B612 fonts: **EPL-2.0** (PolarSys / Airbus) — see `NOTICE` and `assets/fonts/`
+- B612 source TTF + atlas derived from it: **EPL-2.0** (PolarSys / Airbus) — see `NOTICE` and `assets/fonts/`

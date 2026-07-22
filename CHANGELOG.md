@@ -4,6 +4,12 @@
 
 ### Added
 
+- **Baked B612 Mono atlas** (sizes 12/16/20) in-library; no runtime TTF/`fontdue`
+- `bake-font-atlas` tool (`--features bake_font`) to regenerate atlas data
+- `FontSize` + `draw_text_size` API
+
+### Added
+
 - **Product rename:** library and demo are **MFD** (multi-function display)
 - **B612 Mono** embedded cockpit font (`fontdue` raster, AA coverage)
 - Fighter **color tokens** (green / cyan / amber / red / white / magenta)

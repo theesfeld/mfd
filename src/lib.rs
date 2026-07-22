@@ -5,7 +5,7 @@
 //! and OBD-shaped inputs live in [`auto`].
 //!
 //! Low-level pixel strokes: pure assembly **libmfd** (`mfd_line`, `mfd_circle`, …).
-//! Text: **B612 Mono** (cockpit font). Glass: black + fighter symbology colors.
+//! Text: baked **B612 Mono** bitmap atlas (no runtime TTF). Glass: black + fighter ink.
 //!
 //! ```ignore
 //! use mfd::page::Page;
@@ -32,7 +32,10 @@ pub use color::{
     rgb, Ink, AMBER, BLACK, CYAN, GREEN, GREEN_DIM, GREY, MAGENTA, PANEL, RED, TRANSPARENT, WHITE,
     YELLOW,
 };
-pub use font::{draw_text, draw_text_centered, text_height, text_width};
+pub use font::{
+    draw_text, draw_text_centered, draw_text_size, draw_text_size_centered, text_height,
+    text_height_size, text_width, text_width_size, FontSize,
+};
 pub use geom::Rect;
 pub use page::Page;
 pub use surface::{engine_version, using_assembly, Surface, Xform};
