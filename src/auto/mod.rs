@@ -765,10 +765,10 @@ fn chrome(
         let (t, r, l) = option_legends(which, v, feat);
         (t, r, ["OWN", "", "", "", "DCLT"], l, None)
     };
-    let active = (1..=20u8)
-        .find(|&id| bezel.is_down(id))
-        .or(active_osb)
-        .or(bezel.last_osb);
+    // Sticky format-slot highlight (SOI). Momentary press flash only while held.
+    // Never leave last_osb as permanent "active format" color.
+    let active = (1..=20u8).find(|&id| bezel.is_down(id)).or(active_osb);
+    let _ = bezel.last_osb; // press edge tracked elsewhere; not chrome SOI
     osb_chrome(
         page.surface,
         b,
@@ -1407,24 +1407,33 @@ pub fn draw_auto_with_video(
             numeric_matrix(page.surface, c.inset(4), &lines, fh * 1.0, pal.readout, 1);
         }
         AutoPage::Cam => {
-            let owned;
-            let fr = if let Some(f) = cam_frame {
-                f
+            // Fail-soft: no synthetic pod video unless explicitly offline SIM path
+            // (caller only passes live frames; empty = NO VIDEO).
+            if let Some(fr) = cam_frame {
+                blit_grey_flir(page.surface, c.inset(4), fr, pal.primary, pal.structure);
+                crosshair(page.surface, c.center().0, c.center().1, 18, 4, pal.caution);
+                track_gate(page.surface, c.center().0, c.center().1, 28, pal.readout);
+                label(
+                    page.surface,
+                    c.x as f32 + 4.0,
+                    c.bottom() as f32 - fh,
+                    "CAM LIVE",
+                    pal.dim,
+                    fh * 0.7,
+                );
             } else {
-                owned = GreyFrame::synthetic(160, 120, t);
-                &owned
-            };
-            blit_grey_flir(page.surface, c.inset(4), fr, pal.primary, pal.structure);
-            crosshair(page.surface, c.center().0, c.center().1, 18, 4, pal.caution);
-            track_gate(page.surface, c.center().0, c.center().1, 28, pal.readout);
-            label(
-                page.surface,
-                c.x as f32 + 4.0,
-                c.bottom() as f32 - fh,
-                "CAM / FLIR",
-                pal.dim,
-                fh * 0.7,
-            );
+                value_readout(
+                    page.surface,
+                    c.center().0 as f32,
+                    c.y as f32 + c.h as f32 * 0.45,
+                    "CAM",
+                    "NO VIDEO",
+                    "",
+                    pal.dim,
+                    fh * 0.8,
+                    fh * 1.6,
+                );
+            }
         }
         AutoPage::Range => {
             let rng = RangeSnapshot::from_env_or_synthetic(t);

@@ -109,6 +109,7 @@ fn main() -> io::Result<()> {
     let mut available_pages: Vec<AutoPage> = Vec::new();
     let mut fmt_sel = AutoFormatSelect::default();
     let mut warn_eng = WarningEngine::new();
+    let mut fog_ok = true;
 
     #[cfg(feature = "obd")]
     let obd_feed = mfd::obd::ObdFeed::try_start_from_env();
@@ -170,12 +171,12 @@ fn main() -> io::Result<()> {
                     match act {
                         EscAction::Quit => RUNNING.store(false, Ordering::Relaxed),
                         EscAction::PageNext if boot_done => {
-                            auto_page = cycle_auto(auto_page, 1, &available_pages);
-                            fmt_sel.assign(fmt_sel.active, auto_page);
+                            let next = cycle_auto(auto_page, 1, &available_pages);
+                            goto_format(&mut auto_page, &mut fmt_sel, next, &available_pages);
                         }
                         EscAction::PagePrev if boot_done => {
-                            auto_page = cycle_auto(auto_page, -1, &available_pages);
-                            fmt_sel.assign(fmt_sel.active, auto_page);
+                            let prev = cycle_auto(auto_page, -1, &available_pages);
+                            goto_format(&mut auto_page, &mut fmt_sel, prev, &available_pages);
                         }
                         EscAction::Ignore | EscAction::PageNext | EscAction::PagePrev => {}
                     }
@@ -198,92 +199,120 @@ fn main() -> io::Result<()> {
                 _ if !boot_done => {
                     bezel_src.push_key_state(k, &bezel);
                 }
-                // Systems page jumps (after BIT)
-                b'1' => {
-                    auto_page = AutoPage::Eng;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
-                b'2' => {
-                    auto_page = AutoPage::Fuel;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
-                b'3' => {
-                    auto_page = AutoPage::Fluid;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
-                b'4' => {
-                    auto_page = AutoPage::Elec;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
-                b'5' => {
-                    auto_page = AutoPage::Drive;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
-                b'6' => {
-                    auto_page = AutoPage::Chas;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
-                b'7' => {
-                    auto_page = AutoPage::Body;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
-                b'8' => {
-                    auto_page = AutoPage::Lights;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
-                b'9' => {
-                    auto_page = AutoPage::Clim;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
-                b'0' => {
-                    auto_page = AutoPage::Cam;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
-                b'r' | b'R' => {
-                    auto_page = AutoPage::Range;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
-                b'b' | b'B' => {
-                    auto_page = AutoPage::Bus;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
+                // Format jumps — GO formats only (no hollow pages).
+                b'1' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Eng,
+                    &available_pages,
+                ),
+                b'2' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Fuel,
+                    &available_pages,
+                ),
+                b'3' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Fluid,
+                    &available_pages,
+                ),
+                b'4' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Elec,
+                    &available_pages,
+                ),
+                b'5' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Drive,
+                    &available_pages,
+                ),
+                b'6' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Chas,
+                    &available_pages,
+                ),
+                b'7' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Body,
+                    &available_pages,
+                ),
+                b'8' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Lights,
+                    &available_pages,
+                ),
+                b'9' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Clim,
+                    &available_pages,
+                ),
+                b'0' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Cam,
+                    &available_pages,
+                ),
+                b'r' | b'R' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Range,
+                    &available_pages,
+                ),
+                b'b' | b'B' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Bus,
+                    &available_pages,
+                ),
                 b'w' | b'W' | b'o' | b'O' => auto_page = AutoPage::Own,
-                b's' | b'S' | b'h' | b'H' => {
-                    auto_page = AutoPage::Setup;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
+                b's' | b'S' | b'h' | b'H' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Setup,
+                    &available_pages,
+                ),
                 b'u' | b'U' => vehicle.speed_unit = vehicle.speed_unit.cycle(),
                 b'n' | b'N' => {
-                    auto_page = cycle_auto(auto_page, 1, &available_pages);
-                    fmt_sel.assign(fmt_sel.active, auto_page);
+                    let next = cycle_auto(auto_page, 1, &available_pages);
+                    goto_format(&mut auto_page, &mut fmt_sel, next, &available_pages);
                 }
                 b'p' | b'P' => {
-                    auto_page = cycle_auto(auto_page, -1, &available_pages);
-                    fmt_sel.assign(fmt_sel.active, auto_page);
+                    let prev = cycle_auto(auto_page, -1, &available_pages);
+                    goto_format(&mut auto_page, &mut fmt_sel, prev, &available_pages);
                 }
-                b'v' | b'V' => {
-                    auto_page = AutoPage::Attitude;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
-                b'x' | b'X' => {
-                    auto_page = AutoPage::Map;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
-                b'f' | b'F' => {
-                    auto_page = AutoPage::Faults;
-                    fmt_sel.assign(fmt_sel.active, auto_page);
-                }
+                b'v' | b'V' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Attitude,
+                    &available_pages,
+                ),
+                b'x' | b'X' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Map,
+                    &available_pages,
+                ),
+                b'f' | b'F' => goto_format(
+                    &mut auto_page,
+                    &mut fmt_sel,
+                    AutoPage::Faults,
+                    &available_pages,
+                ),
                 b'm' | b'M' if boot_done => {
-                    // Open Master Menu into active slot (keyboard)
-                    let _ = fmt_sel.handle_osb(
-                        fmt_sel.active.osb(),
-                        osb_tick,
-                        if available_pages.is_empty() {
-                            AutoPage::ALL
-                        } else {
-                            &available_pages
-                        },
-                    );
+                    let allow = if available_pages.is_empty() {
+                        AutoPage::ALL
+                    } else {
+                        available_pages.as_slice()
+                    };
+                    let _ = fmt_sel.handle_osb(fmt_sel.active.osb(), osb_tick, allow);
                 }
                 // [ ] ; ' - = , .  → real bezel knobs (BRT CON SYM GAIN)
                 _ => bezel_src.push_key_state(k, &bezel),
@@ -301,12 +330,11 @@ fn main() -> io::Result<()> {
                     continue;
                 }
                 osb_tick = osb_tick.wrapping_add(1);
-                let allow = if available_pages.is_empty() {
-                    AutoPage::ALL
-                } else {
-                    available_pages.as_slice()
-                };
-                // MLU-class format select first (12/13/14, 11 DCLT, 15 OWN, Master Menu).
+                // After boot, empty available_pages must not mean "all formats".
+                let allow = available_pages.as_slice();
+                if allow.is_empty() {
+                    continue;
+                }
                 match fmt_sel.handle_osb(osb, osb_tick, allow) {
                     FormatSelectAction::Show(p) => {
                         auto_page = p;
@@ -322,14 +350,12 @@ fn main() -> io::Result<()> {
                     FormatSelectAction::Declutter => continue,
                     FormatSelectAction::Ignore => {}
                 }
-                // Left BIT jumps (BUS / SET / DTC)
                 if let Some(p) = AutoPage::from_left_support_osb(osb) {
-                    if allow.is_empty() || allow.contains(&p) {
+                    if AutoFormatSelect::is_allowed(p, allow) {
                         auto_page = p;
                     }
                     continue;
                 }
-                // Format-local options (top / right OSBs only when labeled)
                 match (auto_page, osb) {
                     (
                         AutoPage::Eng
@@ -349,7 +375,7 @@ fn main() -> io::Result<()> {
                     (AutoPage::Drive, 7) => vehicle.gear = GearSelect::Manual,
                     (AutoPage::Lights, 1) => vehicle.light_low = !vehicle.light_low,
                     (AutoPage::Lights, 2) => vehicle.light_high = !vehicle.light_high,
-                    (AutoPage::Lights, 3) => vehicle.light_fog = !vehicle.light_fog,
+                    (AutoPage::Lights, 3) if fog_ok => vehicle.light_fog = !vehicle.light_fog,
                     (AutoPage::Lights, 4) => vehicle.light_drive = !vehicle.light_drive,
                     (AutoPage::Lights, 5) => vehicle.light_interior = !vehicle.light_interior,
                     (AutoPage::Clim, 1) => vehicle.hvac_ac = !vehicle.hvac_ac,
@@ -398,6 +424,7 @@ fn main() -> io::Result<()> {
                 fmt_sel.slot_labels()
             );
         }
+        fog_ok = caps_now.features.fog_lights;
 
         if use_obd {
             #[cfg(feature = "obd")]
@@ -564,6 +591,27 @@ fn cycle_auto(cur: AutoPage, dir: i32, pages: &[AutoPage]) -> AutoPage {
     let n = all.len() as i32;
     let j = (i + dir).rem_euclid(n) as usize;
     all[j]
+}
+
+/// Jump to a format only if probe-allowed (or pre-boot ALL). No hollow formats.
+fn goto_format(
+    auto_page: &mut AutoPage,
+    fmt_sel: &mut AutoFormatSelect,
+    page: AutoPage,
+    available: &[AutoPage],
+) {
+    if available.is_empty() {
+        // Pre-boot: allow only defaults
+        *auto_page = page;
+        return;
+    }
+    if !AutoFormatSelect::is_allowed(page, available) {
+        return;
+    }
+    *auto_page = page;
+    if !matches!(page, AutoPage::Own) {
+        fmt_sel.assign(fmt_sel.active, page);
+    }
 }
 
 fn draw_demo_status(s: &mut Surface, text: &str, color: mfd::Color, px: f32) {

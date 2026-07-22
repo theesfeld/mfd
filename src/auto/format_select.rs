@@ -125,7 +125,21 @@ impl AutoFormatSelect {
         if self.menu_open {
             return AutoPage::Setup; // menu drawn specially; placeholder
         }
-        self.slots[self.active as usize].unwrap_or(AutoPage::Eng)
+        if let Some(p) = self.slots[self.active as usize] {
+            return p;
+        }
+        // Never invent ENG for empty active slot unless no slot is filled.
+        self.slots
+            .iter()
+            .flatten()
+            .copied()
+            .next()
+            .unwrap_or(AutoPage::Eng)
+    }
+
+    /// True if this format may be shown (GO list). Empty allow = none after boot.
+    pub fn is_allowed(page: AutoPage, allowed: &[AutoPage]) -> bool {
+        !allowed.is_empty() && allowed.contains(&page)
     }
 
     pub fn slot_labels(&self) -> [&'static str; 3] {
@@ -151,18 +165,10 @@ impl AutoFormatSelect {
 
     /// Handle global format-select OSBs. `allowed` = probe GO formats.
     pub fn handle_osb(&mut self, osb: u8, tick: u32, allowed: &[AutoPage]) -> FormatSelectAction {
-        if osb == 15 {
-            self.menu_open = false;
-            return FormatSelectAction::Own;
-        }
-        if osb == 11 && !self.menu_open {
-            self.cycle_dclt();
-            return FormatSelectAction::Declutter;
-        }
-
+        // Master Menu has priority: OSB 11 = RNG, 15 = OWN pick (not DCLT/OWN jump).
         if self.menu_open {
             if let Some(page) = page_from_master_menu_osb(osb) {
-                if allowed.is_empty() || allowed.contains(&page) {
+                if Self::is_allowed(page, allowed) {
                     self.assign(self.menu_target, page);
                     self.menu_open = false;
                     self.active = self.menu_target;
@@ -177,6 +183,14 @@ impl AutoFormatSelect {
             return FormatSelectAction::Ignore;
         }
 
+        if osb == 15 {
+            return FormatSelectAction::Own;
+        }
+        if osb == 11 {
+            self.cycle_dclt();
+            return FormatSelectAction::Declutter;
+        }
+
         if let Some(slot) = FormatSlot::from_osb(osb) {
             let fmt = self.slots[slot as usize];
             if slot == self.active {
@@ -185,11 +199,14 @@ impl AutoFormatSelect {
                 return FormatSelectAction::OpenMenu { for_slot: slot };
             }
             if fmt.is_none() {
-                if self.last_blank_osb.map(|(o, _)| o) == Some(osb) {
-                    self.menu_open = true;
-                    self.menu_target = slot;
-                    self.last_blank_osb = None;
-                    return FormatSelectAction::OpenMenu { for_slot: slot };
+                const TAP_WINDOW: u32 = 45;
+                if let Some((o, t0)) = self.last_blank_osb {
+                    if o == osb && tick.wrapping_sub(t0) <= TAP_WINDOW {
+                        self.menu_open = true;
+                        self.menu_target = slot;
+                        self.last_blank_osb = None;
+                        return FormatSelectAction::OpenMenu { for_slot: slot };
+                    }
                 }
                 self.last_blank_osb = Some((osb, tick));
                 return FormatSelectAction::Ignore;
@@ -216,17 +233,18 @@ pub fn page_from_master_menu_osb(osb: u8) -> Option<AutoPage> {
         8 => Some(AutoPage::Lights),
         9 => Some(AutoPage::Clim),
         10 => Some(AutoPage::Cam),
+        11 => Some(AutoPage::Range), // DCLT only when menu closed
+        15 => Some(AutoPage::Own),
         16 => Some(AutoPage::Faults),
         17 => Some(AutoPage::Map),
         18 => Some(AutoPage::Attitude),
         19 => Some(AutoPage::Setup),
         20 => Some(AutoPage::Bus),
-        // 15 OWN handled before menu pick
         _ => None,
     }
 }
 
-/// Master Menu legends (blank if page not allowed).
+/// Master Menu legends (blank if page not allowed). Empty allowed → all blank.
 pub fn master_menu_legends(
     allowed: &[AutoPage],
 ) -> (
@@ -236,7 +254,7 @@ pub fn master_menu_legends(
     [&'static str; 5],
 ) {
     let lab = |p: AutoPage| {
-        if allowed.is_empty() || allowed.contains(&p) {
+        if AutoFormatSelect::is_allowed(p, allowed) {
             p.name()
         } else {
             ""
@@ -263,8 +281,8 @@ pub fn master_menu_legends(
         lab(AutoPage::Map),
         lab(AutoPage::Faults),
     ];
-    // Bottom: OWN · (empty slots during menu) · cancel via format OSBs
-    let bottom = ["OWN", "", "", "", ""];
+    // Bottom OSB 15..11: OWN · · · · RNG
+    let bottom = [lab(AutoPage::Own), "", "", "", lab(AutoPage::Range)];
     (top, right, bottom, left)
 }
 
@@ -312,5 +330,24 @@ mod tests {
         fs.handle_osb(14, 1, &[AutoPage::Eng, AutoPage::Fuel]);
         let a = fs.handle_osb(10, 2, &[AutoPage::Eng, AutoPage::Fuel]); // CAM nogo
         assert_eq!(a, FormatSelectAction::Ignore);
+    }
+
+    #[test]
+    fn empty_allowed_rejects_menu_pick() {
+        let mut fs = AutoFormatSelect::default();
+        fs.handle_osb(14, 1, AutoPage::ALL);
+        assert!(fs.menu_open);
+        let a = fs.handle_osb(1, 2, &[]); // empty GO set
+        assert_eq!(a, FormatSelectAction::Ignore);
+    }
+
+    #[test]
+    fn blank_double_tap_opens_menu() {
+        let mut fs = AutoFormatSelect::default();
+        fs.slots[1] = None; // OSB 13 blank
+        let a1 = fs.handle_osb(13, 10, AutoPage::ALL);
+        assert_eq!(a1, FormatSelectAction::Ignore);
+        let a2 = fs.handle_osb(13, 20, AutoPage::ALL); // within window
+        assert!(matches!(a2, FormatSelectAction::OpenMenu { .. }));
     }
 }
