@@ -216,4 +216,9 @@ fn apply_telemetry(t: &Telemetry, v: &mut VehicleSnapshot) {
         v.dtcs = t.dtcs.clone();
         v.dtc_count = t.dtcs.len() as u32;
     }
+    if let Some(vin) = &t.vin {
+        if !vin.is_empty() {
+            v.vin = vin.clone();
+        }
+    }
 }

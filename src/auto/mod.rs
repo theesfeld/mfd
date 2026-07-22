@@ -212,6 +212,8 @@ pub struct VehicleSnapshot {
     pub roll_deg: f32,
     /// Heading degrees magnetic/true (0–360, 0 = north).
     pub heading_deg: f32,
+    /// Vehicle VIN (ownship ID). Empty until Mode 09 / feed fills it.
+    pub vin: String,
 }
 
 impl Default for VehicleSnapshot {
@@ -282,9 +284,13 @@ impl Default for VehicleSnapshot {
             pitch_deg: 0.0,
             roll_deg: 0.0,
             heading_deg: 0.0,
+            vin: String::new(),
         }
     }
 }
+
+/// Demo ownship VIN (matches truck capture when no live OBD).
+pub const DEMO_VIN: &str = "1FTEW1EP9KFC73499";
 
 /// Animated demo vehicle (sinusoids) — host replaces with OBD/CAN.
 pub fn demo_vehicle(t: f32) -> VehicleSnapshot {
@@ -351,6 +357,7 @@ pub fn demo_vehicle(t: f32) -> VehicleSnapshot {
         v.dtcs.clear();
     }
     v.dtc_count = v.dtcs.len() as u32;
+    v.vin = DEMO_VIN.into();
     v
 }
 
@@ -566,16 +573,38 @@ fn chrome(
         which.title(),
         pal.primary,
     );
+    // Ownship VIN — small identity line under page title (when known).
+    if !v.vin.is_empty() {
+        let os = format!("OS  {}", short_vin(&v.vin));
+        page.label_centered(
+            c.center().0 as f32,
+            c.y as f32 + page.font_px * 1.25,
+            &os,
+            pal.readout,
+        );
+    }
+}
+
+/// Last 8 of VIN for tight chrome; full string if shorter.
+pub fn short_vin(vin: &str) -> &str {
+    let v = vin.trim();
+    if v.len() > 8 {
+        &v[v.len() - 8..]
+    } else {
+        v
+    }
 }
 
 fn content(page: &Page) -> Rect {
     let b = page.bounds.inset(2);
     let c = content_after_osb(b, page.font_px * 0.65);
+    // Extra row under title for ownship VIN line.
+    let title_band = (page.font_px as i32) * 2 + 6;
     Rect::new(
         c.x,
-        c.y + (page.font_px as i32) + 4,
+        c.y + title_band,
         c.w,
-        (c.h - (page.font_px as i32) * 2 - 8).max(40),
+        (c.h - title_band - (page.font_px as i32) - 4).max(40),
     )
 }
 
@@ -1196,7 +1225,13 @@ pub fn draw_auto_with_video(
             }
         }
         AutoPage::Obd => {
+            let vin_line = if v.vin.is_empty() {
+                "VIN   —".into()
+            } else {
+                format!("VIN   {}", v.vin)
+            };
             let lines = [
+                vin_line,
                 format!("RPM   {:.0}", v.rpm),
                 format!(
                     "VSS   {:.0} {}",
@@ -1222,26 +1257,34 @@ pub fn draw_auto_with_video(
             );
         }
         AutoPage::Setup => {
+            let vin_s = if v.vin.is_empty() {
+                "VIN  (none)".to_string()
+            } else {
+                format!("VIN  {}", v.vin)
+            };
+            let lines = [
+                vin_s.as_str(),
+                "OWN SHIP  = VIN",
+                "SPD UNIT  → bottom OSB",
+                "FLIR  MFD_FLIR_PATH / MFD_CAMERA",
+                "OBD  MFD_OBD_BT / PORT / REPLAY",
+                "DISPLAY ONLY  no vehicle write",
+                "JET  Tab domain",
+            ];
             list_menu(
                 page.surface,
                 Rect::new(c.x, c.y, c.w, c.h / 2),
-                &[
-                    "SPD UNIT  → bottom OSB",
-                    "FLIR  MFD_FLIR_PATH=file.pgm",
-                    "OBD  host inject VehicleSnapshot",
-                    "CAN  future BezelSource",
-                    "JET  Tab domain",
-                ],
+                &lines,
                 Some(0),
-                fh * 0.8,
+                fh * 0.75,
                 pal.primary,
                 pal.readout,
             );
             caution_box(
                 page.surface,
                 Rect::new(c.x + 12, c.y + c.h / 2 + 4, c.w - 24, c.h / 3),
-                &format!("UNIT {}", v.speed_unit.name()),
-                fh,
+                &format!("UNIT {}  ·  OS {}", v.speed_unit.name(), short_vin(&v.vin)),
+                fh * 0.9,
                 pal.nav,
             );
         }

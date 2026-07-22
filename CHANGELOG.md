@@ -4,6 +4,7 @@
 
 ### Added
 
+- **VIN / ownship:** `VehicleSnapshot.vin` from Mode 09; chrome `OS ……` + SETUP/OBD full VIN. Refs #77.
 - **FAULT CODES** page (`f` / OSB DTC): loads Mode 03/07/0A codes immediately (read-only; no clear). Refs #75.
 
 ### Changed
