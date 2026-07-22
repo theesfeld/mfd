@@ -1,7 +1,7 @@
 # MFD — multi-function display library
 
 <!-- agents:status:begin -->
-> **Status:** active · `0.1.0-dev.1` · auto ATT/MAP + native OBD/BT · [#68](https://github.com/theesfeld/mfd/issues/68) · MIT
+> **Status:** active · `0.1.0-dev.1` · target: physical 4×4 MFD · vehicle-first attitude · [#71](https://github.com/theesfeld/mfd/issues/71) · MIT
 <!-- agents:status:end -->
 
 ## What this is
@@ -73,7 +73,8 @@ OSB (auto): top CLST…LITE · right TPM/BODY/CLIM/FLIR/**RNG** · left OBD/SET/
 | `MFD_RANGE=2.1,3,2.8,1.2` | Range page (m) |
 | `MFD_AUTO_PAGE=FLIR` | Start page |
 
-See `docs/auto-sensors.md`. Jet: `m` Master Menu · `g` widget QA · OSB 12/13/14.  
+See `docs/auto-sensors.md` and **`docs/hardware.md`** (physical 4×4 + OSB; prefer vehicle bus for pitch/heading).  
+Jet: `m` Master Menu · `g` widget QA · OSB 12/13/14.  
 MLU M1 CMFD SoT: `docs/reference/mlu-m1-cmfd.md`.
 
 ### Bezel knobs (when not using page jump keys)

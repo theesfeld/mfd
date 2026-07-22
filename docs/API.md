@@ -9,7 +9,8 @@
 1. Draw instrument **pages** from composable **widgets**.  
 2. Model real MFD **bezel OSB** inputs so hardware plugs in without rewriting pages.  
 3. Share the same widgets for **jet formats** and **automotive** pages.  
-4. Keep a lean path to on-chip: baked font atlas + pixel strokes; host Rust is the lab shell.
+4. Keep a lean path to on-chip: baked font atlas + pixel strokes; host Rust is the lab shell.  
+5. Target a **physical ~4×4 in panel** with buttons; prefer **vehicle bus** for attitude/heading (see `docs/hardware.md`).
 
 ## 2. Architecture layers
 
