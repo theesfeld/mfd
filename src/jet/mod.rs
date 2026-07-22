@@ -17,7 +17,8 @@ pub const F16_OSB_BOT: &[&str] = &["SWAP", "SMS", "HSD", "TGP", "DCLT", "CNTL"];
 
 fn chrome(page: &mut Page, top_sel: Option<usize>, title: &str) {
     let b = page.bounds.inset(4);
-    let th = (page.font_px * 1.4) as i32;
+    // Softkey row tall enough for B612 ascent + descender gap.
+    let th = (page.font_px * 1.8).ceil() as i32 + 6;
     page.softkeys(Rect::new(b.x, b.y, b.w, th), F16_OSB_TOP, top_sel);
     page.softkeys(
         Rect::new(b.x, b.bottom() - th, b.w, th),
@@ -26,7 +27,7 @@ fn chrome(page: &mut Page, top_sel: Option<usize>, title: &str) {
     );
     page.label_centered(
         b.center().0 as f32,
-        (b.y + th + 4) as f32,
+        b.y as f32 + th as f32 + page.font_px * 0.7,
         title,
         GREEN,
     );
