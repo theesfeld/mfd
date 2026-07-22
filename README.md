@@ -36,36 +36,52 @@ cargo run --release --bin mfd-demo
 MFD_TERM=kitty cargo run --release --bin mfd-demo
 ```
 
-Default demo: **FCR** on format slot OSB14 (MLU M1 CMFD model), **30 Hz**, square face.
+Default demo: **AUTO vehicle MFD** (CLUSTER), **30 Hz**.  
+`MFD_DOMAIN=jet` starts on jet FCR instead.
 
-| Key / OSB | Action |
-|-----------|--------|
-| **OSB 12 / 13 / 14** | Switch format option · **press active again** = Master Menu |
-| **`m`** | Open Master Menu (same as active format OSB) |
-| **`g`** | Widget QA page |
-| **`c`** | Color mode (mono / MLU color / high-vis) |
+### Auto pages (default) — jump keys
 
-**Auto (Tab):** CLUSTER · FUEL · TEMPS · DRIVE · LIGHTS · TPM · BODY · CLIMATE · **FLIR** · OBD · SETUP.  
-FLIR: `MFD_CAMERA=/dev/video0` or `auto` · still `MFD_FLIR_PATH=grey.pgm` · **RANGE** page (right OSB 10).  
-OBD live: `MFD_OBD_PORT=/dev/ttyUSB0` or `MFD_OBD_REPLAY=…` (feature `obd`, uses `../obdtui/crates/obd-io`).  
+| Key | Page | Content |
+|-----|------|---------|
+| `1` | CLUSTER | RPM, speed, gear, throttle |
+| `2` | FUEL | Fuel / battery / load **tapes** |
+| `3` | TEMPS | Oil, coolant, trans, IAT, MAF, EGT |
+| `4` | DRIVE | P/R/N/D/M · 2H/4H/4L |
+| `5` | LIGHTS | Beams, fog, brake, turns, cabin |
+| `6` | TPM | Four tire pressures |
+| `7` | BODY | Doors + seat belts |
+| `8` | CLIMATE | Out/in temp, HVAC |
+| `9` | **FLIR** | Camera / FLIR glass |
+| `0` | **RANGE** | Collision / park arcs |
+| `o` / `s` | OBD / SETUP | PIDs · config |
+| `[` `]` | Prev/next page | |
+| `u` | Speed unit | MPH → KM/H → KT |
+| `a` / `j` / Tab | Auto / Jet / toggle | |
 
-Primary manual for CMFD behaviour: **MLU M1 Pilot’s Guide** (`docs/246416220-…pdf`). See `docs/reference/mlu-m1-cmfd.md`.  
-`[` `]` change **real brightness** (scales RGB after draw).
+OSB (auto): top CLST…LITE · right TPM/BODY/CLIM/FLIR/**RNG** · left OBD/SET.
 
-### Bezel keys (events, not hard-wired pages)
+### Sensors (env)
+
+| Env | Role |
+|-----|------|
+| `MFD_CAMERA=/dev/video0` or `auto` | Live V4L2 → FLIR |
+| `MFD_FLIR_PATH=grey.pgm` | Still greyscale |
+| `MFD_OBD_PORT` / `MFD_OBD_REPLAY` | Live OBD → tapes/cluster |
+| `MFD_RANGE=2.1,3,2.8,1.2` | Range page (m) |
+| `MFD_AUTO_PAGE=FLIR` | Start page |
+
+See `docs/auto-sensors.md`. Jet: `m` Master Menu · `g` widget QA · OSB 12/13/14.  
+MLU M1 CMFD SoT: `docs/reference/mlu-m1-cmfd.md`.
+
+### Bezel knobs (when not using page jump keys)
 
 | Key | Event |
 |-----|--------|
-| `1`–`5` | Top OSB 1–5 |
-| `6`–`9` `0` | Right OSB 6–10 |
 | `q w e r t` | Bottom OSB 15–11 |
-| `a s d f g` | Left OSB 16–20 |
-| `[ ]` | Brightness −/+ (**does dim/brighten**) |
+| `a s d f g` | Left OSB (on jet; on auto `a`=`AUTO`, `s`=`SETUP`) |
 | `; '` | Contrast −/+ |
 | `- =` | Symbology −/+ |
 | `, .` | Gain −/+ |
-| `Tab` | Jet ↔ Auto |
-| `/` | Jet format bank |
 | `c` | Color mode |
 | `Esc` | Quit |
 
