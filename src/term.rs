@@ -217,6 +217,111 @@ pub fn leave_fullscreen() -> io::Result<()> {
     out.flush()
 }
 
+/// RAII raw (non-canonical) stdin so single keypresses are available without Enter.
+///
+/// Disables `ICANON` + `ECHO`, sets `VMIN=0` / `VTIME=0` (non-blocking reads).
+/// Restores prior termios on drop.
+#[cfg(unix)]
+pub struct RawStdin {
+    fd: i32,
+    original: libc::termios,
+}
+
+#[cfg(unix)]
+impl RawStdin {
+    /// Enable raw-ish input on stdin. No-op failure if not a TTY.
+    pub fn enter() -> io::Result<Self> {
+        unsafe {
+            if libc::isatty(libc::STDIN_FILENO) == 0 {
+                return Err(io::Error::other("stdin is not a tty"));
+            }
+            let mut original: libc::termios = std::mem::zeroed();
+            if libc::tcgetattr(libc::STDIN_FILENO, &mut original) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let mut raw = original;
+            // Byte-at-a-time, no echo. Keep ISIG so Ctrl+C still works.
+            raw.c_lflag &= !(libc::ICANON | libc::ECHO);
+            raw.c_cc[libc::VMIN] = 0;
+            raw.c_cc[libc::VTIME] = 0;
+            if libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &raw) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self {
+                fd: libc::STDIN_FILENO,
+                original,
+            })
+        }
+    }
+
+    /// Non-blocking: drain all pending input bytes (oldest first).
+    pub fn read_keys(&self, out: &mut Vec<u8>) -> io::Result<()> {
+        out.clear();
+        unsafe {
+            loop {
+                let mut buf = [0u8; 64];
+                let r = libc::read(self.fd, buf.as_mut_ptr() as *mut _, buf.len());
+                if r < 0 {
+                    let err = io::Error::last_os_error();
+                    if err.kind() == io::ErrorKind::WouldBlock
+                        || err.raw_os_error() == Some(libc::EAGAIN)
+                        || err.raw_os_error() == Some(libc::EWOULDBLOCK)
+                    {
+                        break;
+                    }
+                    // EINTR: try again
+                    if err.raw_os_error() == Some(libc::EINTR) {
+                        continue;
+                    }
+                    return Err(err);
+                }
+                if r == 0 {
+                    break;
+                }
+                out.extend_from_slice(&buf[..r as usize]);
+                // One read is enough for interactive keys; more if paste flood.
+                if r < buf.len() as isize {
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl Drop for RawStdin {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = libc::tcsetattr(self.fd, libc::TCSANOW, &self.original);
+        }
+    }
+}
+
+/// Poll one key without raw mode (line-buffered — usually wrong for demos).
+/// Prefer [`RawStdin`].
+pub fn poll_key_byte() -> io::Result<Option<u8>> {
+    #[cfg(unix)]
+    unsafe {
+        if libc::isatty(libc::STDIN_FILENO) == 0 {
+            return Ok(None);
+        }
+        let mut fds = libc::pollfd {
+            fd: libc::STDIN_FILENO,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        if libc::poll(&mut fds as *mut _, 1, 0) > 0 && (fds.revents & libc::POLLIN) != 0 {
+            let mut buf = [0u8; 8];
+            let r = libc::read(libc::STDIN_FILENO, buf.as_mut_ptr() as *mut _, buf.len());
+            if r > 0 {
+                return Ok(Some(buf[0]));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// Present at top-left, full suggested area.
 pub fn present(surface: &Surface, backend: TermBackend) -> io::Result<()> {
     present_at(surface, backend, Viewport::full_terminal())

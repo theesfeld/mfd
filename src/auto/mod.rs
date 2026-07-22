@@ -12,8 +12,8 @@
 use crate::color::{AMBER, CYAN, GREEN, WHITE};
 use crate::geom::Rect;
 use crate::page::Page;
+use crate::widget::{round_gauge, softkey_row, tape_gauge};
 use crate::widget::{RoundGaugeOpts, SoftkeyLayout, TapeOpts, TapeOrientation};
-use crate::widget::{softkey_row, round_gauge, tape_gauge};
 
 /// Common auto cluster softkeys.
 pub const AUTO_PAGES: &[&str] = &["CLUSTER", "POWER", "TEMP", "FUEL", "OBD", "SETUP"];
@@ -93,7 +93,12 @@ pub fn cluster(page: &mut Page, obd: &ObdSnapshot) {
     );
     tape_gauge(
         page.surface,
-        Rect::new(rx + rw / 2, c.y + (page.font_px as i32) * 2, rw / 2 - 4, tape_h),
+        Rect::new(
+            rx + rw / 2,
+            c.y + (page.font_px as i32) * 2,
+            rw / 2 - 4,
+            tape_h,
+        ),
         TapeOpts {
             orientation: TapeOrientation::Vertical,
             font_px: page.font_px * 0.8,

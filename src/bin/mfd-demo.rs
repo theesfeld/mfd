@@ -1,6 +1,6 @@
 //! **MFD demo** — multi-page fighter + automotive cluster in the terminal.
 //!
-//! Keys: `1`–`8` jet pages · `a` automotive cluster · `q` quit.
+//! Keys: `1`–`8` jet pages · `a`/`s`/`d`/`f` auto · `q` quit.
 //!
 //! ```text
 //! cargo run --release --bin mfd-demo
@@ -46,6 +46,7 @@ fn main() -> io::Result<()> {
         std::process::exit(1);
     }
     eprintln!("loaded libmfd {ver} · MFD multi-page demo");
+    eprintln!("keys: 1-8 jet · a/s/d/f auto · q quit");
 
     install_sigint();
     let hz = std::env::var("MFD_HZ")
@@ -70,13 +71,41 @@ fn main() -> io::Result<()> {
     };
 
     let mut screen = Screen::Hsd;
+    // Raw stdin: single keys without Enter. Restored on drop (normal exit).
+    #[cfg(unix)]
+    let raw = match mfd::term::RawStdin::enter() {
+        Ok(r) => Some(r),
+        Err(e) => {
+            eprintln!("warning: raw stdin unavailable ({e}); keys need Enter");
+            None
+        }
+    };
+    #[cfg(not(unix))]
+    let raw: Option<()> = None;
+
     enter_fullscreen()?;
     let t0 = Instant::now();
+    let mut keybuf: Vec<u8> = Vec::with_capacity(32);
 
     while RUNNING.load(Ordering::Relaxed) {
-        if let Some(s) = poll_key()? {
+        // Drain all pending keys this frame (last wins for page select).
+        keybuf.clear();
+        #[cfg(unix)]
+        if let Some(ref raw) = raw {
+            raw.read_keys(&mut keybuf)?;
+        } else if let Some(b) = mfd::term::poll_key_byte()? {
+            keybuf.push(b);
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = &raw;
+        }
+
+        for &s in &keybuf {
             match s {
-                b'q' | b'Q' | 0x1b => break,
+                b'q' | b'Q' | 0x1b => {
+                    RUNNING.store(false, Ordering::Relaxed);
+                }
                 b'1' => screen = Screen::Sms,
                 b'2' => screen = Screen::Hsd,
                 b'3' => screen = Screen::Tgp,
@@ -91,6 +120,9 @@ fn main() -> io::Result<()> {
                 b'f' | b'F' => screen = Screen::AutoObd,
                 _ => {}
             }
+        }
+        if !RUNNING.load(Ordering::Relaxed) {
+            break;
         }
 
         let t = t0.elapsed().as_secs_f32();
@@ -164,30 +196,11 @@ fn main() -> io::Result<()> {
     }
 
     leave_fullscreen()?;
+    // Drop raw before process exit so cooked mode is restored.
+    #[cfg(unix)]
+    drop(raw);
     eprintln!("mfd-demo done · libmfd {ver}");
     Ok(())
-}
-
-fn poll_key() -> io::Result<Option<u8>> {
-    #[cfg(unix)]
-    unsafe {
-        if libc::isatty(libc::STDIN_FILENO) == 0 {
-            return Ok(None);
-        }
-        let mut fds = libc::pollfd {
-            fd: libc::STDIN_FILENO,
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        if libc::poll(&mut fds as *mut _, 1, 0) > 0 && (fds.revents & libc::POLLIN) != 0 {
-            let mut buf = [0u8; 8];
-            let r = libc::read(libc::STDIN_FILENO, buf.as_mut_ptr() as *mut _, buf.len());
-            if r > 0 {
-                return Ok(Some(buf[0]));
-            }
-        }
-    }
-    Ok(None)
 }
 
 fn install_sigint() {

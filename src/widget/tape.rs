@@ -52,7 +52,13 @@ pub fn tape_gauge(s: &mut Surface, rect: Rect, opts: TapeOpts) {
     // Frame
     s.line_aa(body.x, body.y, body.right(), body.y, GREEN_DIM);
     s.line_aa(body.right(), body.y, body.right(), body.bottom(), GREEN_DIM);
-    s.line_aa(body.right(), body.bottom(), body.x, body.bottom(), GREEN_DIM);
+    s.line_aa(
+        body.right(),
+        body.bottom(),
+        body.x,
+        body.bottom(),
+        GREEN_DIM,
+    );
     s.line_aa(body.x, body.bottom(), body.x, body.y, GREEN_DIM);
 
     match opts.orientation {

@@ -66,7 +66,17 @@ pub fn round_gauge(s: &mut Surface, rect: Rect, opts: RoundGaugeOpts) {
     }
 
     if let Some(rl) = opts.redline {
-        draw_arc(s, cx, cy, (r as f32 * 0.94) as i32, rl, 1.0, opts.ang0, opts.sweep, RED);
+        draw_arc(
+            s,
+            cx,
+            cy,
+            (r as f32 * 0.94) as i32,
+            rl,
+            1.0,
+            opts.ang0,
+            opts.sweep,
+            RED,
+        );
     }
 
     // Needle

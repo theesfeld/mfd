@@ -29,7 +29,7 @@ pub mod term;
 pub mod widget;
 
 pub use color::{
-    rgb, AMBER, BLACK, CYAN, GREEN, GREEN_DIM, GREY, Ink, MAGENTA, PANEL, RED, TRANSPARENT, WHITE,
+    rgb, Ink, AMBER, BLACK, CYAN, GREEN, GREEN_DIM, GREY, MAGENTA, PANEL, RED, TRANSPARENT, WHITE,
     YELLOW,
 };
 pub use font::{draw_text, draw_text_centered, text_height, text_width};

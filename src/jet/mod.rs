@@ -20,11 +20,7 @@ fn chrome(page: &mut Page, top_sel: Option<usize>, title: &str) {
     // Softkey row tall enough for B612 ascent + descender gap.
     let th = (page.font_px * 1.8).ceil() as i32 + 6;
     page.softkeys(Rect::new(b.x, b.y, b.w, th), F16_OSB_TOP, top_sel);
-    page.softkeys(
-        Rect::new(b.x, b.bottom() - th, b.w, th),
-        F16_OSB_BOT,
-        None,
-    );
+    page.softkeys(Rect::new(b.x, b.bottom() - th, b.w, th), F16_OSB_BOT, None);
     page.label_centered(
         b.center().0 as f32,
         b.y as f32 + th as f32 + page.font_px * 0.7,
@@ -46,21 +42,29 @@ pub fn sms(page: &mut Page, selected_station: usize, master_arm: bool) {
     for (i, st) in stations.iter().enumerate() {
         let col = (i as i32) % cols;
         let row = (i as i32) / cols;
-        let r = Rect::new(c.x + col * cell_w, c.y + row * cell_h, cell_w - 4, cell_h - 4);
-        page.surface
-            .line_aa(r.x, r.y, r.right(), r.y, GREEN_DIM);
+        let r = Rect::new(
+            c.x + col * cell_w,
+            c.y + row * cell_h,
+            cell_w - 4,
+            cell_h - 4,
+        );
+        page.surface.line_aa(r.x, r.y, r.right(), r.y, GREEN_DIM);
         page.surface
             .line_aa(r.right(), r.y, r.right(), r.bottom(), GREEN_DIM);
         page.surface
             .line_aa(r.right(), r.bottom(), r.x, r.bottom(), GREEN_DIM);
-        page.surface
-            .line_aa(r.x, r.bottom(), r.x, r.y, GREEN_DIM);
+        page.surface.line_aa(r.x, r.bottom(), r.x, r.y, GREEN_DIM);
         let colr = if i == selected_station { WHITE } else { GREEN };
         page.label_centered(r.center().0 as f32, r.center().1 as f32, st, colr);
     }
     let arm = if master_arm { "MASTER ARM" } else { "SAFE" };
     let arm_c = if master_arm { RED } else { GREEN_DIM };
-    page.label(c.x as f32 + 4.0, c.bottom() as f32 - page.font_px, arm, arm_c);
+    page.label(
+        c.x as f32 + 4.0,
+        c.bottom() as f32 - page.font_px,
+        arm,
+        arm_c,
+    );
 }
 
 /// Horizontal Situation Display — range rings + heading cue.
