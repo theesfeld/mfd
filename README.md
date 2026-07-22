@@ -30,6 +30,8 @@ Prefer Kitty/Ghostty: `MFD_TERM=kitty cargo run --release --bin mfd-demo`
 
 ### Demo keys
 
+Single keypress (raw stdin — no Enter). Focus the terminal running the demo.
+
 | Key | Page |
 |-----|------|
 | `1` | Jet SMS |
@@ -44,7 +46,7 @@ Prefer Kitty/Ghostty: `MFD_TERM=kitty cargo run --release --bin mfd-demo`
 | `s` | Auto power |
 | `d` | Auto temps |
 | `f` | Auto OBD |
-| `q` | Quit |
+| `q` / Esc | Quit |
 
 ## Library model
 
