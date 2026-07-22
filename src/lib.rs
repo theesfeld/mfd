@@ -363,8 +363,15 @@ pub fn using_assembly() -> bool {
     cfg!(vge_asm)
 }
 
+/// Version string from **libvge** (`vge_version` in assembly).
 pub fn engine_version() -> &'static str {
-    VERSION
+    unsafe {
+        let p = vge_version();
+        if p.is_null() {
+            return VERSION;
+        }
+        std::ffi::CStr::from_ptr(p).to_str().unwrap_or(VERSION)
+    }
 }
 
 #[cfg(test)]

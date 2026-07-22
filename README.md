@@ -24,7 +24,14 @@ build/libvge.so        shared
 
 Any language: load `libvge`, call the symbols in `vge.h`.
 
-Optional demos (not the product): Rust `vge-demo` is a consumer only.
+### Demo (Rust loads libvge only)
+
+```bash
+make                    # build/libvge.a
+cargo run --release --bin vge-demo
+```
+
+The demo **links pure-asm libvge** and calls `vge_*` through thin FFI. It does not reimplement the engine.
 
 
 ## Performance (read this first)
