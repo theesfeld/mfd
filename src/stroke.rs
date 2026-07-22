@@ -1,7 +1,7 @@
 //! Calligraphic **stroke display list** — beam commands are the picture.
 //!
-//! Refresh clears the scanout to **transparent**, strokes the list, then the
-//! host present paints only opaque beam pixels on top of the terminal.
+//! Moving vectors **sweep**: erase the previous path, then stroke the new path.
+//! No full-scene clear/redraw. Hairlines use crisp Xiaolin Wu AA (asm).
 
 use crate::{alpha, Color, Surface, GREEN};
 
@@ -156,22 +156,53 @@ impl DisplayList {
         }
     }
 
-    /// Execute the beam. Does not clear the surface.
+    /// Execute the beam (draw). Does not clear the surface.
     pub fn stroke(&self, surface: &mut Surface) {
+        self.run(surface, false);
+    }
+
+    /// Erase this list from the surface (overwrite path pixels with transparent).
+    /// Used so moving strokes **sweep** instead of full-scene redraw.
+    pub fn erase(&self, surface: &mut Surface) {
+        self.run(surface, true);
+    }
+
+    /// Sweep: erase `previous` beam path, then stroke this list.
+    /// No full clear — only the vectors that moved are updated.
+    pub fn sweep(&self, surface: &mut Surface, previous: Option<&DisplayList>) {
+        if let Some(prev) = previous {
+            if !prev.is_empty() {
+                prev.erase(surface);
+            }
+        }
+        self.stroke(surface);
+    }
+
+    /// Full rebuild: transparent clear + stroke (static scenes / first frame).
+    pub fn refresh(&self, surface: &mut Surface) {
+        surface.clear_transparent();
+        self.stroke(surface);
+    }
+
+    fn run(&self, surface: &mut Surface, erase: bool) {
         let mut beam = (0i32, 0i32);
         let mut color = GREEN;
         let mut width = 1i32;
         for cmd in &self.cmds {
             match *cmd {
-                Stroke::Color(c) => color = c,
+                Stroke::Color(c) => {
+                    if !erase {
+                        color = c;
+                    }
+                }
                 Stroke::Width(w) => width = w.max(1),
                 Stroke::MoveTo { x, y } => beam = (x, y),
                 Stroke::LineTo { x, y } => {
-                    draw_seg(surface, beam.0, beam.1, x, y, color, width);
+                    draw_seg(surface, beam.0, beam.1, x, y, color, width, erase);
                     beam = (x, y);
                 }
                 Stroke::Line { x0, y0, x1, y1 } => {
-                    draw_seg(surface, x0, y0, x1, y1, color, width);
+                    draw_seg(surface, x0, y0, x1, y1, color, width, erase);
                     beam = (x1, y1);
                 }
                 Stroke::LineThick {
@@ -181,14 +212,22 @@ impl DisplayList {
                     y1,
                     thickness,
                 } => {
-                    draw_seg(surface, x0, y0, x1, y1, color, thickness.max(1));
+                    draw_seg(surface, x0, y0, x1, y1, color, thickness.max(1), erase);
                     beam = (x1, y1);
                 }
                 Stroke::Circle { cx, cy, r } => {
-                    if width <= 1 {
+                    if erase {
+                        // Clear AA fringe around the circle.
+                        let clear_w = width.max(1) + 2;
+                        for o in -clear_w..=clear_w {
+                            let rr = r + o;
+                            if rr > 0 {
+                                surface.circle(cx, cy, rr, 0);
+                            }
+                        }
+                    } else if width <= 1 {
                         surface.circle(cx, cy, r, color);
                     } else {
-                        // Concentric outlines approximate thick stroke circles.
                         let half = width / 2;
                         for o in -half..=half {
                             let rr = r + o;
@@ -201,17 +240,26 @@ impl DisplayList {
             }
         }
     }
-
-    /// Clear scanout to **transparent**, then stroke the list.
-    /// No phosphor. No black fill. Terminal owns the background.
-    pub fn refresh(&self, surface: &mut Surface) {
-        surface.clear_transparent();
-        self.stroke(surface);
-    }
 }
 
-fn draw_seg(surface: &mut Surface, x0: i32, y0: i32, x1: i32, y1: i32, color: Color, width: i32) {
+fn draw_seg(
+    surface: &mut Surface,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    color: Color,
+    width: i32,
+    erase: bool,
+) {
     let w = width.max(1);
+    if erase {
+        // Solid clear of core + thick fringe so AA leftovers disappear.
+        let fringe = (w + 2).max(3);
+        surface.line_thick(x0, y0, x1, y1, 0, fringe);
+        surface.line_fast(x0, y0, x1, y1, 0);
+        return;
+    }
     if w == 1 {
         // Crisp hairline: Xiaolin Wu (asm).
         surface.line_aa(x0, y0, x1, y1, color);
@@ -249,5 +297,23 @@ mod tests {
         assert_eq!(list.width(), 1);
         list.set_width(5);
         assert_eq!(list.width(), 5);
+    }
+
+    #[test]
+    fn sweep_erases_old_stroke() {
+        let mut s = Surface::new(64, 64);
+        let mut a = DisplayList::new();
+        a.set_color(GREEN);
+        a.line(0, 10, 40, 10);
+        a.refresh(&mut s);
+        assert!(alpha(s.get(20, 10).unwrap()) > 0);
+
+        let mut b = DisplayList::new();
+        b.set_color(GREEN);
+        b.line(0, 30, 40, 30);
+        b.sweep(&mut s, Some(&a));
+        // Old y=10 mostly gone; new y=30 lit.
+        assert_eq!(s.get(20, 10).map(alpha).unwrap_or(0), 0);
+        assert!(alpha(s.get(20, 30).unwrap()) > 0);
     }
 }

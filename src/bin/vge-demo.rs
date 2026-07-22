@@ -60,9 +60,15 @@ fn main() -> io::Result<()> {
     };
     let (w, h) = surface_size_for_viewport(backend, vp);
 
-    // Pixel buffer owned here; all drawing goes into libvge via Surface/DisplayList.
+    // Pixel buffer owned here; beam work is libvge.
     let mut scanout = Surface::new(w, h);
-    let mut list = DisplayList::with_capacity(512);
+    // Double list: erase previous path, stroke new path (sweep — not full redraw).
+    let mut lists = [
+        DisplayList::with_capacity(512),
+        DisplayList::with_capacity(512),
+    ];
+    let mut cur = 0usize;
+    let mut first = true;
     let mut ostate = OverlayState::new();
     let mut pacer = if hz == 0 {
         None
@@ -75,7 +81,7 @@ fn main() -> io::Result<()> {
         let mut out = io::stdout().lock();
         write!(
             out,
-            "\x1b[1;1H\x1b[2K\x1b[32mlibvge\x1b[0m {ver} · demo loads asm lib · {backend:?} · {w}x{h} · width={width} · q quit"
+            "\x1b[1;1H\x1b[2K\x1b[32mlibvge\x1b[0m {ver} · sweep+AA · {backend:?} · {w}x{h} · width={width} · q quit"
         )?;
         out.flush()?;
     }
@@ -92,17 +98,22 @@ fn main() -> io::Result<()> {
         }
         let t = t0.elapsed().as_secs_f32();
 
-        // Build display list in Rust (demo logic only).
-        list.clear();
-        list.set_width(width);
-        build_hud(&mut list, w as i32, h as i32, t);
+        let next = 1 - cur;
+        lists[next].clear();
+        lists[next].set_width(width);
+        build_hud(&mut lists[next], w as i32, h as i32, t);
 
-        // libvge: transparent clear + stroke (all plot/line/circle = asm).
+        // Sweep: erase old beam path, draw new path (crisp AA hairlines).
         let tb = Instant::now();
-        list.refresh(&mut scanout);
+        if first {
+            lists[next].refresh(&mut scanout);
+            first = false;
+        } else {
+            lists[next].sweep(&mut scanout, Some(&lists[cur]));
+        }
         beam_sum += tb.elapsed();
+        cur = next;
 
-        // Terminal glue (not the engine).
         let tp = Instant::now();
         present_at_state(&scanout, backend, vp, Some(&mut ostate))?;
         present_sum += tp.elapsed();
@@ -119,8 +130,8 @@ fn main() -> io::Result<()> {
             let mut out = io::stdout().lock();
             write!(
                 out,
-                "\x1b[1;1H\x1b[2K\x1b[32mlibvge\x1b[0m {ver} · strokes={} · beam={d}µs present={p}µs fps={fps:.0} · q quit",
-                list.len()
+                "\x1b[1;1H\x1b[2K\x1b[32mlibvge\x1b[0m {ver} · sweep · strokes={} · beam={d}µs present={p}µs fps={fps:.0} · q quit",
+                lists[cur].len()
             )?;
             out.flush()?;
             n = 0;
