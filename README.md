@@ -12,7 +12,7 @@ Composable **instrument pages** for:
 - **Automotive** cluster / OBD pages reusing the same widgets
 - A **plug-in bezel** (20 OSB + knobs) so keyboard POC and real GPIO share one path
 
-**Face geometry:** real F-16 MLU color MFDs are about **4×4 inches (10×10 cm)** square. This library defaults to a **square** framebuffer (512×512), not a full-wide terminal fill.
+**Face geometry:** F-16 MLU color MFD ≈ **4×4 in (10×10 cm)**. The demo sizes the face like a **ruler on your monitor**: `side_px = 4" × display_PPI` (EDID or `MFD_PPI`), then maps a **visually square** cell box so it is not stretched.
 
 **Text:** baked **B612 Mono** atlas (no runtime TTF).  
 **Draw core:** pure asm **libmfd** (`mfd_plot` / `mfd_line` / …).
@@ -113,11 +113,20 @@ Full diagrams: **[docs/widgets.md](docs/widgets.md)**
 | `ColorMfd` | Color LCD palette |
 | `HighVis` | Yellow-dominant |
 
+## Face size (ruler)
+
+| Env | Meaning |
+|-----|---------|
+| `MFD_FACE_IN=4` | Physical face edge in **inches** (default 4) |
+| `MFD_PPI=190` | Force pixels/inch if EDID is wrong |
+| `MFD_MAX_W` / `MFD_MAX_H` | Cap framebuffer (default 768) |
+
+Startup log prints: `face 4.0" @ 191 ppi → surface … on-glass≈4.0"×4.0"`.
+
 ## Performance notes
 
-- Long crawls were from **huge full-TTY Kitty payloads every frame** + allocs.  
-- Demo now: **square ≤512**, **30 Hz**, **PresentScratch** reuse.  
-- Raise size: `MFD_MAX_W=640 MFD_MAX_H=640` · rate: `MFD_HZ=60` if the terminal keeps up.
+- Long crawls: huge Kitty payloads — demo uses capped square face, **30 Hz**, **PresentScratch**.  
+- Rate: `MFD_HZ=60` if the terminal keeps up.
 
 ## License
 

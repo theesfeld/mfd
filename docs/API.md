@@ -68,10 +68,12 @@ s.apply_brightness(bezel.brightness);
 | Item | Value |
 |------|--------|
 | F-16 MLU color MFD (Honeywell class) | **≈ 4×4 in (10×10 cm)** square LCD |
-| Library framebuffer | **1∶1 pixels** (default **512×512**) |
-| Terminal present box | **Visually square**: `cols/rows` corrected for **cell aspect** (cells are tall; equal cols×rows looks rectangular) |
+| Default face | **4.0 inches** square on the **physical monitor** (`MFD_FACE_IN`) |
+| PPI | `MFD_PPI` env, else DRM **EDID** mm + mode, else 96 |
+| Framebuffer | `side_px = inches × PPI` (1∶1), capped by terminal + `MFD_MAX_*` |
+| Terminal box | Cell counts so **on-glass** width ≈ height ≈ face inches |
 
-`square_mfd_viewport` uses `TIOCGWINSZ` pixel size when available (else assumes ~1∶2 cells) so Kitty does not stretch circles into ovals.
+**Ruler mode:** put a real ruler on the panel — the face should measure ~4"×4" (if EDID/PPI is correct). Calibrate with `MFD_PPI=190` if needed.
 
 ## 4. Bezel input ABI (plug-in hardware)
 
