@@ -1,6 +1,14 @@
 # Auto sensors — camera, OBD, range
 
-**Hardware product target** (4×4 panel, physical OSB, vehicle-first attitude): see [`hardware.md`](hardware.md) and Issue [#71](https://github.com/theesfeld/mfd/issues/71).
+**Hardware product target** (4×4 **color** CMFD, physical OSB, vehicle-first attitude): see [`hardware.md`](hardware.md) and Issue [#71](https://github.com/theesfeld/mfd/issues/71).
+
+## Display only (safety)
+
+The CMFD **only displays** information. It **never** writes the vehicle bus.
+
+- Allowed: Mode 01/09 reads, UDS `0x22` (and `0x10` / `0x3E` only to support reads).
+- Forbidden: clear DTC, write DID, SecurityAccess (`0x27`), programming, actuators.
+- **No** `MFD_OBD_ALLOW_WRITE` or other write override. See Issue [#73](https://github.com/theesfeld/mfd/issues/73).
 
 ## Attitude / heading source order
 
@@ -28,9 +36,10 @@ Build with feature `obd` (default). **No dependency on obdtui.** Stack is new in
 
 - Bluetooth classic SPP (Linux RFCOMM) or serial ELM327/STN
 - SAE J1979 Mode 01 PIDs
-- UDS: session `0x10`, tester present `0x3E`, ReadDataByIdentifier `0x22`, gated SecurityAccess `0x27`
+- UDS **read path only**: session `0x10`, tester present `0x3E`, ReadDataByIdentifier `0x22`
 - ISO-TP multi-frame reassembly helpers
 - Capture + replay (`frames.ndjson`)
+- Write-class UDS is **hard-blocked** (display-only CMFD)
 
 | Env | Meaning |
 |-----|---------|
@@ -39,7 +48,6 @@ Build with feature `obd` (default). **No dependency on obdtui.** Stack is new in
 | `MFD_OBD_PORT=/dev/ttyUSB0` | Serial or bound rfcomm node |
 | `MFD_OBD_BAUD=115200` | Serial baud |
 | `MFD_OBD_REPLAY=docs/odbii-session` | Capture dir or `frames.ndjson` |
-| `MFD_OBD_ALLOW_WRITE=1` | Allow SecurityAccess / write-class UDS |
 
 ### Capture tool
 
@@ -53,7 +61,7 @@ cargo run --release --bin mfd-obd-capture -- \
   --replay docs/odbii-session --seconds 5 -o /tmp/replay-test
 ```
 
-Writes: `frames.ndjson`, `signals.csv`, `meta.toml`, `session.json`.
+Creates log files: `frames.ndjson`, `signals.csv`, `meta.toml`, `session.json` (host disk only — not vehicle writes).
 
 ### What the truck capture already has
 

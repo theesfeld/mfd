@@ -232,7 +232,9 @@ Options:
   --uds             Probe extended session + common 0x22 DIDs
   -h, --help        This help
 
-Env: MFD_OBD_BT, MFD_OBD_PORT, MFD_OBD_REPLAY, MFD_OBD_BAUD, MFD_OBD_ALLOW_WRITE
+Env: MFD_OBD_BT, MFD_OBD_PORT, MFD_OBD_REPLAY, MFD_OBD_BAUD
+
+Display-only: never writes vehicle (no security unlock / clear DTC / DID write).
 "
     );
 }

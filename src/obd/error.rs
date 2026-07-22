@@ -11,7 +11,8 @@ pub enum Error {
     Protocol(String),
     Decode(String),
     NotOpen,
-    ForbiddenWrite,
+    /// Vehicle mutation / write-class UDS blocked (CMFD is display-only).
+    DisplayOnly(String),
     NoData,
 }
 
@@ -25,7 +26,7 @@ impl fmt::Display for Error {
             Error::Protocol(s) => write!(f, "protocol: {s}"),
             Error::Decode(s) => write!(f, "decode: {s}"),
             Error::NotOpen => write!(f, "transport not open"),
-            Error::ForbiddenWrite => write!(f, "write blocked (set MFD_OBD_ALLOW_WRITE=1)"),
+            Error::DisplayOnly(s) => write!(f, "display-only: {s}"),
             Error::NoData => write!(f, "NO DATA"),
         }
     }

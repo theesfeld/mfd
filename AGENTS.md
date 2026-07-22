@@ -5,7 +5,8 @@ User-global process: `~/.config/agents/AGENTS.md`.
 ## Product
 
 - **Name:** mfd (multi-function display library)
-- **End target:** physical ~**4×4 in** MFD (screen + OSB buttons + rockers); see `docs/hardware.md` / Issue #71
+- **End target:** physical ~**4×4 in color CMFD** (screen + OSB + rockers); see `docs/hardware.md` / Issues #71 · #73
+- **Display only:** never write the vehicle (no clear DTC, DID write, security unlock, programming). Read path only.
 - **Bezel:** `BezelSource` is the only page input path (keyboard → GPIO later)
 - **Sensors:** prefer **vehicle OBD/CAN/UDS** for pitch/roll/heading; on-box gyro/compass only as fallback
 - **Low-level draw:** pure asm `libmfd` (`make` → `build/libmfd.a`)

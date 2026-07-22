@@ -1,14 +1,25 @@
-# Hardware MFD target
+# Hardware CMFD target
 
-**SoT issue:** [#71](https://github.com/theesfeld/mfd/issues/71)
+**SoT issues:** hardware [#71](https://github.com/theesfeld/mfd/issues/71) · display-only safety [#73](https://github.com/theesfeld/mfd/issues/73)
 
-This project is not “desktop demo only.” The end product is a **physical multi-function display** that recreates an F-16-class CMFD face for vehicle (and jet-style) use.
+This project is not “desktop demo only.” The end product is a **physical color multi-function display (CMFD)** — F-16-class face for vehicle (and jet-style) use.
+
+## Safety — display only (hard rule)
+
+| Rule | Meaning |
+|------|---------|
+| **Display only** | The CMFD **only shows** data. It does **not** control the vehicle. |
+| **No vehicle writes** | Never clear DTCs, write DIDs, security-unlock, program, or command actuators. |
+| **Read path only** | OBD Mode 01/09 and UDS **read** services (`0x22`; session `0x10` / keep-alive `0x3E` only as needed to **read**). |
+| **No override** | There is no env flag to enable writes. Software rejects write-class SIDs. |
+
+This is intentional and permanent. The unit is safe because it is a **glass**, not a programmer or body controller.
 
 ## Device goals
 
 | Element | Target |
 |---------|--------|
-| Face | ~**4×4 in** active glass (MLU CMFD class) — software already sizes for physical inches |
+| Face | ~**4×4 in** **color** glass (MLU **CMFD** class) — software already sizes for physical inches |
 | Bezel | **Physical OSB buttons** (20 softkeys) + corner rockers (BRT / CON / SYM / GAIN) |
 | Input ABI | `mfd::bezel` (`BezelSource`) — keyboard today; GPIO / matrix later **without page rewrites** |
 | Link | On-unit **Bluetooth** (SPP to ELM/STN or phone path) is allowed and expected |

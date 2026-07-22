@@ -1,11 +1,17 @@
-//! **Native OBD-II / UDS stack** for MFD (no dependency on defunct obdtui).
+//! **Native OBD-II / UDS stack** for the color MFD (**CMFD**).
+//!
+//! # Safety — display only
+//!
+//! This product **only displays** information. It **never** writes the vehicle
+//! (no clear DTC, no DID write, no security unlock, no programming). UDS allow-list
+//! is hard-coded in [`uds`]; there is **no** write override env.
 //!
 //! Layers:
 //! - [`transport`] — serial + Linux Bluetooth RFCOMM SPP
 //! - [`elm`] — ELM327/STN AT commands
 //! - [`j1979`] — Mode 01 PID decode
 //! - [`isotp`] — multi-frame reassembly
-//! - [`uds`] — session control, tester present, 0x22 DID, gated 0x27
+//! - [`uds`] — read path: `0x10` / `0x3E` / `0x22` only
 //! - [`capture`] / [`replay`] — log + play back frames
 //! - [`feed`] — background poll → vehicle snapshot
 //!
@@ -17,7 +23,6 @@
 //! | `MFD_OBD_PORT=/dev/ttyUSB0` | Serial / rfcomm device |
 //! | `MFD_OBD_BAUD=115200` | Serial baud |
 //! | `MFD_OBD_REPLAY=path` | Capture dir or frames.ndjson |
-//! | `MFD_OBD_ALLOW_WRITE=1` | Allow SecurityAccess / writes |
 
 #![cfg(feature = "obd")]
 
