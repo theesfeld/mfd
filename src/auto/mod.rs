@@ -740,9 +740,9 @@ fn chrome(
     );
     // MLU nav cue + lab key map (POC). Production GPIO does not need key letters.
     let nav = if menu {
-        "PICK FORMAT OSB  ·  SLOT KEY CLOSES MENU"
+        "PICK FORMAT OSB 1-20  ·  SLOT KEY CLOSES MENU"
     } else {
-        "LIT *SLOT = MENU  ·  OTHER SLOT = SELECT  ·  yuiop BOTTOM  ·  asdfg LEFT  ·  1-0 TOP/RIGHT"
+        "LIT *SLOT = MENU  ·  [ ] PREV/NEXT  ·  KEYS 1234567890QWERTYUIOP = OSB 1-20"
     };
     page.label_centered(
         c.center().0 as f32,

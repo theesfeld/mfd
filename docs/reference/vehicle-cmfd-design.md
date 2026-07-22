@@ -53,16 +53,18 @@
        OWN  A   B   C  DCLT
 ```
 
-| Side | OSB | POC keys | Role |
-|------|-----|----------|------|
-| **Top** | 1–5 | `1`–`5` | **Page options** (Lights: LO HI FOG DRL INT) |
+| Side | OSB | POC keys (linear) | Role |
+|------|-----|-------------------|------|
+| **Top** | 1–5 | `1`–`5` | **Page options** |
 | **Right** | 6–10 | `6`–`9` `0` | **Page options** |
-| **Bottom** | 15–11 | `y` `u` `i` `o` `p` (legacy qwert) | OWN · **\*fmtA** · fmtB · fmtC · DCLT |
-| **Left** | 16–20 | `a` `s` `d` `f` `g` | DTC · · · SET · BUS |
+| **Bottom** | 11–15 | `q`–`t` | DCLT · C · B · **\*A** · OWN |
+| **Left** | 16–20 | `y`–`p` | DTC · · · SET · BUS |
 
-**Hard rule:** top/right keys are **never** format jumps. Format change only via bottom slots 12–14 + Master Menu.
+Lab row: `1234567890qwertyuiop` = OSB 1–20. `[` `]` = prev/next · `-` `=` = BRT.
 
-**MLU:** lit `*` format slot = Master Menu. Other slots = select. On-glass cue always.
+**Hard rule:** top/right are options / menu picks, not permanent format jumps.
+
+**MLU:** lit `*` format slot = Master Menu. Other slots = select.
 
 **Example — LIGHTS:** `1`=LO · `2`=HI · `3`=FOG · `4`=DRL · `5`=INT. Not ENG/FUEL.
 

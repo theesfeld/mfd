@@ -164,46 +164,37 @@ trait BezelSource {
 
 ## 6. POC keyboard map (lab only — not production hardware)
 
-**Numeric face map** (keys track OSB numbers / face sides):
+**Linear map** (one key per OSB, left-to-right on the keyboard row):
 
 ```text
-         1  2  3  4  5
-   g                    6
-   f                    7
-   d     [  GLASS  ]    8
-   s                    9
-   a                    0
-      y   u   i   o   p
-     15  14  13  12  11
+Keys:  1 2 3 4 5 6 7 8 9 0  q  w  e  r  t  y  u  i  o  p
+OSB:   1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20
 ```
 
-| Face side | Keys | OSB |
-|-----------|------|-----|
-| Top options | `1` `2` `3` `4` `5` | 1–5 |
-| Right options | `6` `7` `8` `9` `0` | 6–10 |
-| Bottom L→R | `y` `u` `i` `o` `p` | **15 · 14 · 13 · 12 · 11** (OWN · A · B · C · DCLT) |
-| Bottom legacy | `q` `w` `e` `r` `t` | same as yuiop |
-| Left bottom→top | `a` `s` `d` `f` `g` | **16 · 17 · 18 · 19 · 20** (DTC · · · SET · BUS) |
-| BRT −/+ | `[` `]` | Knob Brightness |
-| CON −/+ | `;` `'` | Knob Contrast |
-| SYM −/+ | `-` `=` | Knob Symbology |
-| GAIN −/+ | `,` `.` | Knob Gain |
+| OSB | Key | Face role |
+|-----|-----|-----------|
+| 1–5 | `1`–`5` | Top options |
+| 6–10 | `6`–`9` `0` | Right options |
+| 11 | `q` | DCLT |
+| 12 | `w` | Format slot C |
+| 13 | `e` | Format slot B |
+| 14 | `r` | Format slot A (often lit `*`) |
+| 15 | `t` | OWN |
+| 16 | `y` | DTC |
+| 17–18 | `u` `i` | blank / Master Menu MAP·ATT |
+| 19 | `o` | SET |
+| 20 | `p` | BUS |
 
-**Lab-only aliases (not on production face):**
+| Lab rocker keys | Function |
+|-----------------|----------|
+| `[` `]` | Format **prev / next** (lab only) |
+| `-` `=` | **Brightness** − / + |
+| `;` `'` | Contrast − / + |
+| `,` `.` | Gain − / + |
 
-| Key | Alias for | Production path |
-|-----|-----------|-----------------|
-| `n` / arrows | Format cycle | Slots + Master Menu |
-| `m` | Open Master Menu | Press **lit** `*` format slot |
-| Esc | Quit process | Host power / app lifecycle |
+**Lab aliases:** `m` = Master Menu · arrows = prev/next · Esc = quit.
 
-**MLU nav (product):**
-
-| Press | Result |
-|-------|--------|
-| Non-active format slot 12/13/14 | Show that format |
-| **Active** (lit `*`) format slot | **Master Menu** |
-| OWN / DCLT / DTC / SET / BUS | Direct jump |
+**MLU nav (product OSB):** non-active slot 12–14 = select · lit `*` slot = Master Menu · OWN/DCLT/DTC/SET/BUS direct.
 
 **Acceptance test:** every product function works with **only** OSB 1–20 + 4 rockers (no letter shortcuts).
 
@@ -262,3 +253,4 @@ trait BezelSource {
 |------|--------|
 | 2026-07-22 | Initial freeze for hardware design (#113) |
 | 2026-07-22 | Lab numeric face map + MLU SOI (`*` = menu); #129 |
+| 2026-07-22 | Linear lab keys `1…0q…p` = OSB 1–20; `[` `]` prev/next; `-` `=` BRT; #131 |
