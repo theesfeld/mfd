@@ -38,6 +38,45 @@ Same signal may appear on multiple pages (e.g. RPM on ENG and DRV).
 `n`/`p` cycle · number keys and letters jump (see `cmfd` banner).  
 Default domain: **auto only**.
 
+Active page OSB legend is **highlighted** (bright) while that page is shown.
+
+## OSB layout (vehicle CMFD vs real jet)
+
+Hardware is the same **20 OSB** ring as F-16 CMFD (numbered 1→20 clockwise from top-left):
+
+```
+        1   2   3   4   5     ← top
+   20                       6
+   19                       7     ← left / right columns
+   18      [  GLASS  ]      8
+   17                       9
+   16                      10
+       15  14  13  12  11     ← bottom
+```
+
+### Real F-16 CMFD (MLU)
+
+- **Labels are not fixed forever.** Each **format** (FCR, HSD, SMS, …) sets its own 20 legends when entered.
+- **Primary format select** lives on **bottom OSB 12 / 13 / 14** (three slots). Active format is **highlighted**. Press a non-active slot → change format. Press the **active** slot → Format Select Master Menu.
+- **OSB 15** often **SWAP** (left/right MFD).
+- **Other OSBs** are **page options** for that format (range, CNTL, submodes, …) — not a permanent “all pages on top.”
+- Corner rockers: GAIN / SYM / BRT / CON (not OSBs).
+
+### This vehicle product (adaptive systems banks)
+
+We reuse the same 20-button geometry, with **fixed banks** for truck systems (so you can jump without a Master Menu first):
+
+| Side | OSB | Role |
+|------|-----|------|
+| **Top** | 1–5 | Page bank: ENG · FUEL · FLUD · ELEC · DRV |
+| **Right** | 6–10 | Page bank: CHAS · BODY · LITE · CLIM · CAM |
+| **Left** | 20–16 | Page bank: BUS · SET · ATT · MAP · DTC |
+| **Bottom** | 15–11 | **Page options** for the current page (unit, lights toggles, OWN, …) |
+
+So: **top / left / right ≈ “which page”**, **bottom ≈ “options on this page”** — close to jet habit, but jet puts **format slots on the bottom** and fills the rest from the format. Vehicle glass prioritizes many systems pages on the ring.
+
+OWN / RNG are often bottom options or letter keys (`o`, `r`), so they may have no lit ring OSB.
+
 ## Startup (real CMFD power-on)
 
 Glass matches **real F-16 CMFD power-on** (see `docs/reference/cmfd-power-on.md`):

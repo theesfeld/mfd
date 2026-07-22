@@ -681,6 +681,32 @@ impl AutoPage {
             _ => None,
         }
     }
+
+    /// OSB index (1..=20) that selects this page — used to light the active legend.
+    ///
+    /// Matches real CMFD habit: the **active format** stays highlighted. Pages
+    /// only on bottom softkeys (OWN, RNG) have no fixed ring OSB → `None`.
+    pub fn highlight_osb(self) -> Option<u8> {
+        match self {
+            AutoPage::Eng => Some(1),
+            AutoPage::Fuel => Some(2),
+            AutoPage::Fluid => Some(3),
+            AutoPage::Elec => Some(4),
+            AutoPage::Drive => Some(5),
+            AutoPage::Chas => Some(6),
+            AutoPage::Body => Some(7),
+            AutoPage::Lights => Some(8),
+            AutoPage::Clim => Some(9),
+            AutoPage::Cam => Some(10),
+            AutoPage::Faults => Some(16),
+            AutoPage::Map => Some(17),
+            AutoPage::Attitude => Some(18),
+            AutoPage::Setup => Some(19),
+            AutoPage::Bus => Some(20),
+            // Bottom-row / key-only pages — no permanent ring slot
+            AutoPage::Own | AutoPage::Range => None,
+        }
+    }
 }
 
 type Osb5 = [&'static str; 5];
@@ -736,6 +762,12 @@ fn chrome(
 ) {
     let b = page.bounds.inset(2);
     let (top, right, bottom, left) = legends(which, v);
+    // Light the OSB for the **current page** (not only last press). While an
+    // OSB is held down, prefer that momentary highlight like a real bezel.
+    let active = (1..=20u8)
+        .find(|&id| bezel.is_down(id))
+        .or_else(|| which.highlight_osb())
+        .or(bezel.last_osb);
     osb_chrome(
         page.surface,
         b,
@@ -745,7 +777,7 @@ fn chrome(
         &left,
         page.font_px * 0.65,
         pal.dim,
-        bezel.last_osb,
+        active,
     );
     let c = content_after_osb(b, page.font_px * 0.65);
     page.label_centered(
