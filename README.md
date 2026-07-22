@@ -40,7 +40,7 @@ This is a **pixel instrument face**, not glass vectors in air.
 
 **Demo (black glass, high contrast):**
 - Full alternate screen (not a transparent overlay)
-- Softkey legend row + status strip (bitmap font)
+- Softkey legend row + status strip (**stroke** / drawn AA text)
 - Large F-150 style tach **0–7000 RPM**, redline arc **~5500+**, scale digits
 - Tapes with labels: **FUEL**, **COOL**, **TRNS**, **BATT**
 
@@ -215,13 +215,16 @@ Quit: `q`, Esc, or Ctrl+C.
 | `refresh(surface)` | Transparent clear + stroke living (full opacity) |
 | `refresh_life(surface, fade)` | Transparent clear + stroke with optional trail fade |
 
-### Bitmap font (MFD legends)
+### Text (MFD legends)
 
 | Function | Description |
 |----------|-------------|
-| `draw_text(surface, x, y, s, color, scale)` | 5×7 solid glyphs (A–Z, 0–9, basic punctuation) |
-| `draw_text_centered(…)` | Center a line on a point |
-| `text_width` / `text_height` | Layout helpers |
+| `draw_text_stroke(…, px_h)` | **Drawn** glyphs: AA polylines (smooth; no pixel stair-steps) |
+| `draw_text_stroke_centered(…)` | Center stroke text |
+| `stroke_text_width` / `stroke_text_height` | Layout for stroke text |
+| `draw_text(…, scale)` | Optional 5×7 **bitmap** blocks (tiny UI only) |
+
+Prefer **stroke** text on instrument faces. Bitmap text is for extreme size only.
 
 **Update models:** full-scene rebuild → `refresh` or `clear` + draws. Sparse motion → `sweep`. Optional trails → lifespan API.
 

@@ -1,7 +1,7 @@
-//! **MFD instrument panel** — pure-asm libvge + bitmap text in the terminal.
+//! **MFD instrument panel** — pure-asm libvge + **stroke** (drawn) text.
 //!
 //! Full alternate screen. Black glass. High-contrast strokes and legends.
-//! This is an instrument face, not a transparent wireframe overlay.
+//! Text is AA polylines (drawn), not pixel-block bitmap stair-steps.
 //!
 //! ```text
 //! make
@@ -16,7 +16,9 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use vge::font::{draw_text, draw_text_centered, text_height, text_width};
+use vge::font::{
+    draw_text_stroke, draw_text_stroke_centered, stroke_text_height, stroke_text_width,
+};
 use vge::frame::FramePacer;
 use vge::term::{
     detect_backend, enter_fullscreen, leave_fullscreen, present_at, surface_size_for_viewport,
@@ -45,7 +47,7 @@ fn main() -> io::Result<()> {
         eprintln!("error: demo requires pure-asm libvge (x86_64)");
         std::process::exit(1);
     }
-    eprintln!("loaded libvge {ver} · MFD panel (black glass, bitmap text)");
+    eprintln!("loaded libvge {ver} · MFD panel (black glass, stroke text)");
 
     install_sigint();
     let hz = std::env::var("VGE_HZ")
@@ -138,8 +140,15 @@ fn draw_mfd(
     batt: f32,
 ) {
     let m = (w.min(h) as f32 * 0.03).max(6.0) as i32;
-    let scale = if w.min(h) >= 500 { 2 } else { 1 };
-    let th = text_height(scale);
+    // Drawn legend height (pixels). Larger on big panels.
+    let fh = if w.min(h) >= 700 {
+        18.0
+    } else if w.min(h) >= 480 {
+        14.0
+    } else {
+        11.0
+    };
+    let th = stroke_text_height(fh) as i32;
     let top_bar = th + m * 2;
     let bot_bar = th + m * 2;
 
@@ -149,12 +158,12 @@ fn draw_mfd(
     s.line_fast(w - m / 2, h - m / 2, m / 2, h - m / 2, INK_DIM);
     s.line_fast(m / 2, h - m / 2, m / 2, m / 2, INK_DIM);
 
-    // Softkey row (MFD chrome).
+    // Softkey row (MFD chrome) — stroke text.
     let keys = ["NORM", "RWS", "CRM", "CNTL", "OVRD"];
     let slot = (w - 2 * m) / keys.len() as i32;
     for (i, k) in keys.iter().enumerate() {
-        let cx = m + slot * i as i32 + slot / 2;
-        draw_text_centered(s, cx, m + th / 2, k, INK, scale);
+        let cx = (m + slot * i as i32 + slot / 2) as f32;
+        draw_text_stroke_centered(s, cx, (m + th / 2) as f32, k, INK, fh);
     }
     // Divider under softkeys.
     s.line_fast(m, top_bar - 2, w - m, top_bar - 2, INK_DIM);
@@ -170,7 +179,7 @@ fn draw_mfd(
     let tach_cy = face_top + face_h / 2;
     let tach_r = ((tach_right - m).min(face_h) / 2 - 8).max(48);
 
-    draw_tach(s, tach_cx, tach_cy, tach_r, rpm, scale);
+    draw_tach(s, tach_cx, tach_cy, tach_r, rpm, fh);
 
     // Four tapes.
     let n_tapes = 4i32;
@@ -185,16 +194,30 @@ fn draw_mfd(
     ];
     for (i, &(name, val, col)) in tapes.iter().enumerate() {
         let y = face_top + i as i32 * (tape_h + tape_gap);
-        draw_tape(s, tape_x, y, tape_w, tape_h, name, val, col, scale);
+        draw_tape(s, tape_x, y, tape_w, tape_h, name, val, col, fh);
     }
 
     // Bottom status strip.
     s.line_fast(m, face_bot + 2, w - m, face_bot + 2, INK_DIM);
     let rpm_s = format!("RPM {}", rpm.round() as i32);
     let st = format!("F150 TACH 0-7K  RL {}", REDLINE_RPM as i32);
-    draw_text(s, m + 2, h - bot_bar + m / 2, &rpm_s, INK_WHITE, scale);
-    let st_x = w - m - 2 - text_width(&st, scale);
-    draw_text(s, st_x, h - bot_bar + m / 2, &st, INK_DIM, scale);
+    draw_text_stroke(
+        s,
+        (m + 2) as f32,
+        (h - bot_bar + m / 2) as f32,
+        &rpm_s,
+        INK_WHITE,
+        fh,
+    );
+    let st_w = stroke_text_width(&st, fh);
+    draw_text_stroke(
+        s,
+        (w - m - 2) as f32 - st_w,
+        (h - bot_bar + m / 2) as f32,
+        &st,
+        INK_DIM,
+        fh * 0.9,
+    );
 }
 
 fn rpm_to_angle(rpm: f32) -> f32 {
@@ -202,15 +225,13 @@ fn rpm_to_angle(rpm: f32) -> f32 {
     TACH_ANG0 + v * TACH_SWEEP
 }
 
-fn draw_tach(s: &mut Surface, cx: i32, cy: i32, r: i32, rpm: f32, scale: i32) {
+fn draw_tach(s: &mut Surface, cx: i32, cy: i32, r: i32, rpm: f32, fh: f32) {
     let r = r.max(32);
+    let digit_h = (r as f32 * 0.12).clamp(10.0, fh * 1.1);
 
-    // Outer arc track (not a full ring floating — still circle for structure,
-    // plus bold tick field). Hard pixels for bezel.
     s.circle(cx, cy, r, INK_DIM);
     s.circle(cx, cy, r - 1, INK_DIM);
 
-    // Major ticks + numerals every 1000 RPM.
     for k in 0..=7 {
         let rv = k as f32 * 1000.0;
         let a = rpm_to_angle(rv);
@@ -218,22 +239,19 @@ fn draw_tach(s: &mut Surface, cx: i32, cy: i32, r: i32, rpm: f32, scale: i32) {
         let outer = r as f32 - 2.0;
         let inner = r as f32 * if k % 2 == 0 { 0.82 } else { 0.88 };
         let col = if rv >= REDLINE_RPM { INK_RED } else { INK };
-        // Crisp ticks: aliased line on black.
-        s.line_fast(
+        s.line_aa(
             cx + (outer * c) as i32,
             cy + (outer * sn) as i32,
             cx + (inner * c) as i32,
             cy + (inner * sn) as i32,
             col,
         );
-        // Numerals just inside ticks.
-        let lx = cx + ((r as f32 * 0.68) * c) as i32;
-        let ly = cy + ((r as f32 * 0.68) * sn) as i32;
+        let lx = cx as f32 + (r as f32 * 0.66) * c;
+        let ly = cy as f32 + (r as f32 * 0.66) * sn;
         let label = format!("{k}");
-        draw_text_centered(s, lx, ly, &label, col, scale);
+        draw_text_stroke_centered(s, lx, ly, &label, col, digit_h);
     }
 
-    // Minor ticks every 500.
     for k in 0..14 {
         if k % 2 == 0 {
             continue;
@@ -244,7 +262,7 @@ fn draw_tach(s: &mut Surface, cx: i32, cy: i32, r: i32, rpm: f32, scale: i32) {
         let outer = r as f32 - 2.0;
         let inner = r as f32 * 0.92;
         let col = if rv >= REDLINE_RPM { INK_RED } else { INK_DIM };
-        s.line_fast(
+        s.line_aa(
             cx + (outer * c) as i32,
             cy + (outer * sn) as i32,
             cx + (inner * c) as i32,
@@ -253,7 +271,6 @@ fn draw_tach(s: &mut Surface, cx: i32, cy: i32, r: i32, rpm: f32, scale: i32) {
         );
     }
 
-    // Redline arc inside radius (bright, solid chords).
     draw_arc(
         s,
         cx,
@@ -264,18 +281,24 @@ fn draw_tach(s: &mut Surface, cx: i32, cy: i32, r: i32, rpm: f32, scale: i32) {
         INK_RED,
     );
 
-    // Title.
-    draw_text_centered(s, cx, cy + r / 3, "X1000", INK_DIM, scale);
-    draw_text_centered(
+    let title_h = (digit_h * 0.85).max(9.0);
+    draw_text_stroke_centered(
         s,
-        cx,
-        cy + r / 3 + text_height(scale) + 2,
+        cx as f32,
+        cy as f32 + r as f32 * 0.28,
+        "X1000",
+        INK_DIM,
+        title_h,
+    );
+    draw_text_stroke_centered(
+        s,
+        cx as f32,
+        cy as f32 + r as f32 * 0.28 + title_h + 4.0,
         "RPM",
         INK_DIM,
-        scale,
+        title_h,
     );
 
-    // Needle: bright AA hairline + short tail; solid hub.
     let a = rpm_to_angle(rpm);
     let (c, sn) = (a.cos(), a.sin());
     let tip = r as f32 * 0.86;
@@ -284,8 +307,7 @@ fn draw_tach(s: &mut Surface, cx: i32, cy: i32, r: i32, rpm: f32, scale: i32) {
     let y0 = cy + (-tail * sn) as i32;
     let x1 = cx + (tip * c) as i32;
     let y1 = cy + (tip * sn) as i32;
-    // Double pass: aliased core + AA edge for both weight and crispness.
-    s.line_fast(x0, y0, x1, y1, INK_WHITE);
+    s.line_aa(x0, y0, x1, y1, INK_WHITE);
     s.line_aa(x0, y0, x1, y1, INK);
     s.circle(cx, cy, 3, INK_WHITE);
     s.circle(cx, cy, 1, BLACK);
@@ -303,7 +325,7 @@ fn draw_arc(s: &mut Surface, cx: i32, cy: i32, r_arc: i32, rpm0: f32, rpm1: f32,
         let t = i as f32 / segs as f32;
         let a = a0 + (a1 - a0) * t;
         let cur = (cx + (r * a.cos()) as i32, cy + (r * a.sin()) as i32);
-        s.line_fast(prev.0, prev.1, cur.0, cur.1, color);
+        s.line_aa(prev.0, prev.1, cur.0, cur.1, color);
         prev = cur;
     }
 }
@@ -318,26 +340,27 @@ fn draw_tape(
     name: &str,
     value01: f32,
     color: Color,
-    scale: i32,
+    fh: f32,
 ) {
     let v = value01.clamp(0.0, 1.0);
     let x1 = x + w;
     let y1 = y + h;
-    let th = text_height(scale);
+    let label_h = (fh * 0.9).max(9.0);
+    let th = stroke_text_height(label_h) as i32;
 
-    // Label above rail.
-    draw_text(s, x + 2, y + 1, name, color, scale);
+    // Label above rail (drawn).
+    draw_text_stroke(s, (x + 2) as f32, (y + 1) as f32, name, color, label_h);
 
-    let rail_top = y + th + 3;
+    let rail_top = y + th + 4;
     let rail_bot = y1 - 2;
     let rail_h = (rail_bot - rail_top).max(8);
     let mid = x + w / 2;
 
     // Frame.
-    s.line_fast(x, rail_top, x1, rail_top, INK_DIM);
-    s.line_fast(x1, rail_top, x1, rail_bot, INK_DIM);
-    s.line_fast(x1, rail_bot, x, rail_bot, INK_DIM);
-    s.line_fast(x, rail_bot, x, rail_top, INK_DIM);
+    s.line_aa(x, rail_top, x1, rail_top, INK_DIM);
+    s.line_aa(x1, rail_top, x1, rail_bot, INK_DIM);
+    s.line_aa(x1, rail_bot, x, rail_bot, INK_DIM);
+    s.line_aa(x, rail_bot, x, rail_top, INK_DIM);
 
     // Scale ticks.
     let n = 11;
@@ -345,26 +368,32 @@ fn draw_tape(
         let t = i as f32 / (n - 1) as f32;
         let yy = rail_bot - ((rail_h as f32) * t) as i32;
         let half = if i % 5 == 0 { w / 5 } else { w / 10 };
-        s.line_fast(mid - half, yy, mid + half, yy, INK_DIM);
+        s.line_aa(mid - half, yy, mid + half, yy, INK_DIM);
     }
 
-    // Value bar: bright 1px vertical + index.
+    // Value bar + index (AA).
     let fill_h = ((rail_h as f32) * v) as i32;
     if fill_h > 0 {
-        s.line_fast(mid, rail_bot, mid, rail_bot - fill_h, color);
-        // Second column for slight weight (still 1–2 px total).
-        s.line_fast(mid + 1, rail_bot, mid + 1, rail_bot - fill_h, color);
+        s.line_aa(mid, rail_bot, mid, rail_bot - fill_h, color);
+        s.line_aa(mid + 1, rail_bot, mid + 1, rail_bot - fill_h, color);
     }
     let iy = rail_bot - fill_h;
     let arm = (w / 3).max(6);
-    s.line_fast(mid - arm, iy, mid + arm, iy, color);
-    // Index bug.
-    s.line_fast(mid - arm, iy, mid - arm + 3, iy - 3, color);
-    s.line_fast(mid - arm, iy, mid - arm + 3, iy + 3, color);
+    s.line_aa(mid - arm, iy, mid + arm, iy, color);
+    s.line_aa(mid - arm, iy, mid - arm + 3, iy - 3, color);
+    s.line_aa(mid - arm, iy, mid - arm + 3, iy + 3, color);
 
-    // Numeric percent.
+    // Numeric percent (drawn).
     let pct = format!("{}", (v * 100.0).round() as i32);
-    draw_text_centered(s, mid, rail_top + th / 2 + 1, &pct, INK_WHITE, scale);
+    let pct_h = (label_h * 0.85).max(8.0);
+    draw_text_stroke_centered(
+        s,
+        mid as f32,
+        (rail_top + th / 2 + 1) as f32,
+        &pct,
+        INK_WHITE,
+        pct_h,
+    );
 }
 
 fn poll_quit() -> io::Result<bool> {

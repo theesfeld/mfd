@@ -4,7 +4,8 @@
 
 ### Added
 
-- **Bitmap font** (`font::draw_text`, 5×7) for MFD legends and scale digits
+- **Stroke font** (`draw_text_stroke`) — AA polylines for drawn MFD legends (no bitmap stair-steps)
+- Optional **bitmap** font (`draw_text`, 5×7) for tiny labels
 - **Per-stroke lifespan** on `DisplayList`: `set_lifespan`, `tick`, `TimedStroke`, `stroke_life` / `refresh_life`
 - Demo: full-screen **MFD panel** — black glass, softkeys, F-150 tach 0–7k with redline arc, labeled tapes
 
