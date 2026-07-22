@@ -43,6 +43,10 @@ pub use geom::Rect;
 pub use page::Page;
 pub use palette::{ColorMode, Palette};
 pub use surface::{engine_version, using_assembly, Surface, Xform};
+// term re-exports used by demos/integrators
+pub use term::{
+    display_ppi, display_ppi_info, mfd_face_inches, physical_mfd_layout, PhysicalFace, PpiSource,
+};
 pub use widget::{
     bearing_pointer, bezel_frame, bscope_grid, caution_box, content_after_osb, crosshair,
     horizon_cue, label, label_centered, list_menu, numeric_readout, osb_chrome, progress_strip,

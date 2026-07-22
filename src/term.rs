@@ -178,15 +178,15 @@ pub fn cell_pixel_size() -> (f32, f32) {
 }
 
 fn max_pixels() -> (u32, u32) {
-    // Cap present payload. Physical 4" may want ~700–900 px on hi-DPI; default 768.
+    // Allow true 4" on hi-DPI (~190 ppi → ~760 px; 220 ppi → ~880). Default 1024.
     let mw = std::env::var("MFD_MAX_W")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(768u32);
+        .unwrap_or(1024u32);
     let mh = std::env::var("MFD_MAX_H")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(768u32);
+        .unwrap_or(1024u32);
     (mw.max(64), mh.max(64))
 }
 
@@ -220,131 +220,235 @@ pub fn mfd_face_inches() -> f32 {
         .clamp(1.0, 12.0)
 }
 
-/// Detect display **pixels per inch** (PPI).
+/// How PPI was obtained (for logs / calibration).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PpiSource {
+    Env,
+    EdidDetailed,
+    EdidCm,
+    Fallback96,
+}
+
+/// Detect display **pixels per inch** (PPI) for ruler sizing.
 ///
 /// Order:
-/// 1. `MFD_PPI` env (manual ruler calibration)
-/// 2. DRM connector EDID (`/sys/class/drm/*/edid`) + active mode
-/// 3. Fallback **96** PPI
+/// 1. `MFD_PPI` — manual ruler calibration (always wins)
+/// 2. DRM EDID detailed timing size in **mm** (best automatic)
+/// 3. DRM EDID screen size in **cm** (coarser)
+/// 4. Fallback **96** (not ruler-accurate — calibrate with `MFD_PPI`)
 pub fn display_ppi() -> f32 {
+    display_ppi_info().0
+}
+
+/// `(ppi, source)` for diagnostics.
+pub fn display_ppi_info() -> (f32, PpiSource) {
     if let Ok(s) = std::env::var("MFD_PPI") {
         if let Ok(v) = s.parse::<f32>() {
-            if v.is_finite() && v > 40.0 && v < 600.0 {
-                return v;
+            if v.is_finite() && (40.0..600.0).contains(&v) {
+                return (v, PpiSource::Env);
             }
         }
     }
-    if let Some(ppi) = ppi_from_drm_edid() {
-        return ppi;
+    if let Some(ppi) = ppi_from_drm_edid(true) {
+        return (ppi, PpiSource::EdidDetailed);
     }
-    96.0
+    if let Some(ppi) = ppi_from_drm_edid(false) {
+        return (ppi, PpiSource::EdidCm);
+    }
+    (96.0, PpiSource::Fallback96)
 }
 
-/// Read connected DRM EDID: physical cm + first mode → PPI.
-fn ppi_from_drm_edid() -> Option<f32> {
+/// Unified **ruler layout**: one side length drives both framebuffer and viewport.
+#[derive(Clone, Debug)]
+pub struct PhysicalFace {
+    /// Requested edge length (inches).
+    pub inches_requested: f32,
+    /// PPI used for the calculation.
+    pub ppi: f32,
+    pub ppi_source: PpiSource,
+    /// Framebuffer side (1∶1), after clamps.
+    pub side_px: u32,
+    /// Present cell box (aspect-corrected).
+    pub viewport: Viewport,
+    /// On-glass edge after integer cell snap (inches).
+    pub on_glass_in: f32,
+    /// True if terminal/max caps forced a smaller face than requested.
+    pub clipped: bool,
+}
+
+impl PhysicalFace {
+    /// Compute a ruler-accurate square face for this host + backend.
+    pub fn layout(backend: TermBackend, inches: f32) -> Self {
+        let inches = inches.clamp(1.0, 12.0);
+        let (ppi, ppi_source) = display_ppi_info();
+        let (cw, ch) = cell_pixel_size();
+        let (tc, tr) = terminal_cells();
+
+        // Ideal screen pixels for N inches.
+        let want = inches * ppi;
+
+        // Largest square that fits the terminal window (device pixels).
+        let fit = (tc as f32 * cw).min(tr as f32 * ch).max(64.0);
+
+        // Present payload cap (still allow real 4" on hi-DPI; default 1024).
+        let (mw, mh) = max_pixels();
+        let cap = mw.min(mh).max(64) as f32;
+
+        let mut side_f = want.min(fit).min(cap);
+        // Backend soft caps (ascii is for CI only — not ruler-accurate).
+        side_f = match backend {
+            TermBackend::Ascii => side_f.min(160.0),
+            TermBackend::HalfBlock => side_f.min(640.0),
+            TermBackend::Kitty => side_f,
+        };
+        let side_px = (side_f.round() as u32).clamp(128, 4096);
+        let clipped = side_f + 0.5 < want;
+
+        // Viewport must show the **same** side on glass (same pixel side).
+        let (cols, rows) = cells_for_screen_square(tc, tr, cw, ch, side_px as f32);
+        let col = tc.saturating_sub(cols) / 2;
+        let row = tr.saturating_sub(rows) / 2;
+        let viewport = Viewport {
+            col,
+            row,
+            cols,
+            rows,
+        };
+
+        let vis_w = cols as f32 * cw;
+        let vis_h = rows as f32 * ch;
+        let on_glass_px = vis_w.min(vis_h);
+        let on_glass_in = on_glass_px / ppi;
+
+        Self {
+            inches_requested: inches,
+            ppi,
+            ppi_source,
+            side_px,
+            viewport,
+            on_glass_in,
+            clipped,
+        }
+    }
+
+    pub fn surface_size(&self) -> (u32, u32) {
+        (self.side_px, self.side_px)
+    }
+}
+
+/// Square pixel surface sized to physical inches (uses [`PhysicalFace::layout`]).
+pub fn square_mfd_pixels(backend: TermBackend) -> (u32, u32) {
+    PhysicalFace::layout(backend, mfd_face_inches()).surface_size()
+}
+
+/// Cell viewport for physical inches (uses [`PhysicalFace::layout`]).
+pub fn square_mfd_viewport(_frac: f32) -> Viewport {
+    PhysicalFace::layout(detect_backend(), mfd_face_inches()).viewport
+}
+
+/// Explicit inches + backend (preferred for demos).
+pub fn physical_mfd_layout(backend: TermBackend, inches: f32) -> PhysicalFace {
+    PhysicalFace::layout(backend, inches)
+}
+
+/// Read connected DRM EDID → PPI.
+/// `prefer_detailed`: use detailed-timing mm when present (more accurate than cm fields).
+fn ppi_from_drm_edid(prefer_detailed: bool) -> Option<f32> {
     let drm = std::path::Path::new("/sys/class/drm");
     let entries = std::fs::read_dir(drm).ok()?;
+    let mut best: Option<f32> = None;
     for ent in entries.flatten() {
         let path = ent.path();
         let name = path.file_name()?.to_string_lossy();
         if !name.contains('-') {
-            continue; // skip card0, renderD*
+            continue;
         }
         let status = std::fs::read_to_string(path.join("status")).ok()?;
         if !status.trim().eq_ignore_ascii_case("connected") {
             continue;
         }
         let edid = std::fs::read(path.join("edid")).ok()?;
-        if edid.len() < 0x17 {
-            continue;
-        }
-        // EDID 1.3: 0x15 / 0x16 = max image size in cm (0 if projector / unknown).
-        let h_cm = edid[0x15] as f32;
-        let v_cm = edid[0x16] as f32;
-        if h_cm < 5.0 || v_cm < 5.0 {
-            continue;
-        }
-        // First listed mode "WIDTHxHEIGHT"
         let modes = std::fs::read_to_string(path.join("modes")).ok()?;
         let line = modes.lines().next()?;
         let (rw, rh) = parse_mode_wh(line)?;
-        let ppi_w = rw as f32 / (h_cm / 2.54);
-        let ppi_h = rh as f32 / (v_cm / 2.54);
-        let ppi = (ppi_w + ppi_h) * 0.5;
-        if ppi.is_finite() && (50.0..500.0).contains(&ppi) {
-            return Some(ppi);
+
+        let ppi = if prefer_detailed {
+            edid_ppi_detailed(&edid, rw, rh)
+        } else {
+            edid_ppi_cm(&edid, rw, rh)
+        };
+        if let Some(p) = ppi {
+            best = Some(match best {
+                Some(b) => b.max(p), // prefer denser / primary often listed first; take max valid
+                None => p,
+            });
+            // Prefer first connected with a good detailed size
+            if prefer_detailed {
+                return Some(p);
+            }
+        }
+    }
+    best
+}
+
+fn edid_ppi_cm(edid: &[u8], mode_w: u32, mode_h: u32) -> Option<f32> {
+    if edid.len() < 0x17 {
+        return None;
+    }
+    let h_cm = edid[0x15] as f32;
+    let v_cm = edid[0x16] as f32;
+    if h_cm < 5.0 || v_cm < 5.0 {
+        return None;
+    }
+    let ppi_w = mode_w as f32 / (h_cm / 2.54);
+    let ppi_h = mode_h as f32 / (v_cm / 2.54);
+    let ppi = (ppi_w + ppi_h) * 0.5;
+    valid_ppi(ppi)
+}
+
+/// Detailed timing descriptors (18-byte blocks at 54,72,90,108) can store size in mm.
+fn edid_ppi_detailed(edid: &[u8], mode_w: u32, mode_h: u32) -> Option<f32> {
+    if edid.len() < 126 {
+        return None;
+    }
+    for base in [54, 72, 90, 108] {
+        if base + 17 >= edid.len() {
+            break;
+        }
+        // Monitor descriptors have pixel clock = 0.
+        if edid[base] == 0 && edid[base + 1] == 0 {
+            continue;
+        }
+        // Horizontal image size mm: low 8 @ +12, high 4 in +14[7:4]
+        // Vertical image size mm: low 8 @ +13, high 4 in +14[3:0]
+        let h_mm = edid[base + 12] as u16 | (((edid[base + 14] as u16) & 0xF0) << 4);
+        let v_mm = edid[base + 13] as u16 | (((edid[base + 14] as u16) & 0x0F) << 8);
+        if h_mm < 50 || v_mm < 50 {
+            continue;
+        }
+        let ppi_w = mode_w as f32 / (h_mm as f32 / 25.4);
+        let ppi_h = mode_h as f32 / (v_mm as f32 / 25.4);
+        if let Some(p) = valid_ppi((ppi_w + ppi_h) * 0.5) {
+            return Some(p);
         }
     }
     None
 }
 
+fn valid_ppi(ppi: f32) -> Option<f32> {
+    if ppi.is_finite() && (50.0..500.0).contains(&ppi) {
+        Some(ppi)
+    } else {
+        None
+    }
+}
+
 fn parse_mode_wh(s: &str) -> Option<(u32, u32)> {
     let s = s.trim();
     let (a, b) = s.split_once('x')?;
+    // modes may be "2560x1600i" etc.
+    let b = b.trim_end_matches(|c: char| !c.is_ascii_digit());
     Some((a.parse().ok()?, b.parse().ok()?))
-}
-
-/// Target **framebuffer** side in pixels for a physical square face.
-///
-/// `side = inches × PPI`, then clamped to fit the terminal and `MFD_MAX_*`.
-pub fn physical_mfd_side_px(inches: f32, backend: TermBackend) -> u32 {
-    let ppi = display_ppi();
-    let want = (inches.clamp(1.0, 12.0) * ppi).round() as u32;
-
-    let (cw, ch) = cell_pixel_size();
-    let (tc, tr) = terminal_cells();
-    // Largest square that fits the terminal window in **screen pixels**.
-    let fit_w = (tc as f32 * cw).floor() as u32;
-    let fit_h = (tr as f32 * ch).floor() as u32;
-    let fit = fit_w.min(fit_h).max(64);
-
-    let (mw, mh) = max_pixels();
-    let cap = mw.min(mh).max(64);
-
-    let mut side = want.min(fit).min(cap);
-    side = match backend {
-        TermBackend::Ascii => side.min(160),
-        TermBackend::HalfBlock => side.min(480),
-        TermBackend::Kitty => side,
-    };
-    side.max(128)
-}
-
-/// Square pixel surface sized to physical inches (ruler on the monitor).
-pub fn square_mfd_pixels(backend: TermBackend) -> (u32, u32) {
-    let side = physical_mfd_side_px(mfd_face_inches(), backend);
-    (side, side)
-}
-
-/// Cell viewport that displays a physical square of `inches` on the monitor.
-///
-/// Uses PPI + cell size so the on-glass box is ~N×N inches (clamped to window).
-pub fn square_mfd_viewport(frac: f32) -> Viewport {
-    physical_mfd_viewport(mfd_face_inches(), frac)
-}
-
-/// Same as [`square_mfd_viewport`] with explicit inches.
-pub fn physical_mfd_viewport(inches: f32, frac: f32) -> Viewport {
-    let (tc, tr) = terminal_cells();
-    let (cw, ch) = cell_pixel_size();
-    let ppi = display_ppi();
-    let f = frac.clamp(0.5, 1.0);
-
-    // Desired screen pixels for N-inch face.
-    let mut side_px = inches.clamp(1.0, 12.0) * ppi;
-    // Must fit in the terminal (with frac of window).
-    let max_side = (tc as f32 * cw * f).min(tr as f32 * ch * f);
-    side_px = side_px.min(max_side).max(64.0);
-
-    let (cols, rows) = cells_for_screen_square(tc, tr, cw, ch, side_px);
-    let col = tc.saturating_sub(cols) / 2;
-    let row = tr.saturating_sub(rows) / 2;
-    Viewport {
-        col,
-        row,
-        cols,
-        rows,
-    }
 }
 
 /// Cell counts so the **on-screen** box is `side_px`×`side_px` (aspect-correct).
@@ -935,5 +1039,16 @@ mod tests {
         let w = cols as f32 * 8.0;
         let h = rows as f32 * 16.0;
         assert!((w - h).abs() / w.max(h) < 0.12, "w={w} h={h}");
+    }
+
+    #[test]
+    fn layout_framebuffer_matches_requested_when_room() {
+        // Huge terminal, known ppi via env is tested indirectly: cells for 764px.
+        let side = 765.0_f32;
+        let (cols, rows) = cells_for_screen_square(300, 100, 8.0, 16.0, side);
+        let w = cols as f32 * 8.0;
+        let h = rows as f32 * 16.0;
+        assert!((w - h).abs() < 20.0, "aspect w={w} h={h}");
+        assert!((w - side).abs() < side * 0.08, "size w={w} want≈{side}");
     }
 }

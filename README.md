@@ -113,15 +113,28 @@ Full diagrams: **[docs/widgets.md](docs/widgets.md)**
 | `ColorMfd` | Color LCD palette |
 | `HighVis` | Yellow-dominant |
 
-## Face size (ruler)
+## Face size (ruler-accurate 4×4 on any screen)
+
+Default face is **4.0 inches square** on the **physical monitor** (F-16 MLU class).
+
+```
+side_px = MFD_FACE_IN × PPI
+viewport cells chosen so on-glass width = height = side
+```
 
 | Env | Meaning |
 |-----|---------|
-| `MFD_FACE_IN=4` | Physical face edge in **inches** (default 4) |
-| `MFD_PPI=190` | Force pixels/inch if EDID is wrong |
-| `MFD_MAX_W` / `MFD_MAX_H` | Cap framebuffer (default 768) |
+| `MFD_FACE_IN=4` | Edge length in **inches** (default **4**) |
+| `MFD_PPI=190` | **Force** pixels/inch (use if EDID is wrong — put a ruler on the panel) |
+| `MFD_MAX_W` / `MFD_MAX_H` | Cap FB (default **1024**) |
 
-Startup log prints: `face 4.0" @ 191 ppi → surface … on-glass≈4.0"×4.0"`.
+PPI detection: `MFD_PPI` → EDID detailed mm → EDID cm → 96 (not accurate).
+
+Startup example:
+```text
+ruler face 4.00" @ 191.2 ppi (EDID-mm) → 765×765px  cells 48×24  on-glass 4.00"×4.00"
+```
+If the terminal is too small: `on-glass` drops and `[clipped to window]` is printed.
 
 ## Performance notes
 

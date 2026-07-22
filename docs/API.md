@@ -73,7 +73,7 @@ s.apply_brightness(bezel.brightness);
 | Framebuffer | `side_px = inches × PPI` (1∶1), capped by terminal + `MFD_MAX_*` |
 | Terminal box | Cell counts so **on-glass** width ≈ height ≈ face inches |
 
-**Ruler mode:** put a real ruler on the panel — the face should measure ~4"×4" (if EDID/PPI is correct). Calibrate with `MFD_PPI=190` if needed.
+**Ruler mode (any screen):** `PhysicalFace::layout(backend, 4.0)` sets both the 1∶1 framebuffer and the cell viewport from the same `side_px = inches × PPI`. PPI from `MFD_PPI` or EDID. Put a real ruler on the glass — it should read ~4"×4" when not clipped by a small terminal window.
 
 ## 4. Bezel input ABI (plug-in hardware)
 

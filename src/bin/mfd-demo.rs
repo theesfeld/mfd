@@ -18,8 +18,8 @@ use mfd::jet::{self, Format};
 use mfd::page::Page;
 use mfd::palette::{ColorMode, Palette};
 use mfd::term::{
-    detect_backend, enter_fullscreen, leave_fullscreen, present_at_state_scratch,
-    square_mfd_pixels, square_mfd_viewport, PresentScratch, RawStdin,
+    detect_backend, enter_fullscreen, leave_fullscreen, mfd_face_inches, physical_mfd_layout,
+    present_at_state_scratch, PpiSource, PresentScratch, RawStdin,
 };
 use mfd::{engine_version, using_assembly, Surface};
 
@@ -49,19 +49,27 @@ fn main() -> io::Result<()> {
         .unwrap_or(30u32);
 
     let backend = detect_backend();
-    let inches = mfd::term::mfd_face_inches();
-    let ppi = mfd::term::display_ppi();
-    let vp = square_mfd_viewport(0.95);
-    let (w, h) = square_mfd_pixels(backend);
-    let (cw, ch) = mfd::term::cell_pixel_size();
-    let vis_w = vp.cols as f32 * cw;
-    let vis_h = vp.rows as f32 * ch;
+    let face = physical_mfd_layout(backend, mfd_face_inches());
+    let vp = face.viewport;
+    let (w, h) = face.surface_size();
+    let src = match face.ppi_source {
+        PpiSource::Env => "MFD_PPI",
+        PpiSource::EdidDetailed => "EDID-mm",
+        PpiSource::EdidCm => "EDID-cm",
+        PpiSource::Fallback96 => "fallback-96 (set MFD_PPI for ruler accuracy)",
+    };
     eprintln!(
-        "face {inches:.1}\" @ {ppi:.0} ppi → surface {w}x{h}px  viewport {}x{} cells  on-glass≈{:.1}\"×{:.1}\"",
+        "ruler face {req:.2}\" @ {ppi:.1} ppi ({src}) → {w}×{h}px  cells {}×{}  on-glass {og:.2}\"×{og:.2}\"{clip}",
         vp.cols,
         vp.rows,
-        vis_w / ppi,
-        vis_h / ppi
+        req = face.inches_requested,
+        ppi = face.ppi,
+        og = face.on_glass_in,
+        clip = if face.clipped {
+            "  [clipped to window — enlarge terminal or lower MFD_FACE_IN]"
+        } else {
+            ""
+        }
     );
     debug_assert_eq!(w, h, "framebuffer must be square");
 
