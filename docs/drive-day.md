@@ -40,7 +40,7 @@ Headless long capture example:
 
 ## Adapter note
 
-One ELM Bluetooth SPP client at a time. Drive mode runs **capture inside `mfd-demo`** (`MFD_OBD_CAPTURE` + `MFD_OBD_CRUSH`). Do not start a second `mfd-obd-capture` process against the same adapter while the glass is live.
+One ELM Bluetooth SPP client at a time. Drive mode runs **capture inside `cmfd`** (`MFD_OBD_CAPTURE` + `MFD_OBD_CRUSH`). Do not start a second `mfd-obd-capture` process against the same adapter while the glass is live.
 
 ## Env (defaults for this truck)
 
@@ -87,8 +87,10 @@ Never clear DTCs, write DIDs, or security unlock.
 | BUS | Link header + full channel dump (2–3 columns) |
 | DTC | Fault list (read-only) |
 
-Bottom status strip on every page: `BT LIVE · …MAC…` (or `BT ERR` / `DEMO`).  
+Bottom status strip on every page: `BT LIVE · …MAC…` (or `BT ERR` / `SIM` offline).  
 Open **OWN** (`o` / `w`) for the full link block.
+
+**Naming:** `cmfd` is the live product glass. **SIM** means offline synthetic data only (no adapter).
 
 ## After work
 

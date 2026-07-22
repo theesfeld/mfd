@@ -4,6 +4,7 @@
 
 ### Added
 
+- **Product glass `cmfd`:** binary renamed from `mfd-demo` (alias kept). Offline without OBD = **SIM**. Live drive = `./cmfd.sh`. Refs #95.
 - **Drive day:** `./cmfd.sh` — release build + live glass + crush OBD/UDS capture under `captures/drive-TIMESTAMP/`. `MFD_OBD_CAPTURE` + `MFD_OBD_CRUSH` on the feed (one BT client). Headless `./cmfd.sh capture` for DID range scans. Dense page layouts (gauges + numerics). **Bluetooth/link block** on OWN + SETUP + BUS + bottom strip (MAC, channel, adapter, protocol, LIVE/ERR). Docs: `docs/drive-day.md`. Refs #93.
 - **Warnings:** BINGO aural (low fuel), ALERT aural, red **flash** fields (park brake, …), master caution strip. Speaker via `aplay` PCM. Refs #90.
 - **Startup:** real CMFD power-on (black → blank + MLU OSB FCR/HSD/SMS); probe off-glass; adaptive pages omit NOGO options. Refs #88.

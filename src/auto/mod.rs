@@ -167,7 +167,7 @@ impl DriveMode {
     }
 }
 
-/// Full vehicle snapshot for auto pages (demo or OBD/CAN host).
+/// Full vehicle snapshot for auto pages (live OBD/CAN or offline SIM).
 ///
 /// Prefer **engineering units** on glass. Normalized 0..1 fields remain for tape widgets.
 #[derive(Clone, Debug)]
@@ -242,7 +242,7 @@ pub struct VehicleSnapshot {
     pub heading_deg: f32,
     pub vin: String,
     // ── OBD / Bluetooth link (OWN · SETUP · BUS · status strip) ───────────
-    /// `BT` · `SERIAL` · `REPLAY` · `DEMO` · `OFF`
+    /// `BT` · `SERIAL` · `REPLAY` · `SIM` · `OFF`
     pub bus_kind: String,
     /// MAC, serial path, or replay path.
     pub bus_addr: String,
@@ -252,7 +252,7 @@ pub struct VehicleSnapshot {
     pub bus_adapter: String,
     /// ELM `ATDP` protocol string.
     pub bus_proto: String,
-    /// `LIVE` · `BIT` · `ERR` · `DEMO` · `OFF`
+    /// `LIVE` · `BIT` · `ERR` · `SIM` · `OFF`
     pub bus_state: String,
     /// Last bus error (empty if none).
     pub bus_error: String,
@@ -418,12 +418,12 @@ impl Default for VehicleSnapshot {
             roll_deg: 0.0,
             heading_deg: 0.0,
             vin: String::new(),
-            bus_kind: "DEMO".into(),
+            bus_kind: "SIM".into(),
             bus_addr: vehicle_profile::OBD_BT_MAC.into(),
             bus_channel: "1".into(),
             bus_adapter: "—".into(),
             bus_proto: "—".into(),
-            bus_state: "DEMO".into(),
+            bus_state: "SIM".into(),
             bus_error: String::new(),
             bus_ticks: 0,
             bus_capture: String::new(),
@@ -1476,7 +1476,7 @@ pub fn draw_auto_with_video(
         }
         AutoPage::Own => {
             let id = vehicle_profile::identity_line();
-            // Link state as hero status (LIVE / ERR / DEMO).
+            // Link state as hero status (LIVE / ERR / SIM).
             let link_col = match v.bus_state.as_str() {
                 "LIVE" => pal.primary,
                 "ERR" => pal.warning,

@@ -3,9 +3,12 @@
 #
 # Default (drive mode):
 #   ./cmfd.sh
-#     1) cargo build --release (mfd-demo + mfd-obd-capture)
+#     1) cargo build --release (cmfd + mfd-obd-capture)
 #     2) open captures/drive-TIMESTAMP/
-#     3) run mfd-demo with BT ELM + crush poll + capture to that dir
+#     3) run live cmfd glass with BT ELM + crush poll + capture to that dir
+#
+# This is the live product path (not a toy demo). Offline glass without OBD
+# shows SIM synthetic data only.
 #
 # One Bluetooth adapter can serve only one RFCOMM client. Glass and capture
 # therefore share one process (ObdFeed writes frames.ndjson while drawing).
@@ -43,7 +46,7 @@ if [[ "${1:-}" == "capture" || "${1:-}" == "glass" || "${1:-}" == "drive" || "${
   shift || true
 fi
 
-DEMO_BIN="$ROOT/target/release/mfd-demo"
+CMFD_BIN="$ROOT/target/release/cmfd"
 CAP_BIN="$ROOT/target/release/mfd-obd-capture"
 
 build_release() {
@@ -77,15 +80,15 @@ print_env() {
 case "$MODE" in
   build)
     build_release
-    ls -la "$DEMO_BIN" "$CAP_BIN" 2>/dev/null || true
+    ls -la "$CMFD_BIN" "$CAP_BIN" 2>/dev/null || true
     ;;
 
   glass)
     build_release
     unset MFD_OBD_CAPTURE || true
     print_env
-    echo "cmfd: glass only → $DEMO_BIN"
-    exec "$DEMO_BIN" "$@"
+    echo "cmfd: glass only (live if OBD env set) → $CMFD_BIN"
+    exec "$CMFD_BIN" "$@"
     ;;
 
   capture)
@@ -132,11 +135,11 @@ case "$MODE" in
     export MFD_OBD_CAPTURE="$CAP"
     export MFD_OBD_CRUSH=1
     print_env
-    echo "cmfd: DRIVE MODE"
-    echo "  glass:   $DEMO_BIN"
+    echo "cmfd: LIVE DRIVE"
+    echo "  glass:   $CMFD_BIN"
     echo "  capture: $CAP"
     echo "  crush:   Mode 01 discover + multi-module UDS + continuous poll"
-    echo "  note:    one BT adapter — capture is inside mfd-demo (not a second process)"
+    echo "  note:    one BT adapter — capture is inside cmfd (not a second process)"
     echo "  quit:    Esc  →  capture files finalize on exit"
     echo ""
     # Write a small pointer for post-drive parse
@@ -145,10 +148,9 @@ case "$MODE" in
       echo "mode=drive"
       echo "bt=${MFD_OBD_BT}"
       echo "crush=1"
-      echo "bin=$DEMO_BIN"
+      echo "bin=$CMFD_BIN"
     } >"$CAP/cmfd-run.txt"
-    # Ensure finish on signals if shell dies around demo
-    trap 'echo "cmfd: stopped — parse $CAP"' EXIT
-    exec "$DEMO_BIN" "$@"
+        trap 'echo "cmfd: stopped — parse $CAP"' EXIT
+    exec "$CMFD_BIN" "$@"
     ;;
 esac

@@ -28,8 +28,13 @@ name = "mfd"
 crate-type = ["rlib", "staticlib", "cdylib"]
 
 [[bin]]
+name = "cmfd"
+path = "src/bin/cmfd.rs"
+
+# Legacy alias — same glass binary (prefer `cmfd` / `./cmfd.sh`).
+[[bin]]
 name = "mfd-demo"
-path = "src/bin/mfd-demo.rs"
+path = "src/bin/cmfd.rs"
 
 [[bin]]
 name = "mfd-obd-capture"

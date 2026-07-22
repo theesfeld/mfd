@@ -29,4 +29,4 @@ jobs:
       - name: cargo test
         run: cargo test --all-features
       - name: cargo build demo
-        run: cargo build --release --bin mfd-demo
+        run: cargo build --release --bin cmfd

@@ -1,12 +1,16 @@
-//! **MFD demo** — vehicle CMFD systems pages (auto-centric).
+//! **cmfd** — live vehicle color MFD (systems pages, OBD/UDS, capture).
+//!
+//! This is the **product glass**, not a toy demo. Offline synthetic data only
+//! appears when no adapter is configured (`bus_state = SIM`).
 //!
 //! Jet **formats** are not in this path; widgets remain in the library for later.
 //!
 //! ```text
-//! cargo run --release --bin mfd-demo
-//! MFD_CAMERA=auto cargo run --release --bin mfd-demo
-//! MFD_OBD_BT=00:04:3E:96:B8:F1 cargo run --release --bin mfd-demo
-//! MFD_OBD_REPLAY=docs/odbii-session cargo run --release --bin mfd-demo
+//! ./cmfd.sh
+//! cargo run --release --bin cmfd
+//! MFD_CAMERA=auto cargo run --release --bin cmfd
+//! MFD_OBD_BT=00:04:3E:96:B8:F1 cargo run --release --bin cmfd
+//! MFD_OBD_REPLAY=docs/odbii-session cargo run --release --bin cmfd
 //! ```
 
 use std::io;
@@ -31,7 +35,7 @@ static RUNNING: AtomicBool = AtomicBool::new(true);
 fn main() -> io::Result<()> {
     let ver = engine_version();
     if !using_assembly() {
-        eprintln!("error: mfd-demo requires pure-asm libmfd (x86_64)");
+        eprintln!("error: cmfd requires pure-asm libmfd (x86_64)");
         std::process::exit(1);
     }
 
@@ -111,13 +115,13 @@ fn main() -> io::Result<()> {
         eprintln!("OBD: {s}");
         s
     } else {
-        eprintln!("OBD: DEMO probe (MFD_OBD_BT / MFD_OBD_PORT / MFD_OBD_REPLAY)");
-        "DEMO".into()
+        eprintln!("OBD: SIM (set MFD_OBD_BT / MFD_OBD_PORT / MFD_OBD_REPLAY for live truck)");
+        "SIM".into()
     };
     #[cfg(not(feature = "obd"))]
     let obd_status = {
-        eprintln!("OBD: DEMO probe");
-        "DEMO".to_string()
+        eprintln!("OBD: SIM (obd feature off)");
+        "SIM".to_string()
     };
 
     #[cfg(target_os = "linux")]
@@ -139,7 +143,7 @@ fn main() -> io::Result<()> {
     #[cfg(not(target_os = "linux"))]
     let cam_label = "CAM n/a".to_string();
 
-    eprintln!("start · AUTO vehicle CMFD · page {}", auto_page.title());
+    eprintln!("start · LIVE vehicle CMFD · page {}", auto_page.title());
 
     enter_fullscreen()?;
     let t0 = Instant::now();
@@ -322,14 +326,13 @@ fn main() -> io::Result<()> {
             auto::draw_bit_screen(&mut page, &pal, &caps_now, t);
         } else {
             let font_px = page.font_px;
-            // Force some demo alerts so flash/bingo is visible without real risk
+            // Offline SIM only: force brief alerts so flash/bingo can be checked
+            // without a truck. Live OBD path never invents faults.
             if !use_obd {
-                // Brief park-brake flash window in demo
                 if (t as i32 % 20) < 4 {
                     vehicle.park_brake = true;
                     vehicle.speed_mph = vehicle.speed_mph.max(8.0);
                 }
-                // Bingo when fuel demo dips
                 if vehicle.fuel < 0.20 {
                     vehicle.fuel = vehicle.fuel.min(0.12);
                 }
@@ -368,7 +371,7 @@ fn main() -> io::Result<()> {
     leave_fullscreen()?;
     drop(raw);
     let _ = (obd_status.as_str(), cam_label.as_str());
-    eprintln!("mfd-demo done · libmfd {ver}");
+    eprintln!("cmfd done · libmfd {ver}");
     Ok(())
 }
 
@@ -395,18 +398,22 @@ fn draw_demo_status(s: &mut Surface, text: &str, color: mfd::Color, px: f32) {
 
 fn print_banner(ver: &str) {
     eprintln!("═══════════════════════════════════════════════════════════");
-    eprintln!("  mfd-demo  libmfd {ver}");
-    eprintln!("  Vehicle CMFD — systems pages + BIT + warnings");
+    eprintln!("  cmfd  libmfd {ver}");
+    eprintln!("  Vehicle CMFD — LIVE glass · OBD/UDS · display-only");
     eprintln!("═══════════════════════════════════════════════════════════");
     eprintln!();
     eprintln!("  DATA STACK");
     eprintln!("    J1979 OBD-II  ·  UDS/CAN (0x22)  ·  Ford DID / As-Built labels");
     eprintln!();
     eprintln!("  STARTUP");
-    eprintln!("    CMFD BIT screen until capability probe finishes");
+    eprintln!("    CMFD power-on until capability probe finishes");
     eprintln!();
     eprintln!("  SYSTEMS  n/p  1 ENG 2 FUEL 3 FLUD 4 ELEC 5 DRV 6 CHAS …");
-    eprintln!("    b BUS  f DTC  v ATT  x MAP  w OWN  s SET  r RNG");
+    eprintln!("    b BUS  f DTC  v ATT  x MAP  o OWN  s SET  r RNG");
+    eprintln!();
+    eprintln!("  LINK");
+    eprintln!("    OWN page = Bluetooth MAC · channel · adapter · protocol");
+    eprintln!("    Bottom strip = BT LIVE / ERR / SIM on every page");
     eprintln!();
     eprintln!("  WARNINGS (speaker)");
     eprintln!("    BINGO low fuel · ALERT park brake / tire / door");
@@ -414,7 +421,7 @@ fn print_banner(ver: &str) {
     eprintln!("    MFD_AUDIO=0 mute · needs aplay (alsa-utils)");
     eprintln!();
     eprintln!("  BEZEL  [ ] BRT  ·  MFD_OBD_BT=00:04:3E:96:B8:F1");
-    eprintln!("  c color · Esc quit");
+    eprintln!("  Drive: ./cmfd.sh  ·  c color · Esc quit");
     eprintln!();
 }
 

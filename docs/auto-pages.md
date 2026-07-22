@@ -1,6 +1,6 @@
 # Auto CMFD — pages and data stack
 
-**Product:** vehicle color MFD only. Jet **formats** are not in the demo path.  
+**Product:** vehicle color MFD only. Jet **formats** are not in the product path.  
 **Widgets** (tapes, gauges, lists, attitude, …) remain in `mfd::widget` / `mfd::jet` for later reuse.
 
 ## Data stack (all three)
@@ -33,9 +33,9 @@ The spreadsheet is **Ford As-Built** vocabulary, not a full live PID dump. Live 
 
 Same signal may appear on multiple pages (e.g. RPM on ENG and DRV).
 
-## Demo keys
+## Keys
 
-`n`/`p` cycle · number keys and letters jump (see `mfd-demo` banner).  
+`n`/`p` cycle · number keys and letters jump (see `cmfd` banner).  
 Default domain: **auto only**.
 
 ## Startup (real CMFD power-on)

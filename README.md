@@ -44,17 +44,18 @@ Quit with Esc. After the commute, parse that directory.
 
 Full notes: **[docs/drive-day.md](docs/drive-day.md)**.
 
-## Build and demo
+## Build and run (live glass)
 
 ```bash
 cd ~/Projects/mfd
 make
-cargo run --release --bin mfd-demo
+./cmfd.sh                 # drive: release + BT + capture
+cargo run --release --bin cmfd
 # Ghostty/Kitty:
-MFD_TERM=kitty cargo run --release --bin mfd-demo
+MFD_TERM=kitty cargo run --release --bin cmfd
 ```
 
-Default demo: **AUTO vehicle MFD** (ENG bank), **30 Hz**.
+Default: **vehicle CMFD** (ENG bank), **30 Hz**. Without OBD env → offline **SIM** data only.
 
 ### Auto pages (default) — jump keys
 
