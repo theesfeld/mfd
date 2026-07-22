@@ -28,25 +28,23 @@ cargo run --release --bin mfd-demo
 
 Prefer Kitty/Ghostty: `MFD_TERM=kitty cargo run --release --bin mfd-demo`
 
-### Demo keys
+### Demo keys (bezel / OSB model)
 
-Single keypress (raw stdin — no Enter). Focus the terminal running the demo.
+Single keypress (raw stdin). Keys emit **bezel events** — same path real OSB GPIO will use.
 
-| Key | Page |
-|-----|------|
-| `1` | Jet SMS |
-| `2` | Jet HSD |
-| `3` | Jet TGP |
-| `4` | Jet FCR |
-| `5` | Jet ENG |
-| `6` | Jet FUEL |
-| `7` | Jet DTE |
-| `8` | Jet TEST |
-| `a` | Auto cluster |
-| `s` | Auto power |
-| `d` | Auto temps |
-| `f` | Auto OBD |
-| `q` / Esc | Quit |
+| Key | Bezel |
+|-----|--------|
+| `1`–`5` | Top OSB 1–5 (format / auto page) |
+| `6`–`9`, `0` | Right OSB 6–10 |
+| `q w e r t` | Bottom OSB 15–11 |
+| `a s d f g` | Left OSB 16–20 |
+| `[ ]` `; '` `- =` `, .` | BRT / CON / SYM / GAIN knobs |
+| `Tab` | Jet ↔ Auto domain |
+| `/` | Jet format bank (primary/secondary/tertiary) |
+| `c` | Color mode: green mono → color MFD → high-vis |
+| `Esc` | Quit |
+
+Catalog: [`docs/reference/f16-mfd-catalog.md`](docs/reference/f16-mfd-catalog.md)
 
 ## Library model
 

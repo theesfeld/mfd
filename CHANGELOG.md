@@ -4,6 +4,12 @@
 
 ### Added
 
+- F-16 format catalog + public source notes (`docs/reference/f16-mfd-catalog.md`)
+- Widgets: range rings, bearing pointer, track gate, crosshair, B-scope, list, station grid, readout, caution, horizon, progress, video frame, full OSB chrome
+- Jet formats: SMS HSD TGP FCR/GM/SEA WPN HAD FLIR DTE TEST ENG FUEL CNI RESET ECM TFR HUD UFC PFL STORES BLANK
+- Color modes: `GreenMono`, `ColorMfd`, `HighVis`
+- **Bezel/OSB plug-in API** (`BezelSource`, `KeyboardBezel`, knobs) — hardware later without page rewrites
+- Auto pages use same bezel + widgets
 - **Baked B612 Mono atlas** (sizes 12/16/20) in-library; no runtime TTF/`fontdue`
 - `bake-font-atlas` tool (`--features bake_font`) to regenerate atlas data
 - `FontSize` + `draw_text_size` API

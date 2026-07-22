@@ -1,291 +1,512 @@
-//! Fighter **page calls** (F-16-class layouts as starting set).
+//! F-16-class **format (page) calls**.
 //!
-//! Each function fills a [`Page`] using multiple widgets — same pattern as a
-//! real MFD: softkeys + content. Layouts are **inspired by public/sim
-//! documentation**, not OEM ROM.
+//! Names follow public flight-manual / open training usage.
+//! See `docs/reference/f16-mfd-catalog.md`.
 
-use crate::color::{AMBER, CYAN, GREEN, GREEN_DIM, RED, WHITE};
+use crate::bezel::BezelState;
 use crate::geom::Rect;
 use crate::page::Page;
-use crate::widget::{RoundGaugeOpts, TapeOpts, TapeOrientation};
+use crate::palette::Palette;
+use crate::widget::{
+    bearing_pointer, bscope_grid, caution_box, crosshair, horizon_cue, list_menu, numeric_readout,
+    osb_chrome, progress_strip, range_rings, round_gauge, station_grid, tape_gauge, track_gate,
+    video_frame, RoundGaugeOpts, TapeOpts, TapeOrientation,
+};
 
-/// Shared top OSB set used by several F-16-style pages.
-pub const F16_OSB_TOP: &[&str] = &["BLANK", "HAD", "SMS", "HSD", "DTE", "TEST"];
+/// Logical format id for OSB routing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Format {
+    Blank,
+    Sms,
+    Hsd,
+    Tgp,
+    Fcr,
+    FcrGm,
+    FcrSea,
+    Wpn,
+    Had,
+    Flir,
+    Dte,
+    Test,
+    Eng,
+    Fuel,
+    Cni,
+    Reset,
+    Ecm,
+    Tfr,
+    HudRpt,
+    Ufc,
+    Pfl,
+    Stores,
+}
 
-/// Bottom OSB set (content-dependent; representative set).
-pub const F16_OSB_BOT: &[&str] = &["SWAP", "SMS", "HSD", "TGP", "DCLT", "CNTL"];
+impl Format {
+    pub const ALL: &'static [Format] = &[
+        Format::Blank,
+        Format::Sms,
+        Format::Hsd,
+        Format::Tgp,
+        Format::Fcr,
+        Format::FcrGm,
+        Format::FcrSea,
+        Format::Wpn,
+        Format::Had,
+        Format::Flir,
+        Format::Dte,
+        Format::Test,
+        Format::Eng,
+        Format::Fuel,
+        Format::Cni,
+        Format::Reset,
+        Format::Ecm,
+        Format::Tfr,
+        Format::HudRpt,
+        Format::Ufc,
+        Format::Pfl,
+        Format::Stores,
+    ];
 
-fn chrome(page: &mut Page, top_sel: Option<usize>, title: &str) {
-    let b = page.bounds.inset(4);
-    // Softkey row tall enough for B612 ascent + descender gap.
-    let th = (page.font_px * 1.8).ceil() as i32 + 6;
-    page.softkeys(Rect::new(b.x, b.y, b.w, th), F16_OSB_TOP, top_sel);
-    page.softkeys(Rect::new(b.x, b.bottom() - th, b.w, th), F16_OSB_BOT, None);
+    pub fn name(self) -> &'static str {
+        match self {
+            Format::Blank => "BLANK",
+            Format::Sms => "SMS",
+            Format::Hsd => "HSD",
+            Format::Tgp => "TGP",
+            Format::Fcr => "FCR",
+            Format::FcrGm => "FCR GM",
+            Format::FcrSea => "FCR SEA",
+            Format::Wpn => "WPN",
+            Format::Had => "HAD",
+            Format::Flir => "FLIR",
+            Format::Dte => "DTE",
+            Format::Test => "TEST",
+            Format::Eng => "ENG",
+            Format::Fuel => "FUEL",
+            Format::Cni => "CNI",
+            Format::Reset => "RESET",
+            Format::Ecm => "ECM",
+            Format::Tfr => "TFR",
+            Format::HudRpt => "HUD",
+            Format::Ufc => "UFC",
+            Format::Pfl => "PFL",
+            Format::Stores => "STORES",
+        }
+    }
+
+    /// Top OSB 1–5 cycle primary formats (demo binding).
+    pub fn from_top_osb(osb: u8, bank: usize) -> Option<Format> {
+        let primary = [
+            Format::Sms,
+            Format::Hsd,
+            Format::Tgp,
+            Format::Fcr,
+            Format::Wpn,
+        ];
+        let secondary = [
+            Format::Had,
+            Format::Flir,
+            Format::Dte,
+            Format::Eng,
+            Format::Fuel,
+        ];
+        let tertiary = [
+            Format::Cni,
+            Format::Test,
+            Format::Ecm,
+            Format::HudRpt,
+            Format::Blank,
+        ];
+        let set = match bank % 3 {
+            0 => &primary,
+            1 => &secondary,
+            _ => &tertiary,
+        };
+        if (1..=5).contains(&osb) {
+            Some(set[(osb - 1) as usize])
+        } else {
+            None
+        }
+    }
+}
+
+fn chrome(page: &mut Page, pal: &Palette, title: &str, bezel: &BezelState) {
+    let b = page.bounds.inset(2);
+    let top = ["SMS", "HSD", "TGP", "FCR", "WPN"];
+    let right = ["DCLT", "SWAP", "CNTL", "MODE", "GAIN"];
+    let bottom = ["DTE", "TEST", "ENG", "FUEL", "CNI"];
+    let left = ["HAD", "FLIR", "ECM", "HUD", "BLANK"];
+    osb_chrome(
+        page.surface,
+        b,
+        &top,
+        &right,
+        &bottom,
+        &left,
+        page.font_px * 0.75,
+        pal.dim,
+        bezel.last_osb,
+    );
     page.label_centered(
         b.center().0 as f32,
-        b.y as f32 + th as f32 + page.font_px * 0.7,
+        b.y as f32 + page.font_px * 1.6,
         title,
-        GREEN,
+        pal.primary,
+    );
+    // Corner knob readouts (BRT/CON) — POC for real knobs later.
+    page.label_at(
+        b.x as f32 + 4.0,
+        b.bottom() as f32 - page.font_px * 2.2,
+        &format!("BRT {:.0}", bezel.brightness * 100.0),
+        pal.dim,
+        page.font_px * 0.7,
+    );
+    page.label_at(
+        b.right() as f32 - page.font_px * 6.0,
+        b.bottom() as f32 - page.font_px * 2.2,
+        &format!("CON {:.0}", bezel.contrast * 100.0),
+        pal.dim,
+        page.font_px * 0.7,
     );
 }
 
-/// Stores Management System page — weapon stations / load summary.
-pub fn sms(page: &mut Page, selected_station: usize, master_arm: bool) {
+fn content(page: &Page) -> Rect {
+    let b = page.bounds.inset(4);
+    let m = (page.font_px * 1.8) as i32 + 8;
+    Rect::new(b.x + m, b.y + m, b.w - 2 * m, b.h - 2 * m - 10)
+}
+
+pub fn draw_format(page: &mut Page, fmt: Format, pal: &Palette, bezel: &BezelState, t: f32) {
     page.clear();
+    page.surface.clear(pal.glass);
     page.bezel();
-    chrome(page, Some(2), "SMS");
-    let c = page.content_rect((page.font_px * 2.8) as i32, (page.font_px * 1.6) as i32);
-    let stations = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
-    let cols = 3i32;
-    let cell_w = c.w / cols;
-    let cell_h = c.h / 3;
-    for (i, st) in stations.iter().enumerate() {
-        let col = (i as i32) % cols;
-        let row = (i as i32) / cols;
-        let r = Rect::new(
-            c.x + col * cell_w,
-            c.y + row * cell_h,
-            cell_w - 4,
-            cell_h - 4,
-        );
-        page.surface.line_aa(r.x, r.y, r.right(), r.y, GREEN_DIM);
-        page.surface
-            .line_aa(r.right(), r.y, r.right(), r.bottom(), GREEN_DIM);
-        page.surface
-            .line_aa(r.right(), r.bottom(), r.x, r.bottom(), GREEN_DIM);
-        page.surface.line_aa(r.x, r.bottom(), r.x, r.y, GREEN_DIM);
-        let colr = if i == selected_station { WHITE } else { GREEN };
-        page.label_centered(r.center().0 as f32, r.center().1 as f32, st, colr);
+    chrome(page, pal, fmt.name(), bezel);
+    let c = content(page);
+    match fmt {
+        Format::Blank => {}
+        Format::Sms | Format::Stores => {
+            let labs = [
+                "1 AIM", "2 AIM", "3 TANK", "4 GBU", "5 GUN", "6 GBU", "7 TANK", "8 AIM", "9 AIM",
+            ];
+            station_grid(
+                page.surface,
+                c,
+                &labs,
+                3,
+                ((t * 0.5) as usize) % 9,
+                page.font_px * 0.8,
+                pal.primary,
+                pal.readout,
+            );
+            let arm = if t.sin() > 0.0 { "MASTER ARM" } else { "SAFE" };
+            numeric_readout(
+                page.surface,
+                c.x as f32 + 40.0,
+                c.bottom() as f32 - 8.0,
+                arm,
+                if t.sin() > 0.0 { pal.warning } else { pal.dim },
+                page.font_px * 0.85,
+            );
+        }
+        Format::Hsd => {
+            let (cx, cy) = c.center();
+            let r = (c.w.min(c.h) / 2 - 8).max(20);
+            range_rings(page.surface, cx, cy, r, 3, pal.nav);
+            bearing_pointer(
+                page.surface,
+                cx,
+                cy,
+                r as f32 * 0.9,
+                (t * 25.0) % 360.0,
+                pal.readout,
+            );
+            page.surface.circle(cx, cy, 3, pal.primary);
+            numeric_readout(
+                page.surface,
+                c.x as f32 + 40.0,
+                c.y as f32 + 12.0,
+                &format!("HDG {:.0}", (t * 25.0) % 360.0),
+                pal.primary,
+                page.font_px,
+            );
+            numeric_readout(
+                page.surface,
+                c.x as f32 + 40.0,
+                c.y as f32 + 12.0 + page.font_px + 4.0,
+                "RNG 40 NM",
+                pal.dim,
+                page.font_px * 0.9,
+            );
+        }
+        Format::Tgp | Format::Flir => {
+            video_frame(page.surface, c.inset(c.w / 10), pal.structure);
+            let tx = c.center().0 + ((t * 0.8).sin() * c.w as f32 * 0.15) as i32;
+            let ty = c.center().1 + ((t * 0.6).cos() * c.h as f32 * 0.12) as i32;
+            track_gate(page.surface, tx, ty, 14, pal.readout);
+            crosshair(page.surface, c.center().0, c.center().1, 24, 6, pal.dim);
+            let lz = if t.sin() > 0.7 {
+                "LASER ARM"
+            } else {
+                "LASER SAFE"
+            };
+            numeric_readout(
+                page.surface,
+                c.x as f32 + 50.0,
+                c.bottom() as f32 - 6.0,
+                lz,
+                if t.sin() > 0.7 { pal.warning } else { pal.dim },
+                page.font_px * 0.85,
+            );
+        }
+        Format::Fcr | Format::FcrGm | Format::FcrSea => {
+            bscope_grid(page.surface, c, 6, pal.structure);
+            let px = c.x as f32 + (0.5 + 0.35 * (t * 0.5).sin()) * c.w as f32;
+            let py = c.bottom() as f32 - (0.3 + 0.4 * (t * 0.35).cos().abs()) * c.h as f32;
+            page.surface.circle(px as i32, py as i32, 5, pal.caution);
+            numeric_readout(
+                page.surface,
+                c.x as f32 + 30.0,
+                c.y as f32 + 10.0,
+                if matches!(fmt, Format::FcrGm) {
+                    "GM"
+                } else if matches!(fmt, Format::FcrSea) {
+                    "SEA"
+                } else {
+                    "RWS"
+                },
+                pal.primary,
+                page.font_px,
+            );
+            numeric_readout(
+                page.surface,
+                c.right() as f32 - 40.0,
+                c.y as f32 + 10.0,
+                &format!("G {:.0}", bezel.gain * 100.0),
+                pal.dim,
+                page.font_px * 0.85,
+            );
+        }
+        Format::Wpn | Format::Had => {
+            list_menu(
+                page.surface,
+                c,
+                &[
+                    "MODE  CCRP",
+                    "PROFILE  1",
+                    "TARGET  TGP",
+                    "RELEASE  SGL",
+                    "FUZE  N/S",
+                ],
+                Some(((t * 0.4) as usize) % 5),
+                page.font_px,
+                pal.primary,
+                pal.readout,
+            );
+        }
+        Format::Dte | Format::Cni | Format::Ufc | Format::Pfl => {
+            let lines: &[&str] = match fmt {
+                Format::Dte => &[
+                    "LOAD 1 READY",
+                    "LOAD 2 READY",
+                    "WP LIST 12",
+                    "DTC MOUNTED",
+                    "COMM OK",
+                ],
+                Format::Cni => &[
+                    "UHF  251.000",
+                    "VHF  127.500",
+                    "IFF  MODE 3",
+                    "TACAN  22Y",
+                    "ILS  109.50",
+                ],
+                Format::Ufc => &[
+                    "DED  STPT 12",
+                    "LAT  N 36 12.1",
+                    "LNG  W 115 08.4",
+                    "TOS  12:04:11",
+                    "",
+                ],
+                Format::Pfl => &[
+                    "PFL 00  NO FAULTS",
+                    "MFDS  OK",
+                    "FCR  OK",
+                    "SMS  OK",
+                    "INS  RDY",
+                ],
+                _ => &[],
+            };
+            list_menu(
+                page.surface,
+                c,
+                lines,
+                None,
+                page.font_px,
+                pal.primary,
+                pal.readout,
+            );
+        }
+        Format::Test | Format::Reset => {
+            caution_box(
+                page.surface,
+                c.inset(c.w / 6),
+                if matches!(fmt, Format::Test) {
+                    "BIT GO"
+                } else {
+                    "RESET RDY"
+                },
+                page.font_px * 1.2,
+                pal.primary,
+            );
+            progress_strip(
+                page.surface,
+                Rect::new(c.x + 20, c.bottom() - 24, c.w - 40, 12),
+                0.5 + 0.5 * (t * 0.7).sin(),
+                pal.nav,
+                pal.structure,
+            );
+        }
+        Format::Eng => {
+            let half = c.w / 2;
+            round_gauge(
+                page.surface,
+                Rect::new(c.x, c.y, half, c.h / 2),
+                RoundGaugeOpts {
+                    value: 0.55 + 0.25 * (t * 0.7).sin(),
+                    redline: Some(0.85),
+                    label: "RPM",
+                    color: pal.primary,
+                    font_px: page.font_px * 0.8,
+                    ..Default::default()
+                },
+            );
+            round_gauge(
+                page.surface,
+                Rect::new(c.x + half, c.y, half, c.h / 2),
+                RoundGaugeOpts {
+                    value: 0.4 + 0.2 * (t * 0.5).cos(),
+                    redline: None,
+                    label: "NOZ",
+                    color: pal.nav,
+                    font_px: page.font_px * 0.8,
+                    ..Default::default()
+                },
+            );
+            let ty = c.y + c.h / 2 + 4;
+            let tw = c.w / 2 - 8;
+            tape_gauge(
+                page.surface,
+                Rect::new(c.x + 4, ty, tw, c.h / 2 - 8),
+                TapeOpts {
+                    orientation: TapeOrientation::Vertical,
+                    font_px: page.font_px * 0.75,
+                    color: pal.caution,
+                    value: 0.45 + 0.1 * (t * 0.3).sin(),
+                    label: "OIL",
+                },
+            );
+            tape_gauge(
+                page.surface,
+                Rect::new(c.x + tw + 8, ty, tw, c.h / 2 - 8),
+                TapeOpts {
+                    orientation: TapeOrientation::Vertical,
+                    font_px: page.font_px * 0.75,
+                    color: pal.warning,
+                    value: 0.5 + 0.12 * (t * 0.4).cos(),
+                    label: "FTIT",
+                },
+            );
+        }
+        Format::Fuel => {
+            let tw = c.w / 3 - 6;
+            for (i, (lab, val, col)) in [
+                ("TOT", 0.7 + 0.1 * (t * 0.1).cos(), pal.primary),
+                ("INT", 0.55 + 0.08 * (t * 0.12).sin(), pal.nav),
+                ("EXT", 0.3 + 0.05 * (t * 0.08).cos(), pal.caution),
+            ]
+            .iter()
+            .enumerate()
+            {
+                tape_gauge(
+                    page.surface,
+                    Rect::new(c.x + i as i32 * (tw + 6), c.y, tw, c.h),
+                    TapeOpts {
+                        orientation: TapeOrientation::Vertical,
+                        font_px: page.font_px * 0.8,
+                        color: *col,
+                        value: *val,
+                        label: lab,
+                    },
+                );
+            }
+        }
+        Format::Ecm => {
+            list_menu(
+                page.surface,
+                c,
+                &[
+                    "ECM  STBY",
+                    "RWR  NORM",
+                    "CHAFF  30",
+                    "FLARE  15",
+                    "JAM  OFF",
+                ],
+                Some(0),
+                page.font_px,
+                pal.primary,
+                pal.caution,
+            );
+        }
+        Format::Tfr | Format::HudRpt => {
+            horizon_cue(
+                page.surface,
+                c.center().0,
+                c.center().1,
+                c.w / 4,
+                10.0 * (t * 0.4).sin(),
+                pal.primary,
+            );
+            bearing_pointer(
+                page.surface,
+                c.center().0,
+                c.center().1,
+                c.h as f32 * 0.2,
+                0.0,
+                pal.nav,
+            );
+            numeric_readout(
+                page.surface,
+                c.center().0 as f32,
+                c.y as f32 + 16.0,
+                if matches!(fmt, Format::Tfr) {
+                    "TFR  SOFT"
+                } else {
+                    "HUD RPT"
+                },
+                pal.readout,
+                page.font_px,
+            );
+        }
     }
-    let arm = if master_arm { "MASTER ARM" } else { "SAFE" };
-    let arm_c = if master_arm { RED } else { GREEN_DIM };
-    page.label(
-        c.x as f32 + 4.0,
-        c.bottom() as f32 - page.font_px,
-        arm,
-        arm_c,
-    );
 }
 
-/// Horizontal Situation Display — range rings + heading cue.
-pub fn hsd(page: &mut Page, heading_deg: f32, range_nm: f32) {
-    page.clear();
-    page.bezel();
-    chrome(page, Some(3), "HSD");
-    let c = page.content_rect((page.font_px * 2.8) as i32, (page.font_px * 1.6) as i32);
-    let (cx, cy) = c.center();
-    let r = (c.w.min(c.h) / 2 - 12).max(20);
-    for ring in 1..=3 {
-        page.surface.circle(cx, cy, r * ring / 3, CYAN);
-    }
-    // Ownship + heading line
-    let rad = heading_deg.to_radians() - std::f32::consts::FRAC_PI_2;
-    let len = r as f32 * 0.9;
-    page.surface.line_aa(
-        cx,
-        cy,
-        cx + (len * rad.cos()) as i32,
-        cy + (len * rad.sin()) as i32,
-        WHITE,
-    );
-    page.surface.circle(cx, cy, 4, GREEN);
-    page.label(
-        c.x as f32 + 4.0,
-        c.y as f32 + 4.0,
-        &format!("HDG {:.0}", heading_deg.rem_euclid(360.0)),
-        GREEN,
-    );
-    page.label(
-        c.x as f32 + 4.0,
-        c.y as f32 + page.font_px + 6.0,
-        &format!("RNG {:.0} NM", range_nm),
-        GREEN_DIM,
-    );
+// Thin wrappers for direct calls (stable names).
+pub fn blank(page: &mut Page, pal: &Palette, bezel: &BezelState, t: f32) {
+    draw_format(page, Format::Blank, pal, bezel, t);
 }
-
-/// Targeting pod page — track box + status.
-pub fn tgp(page: &mut Page, track_x: f32, track_y: f32, laser: bool) {
-    page.clear();
-    page.bezel();
-    chrome(page, None, "TGP");
-    let c = page.content_rect((page.font_px * 2.8) as i32, (page.font_px * 1.6) as i32);
-    // FOV frame
-    let fov = c.inset(c.w / 8);
-    page.surface
-        .line_aa(fov.x, fov.y, fov.right(), fov.y, GREEN_DIM);
-    page.surface
-        .line_aa(fov.right(), fov.y, fov.right(), fov.bottom(), GREEN_DIM);
-    page.surface
-        .line_aa(fov.right(), fov.bottom(), fov.x, fov.bottom(), GREEN_DIM);
-    page.surface
-        .line_aa(fov.x, fov.bottom(), fov.x, fov.y, GREEN_DIM);
-    // Track gate
-    let tx = fov.x as f32 + track_x.clamp(0.0, 1.0) * fov.w as f32;
-    let ty = fov.y as f32 + track_y.clamp(0.0, 1.0) * fov.h as f32;
-    let g = 12;
-    page.surface.line_aa(
-        tx as i32 - g,
-        ty as i32 - g,
-        tx as i32 + g,
-        ty as i32 - g,
-        WHITE,
-    );
-    page.surface.line_aa(
-        tx as i32 + g,
-        ty as i32 - g,
-        tx as i32 + g,
-        ty as i32 + g,
-        WHITE,
-    );
-    page.surface.line_aa(
-        tx as i32 + g,
-        ty as i32 + g,
-        tx as i32 - g,
-        ty as i32 + g,
-        WHITE,
-    );
-    page.surface.line_aa(
-        tx as i32 - g,
-        ty as i32 + g,
-        tx as i32 - g,
-        ty as i32 - g,
-        WHITE,
-    );
-    let lz = if laser { "LASER ARM" } else { "LASER SAFE" };
-    page.label(
-        c.x as f32 + 4.0,
-        c.bottom() as f32 - page.font_px,
-        lz,
-        if laser { RED } else { GREEN_DIM },
-    );
+pub fn sms(page: &mut Page, pal: &Palette, bezel: &BezelState, t: f32) {
+    draw_format(page, Format::Sms, pal, bezel, t);
 }
-
-/// Fire-control radar style page — range/azimuth grid + contact.
-pub fn fcr(page: &mut Page, az_frac: f32, rng_frac: f32) {
-    page.clear();
-    page.bezel();
-    chrome(page, None, "FCR");
-    let c = page.content_rect((page.font_px * 2.8) as i32, (page.font_px * 1.6) as i32);
-    // B-scope style grid
-    for i in 0..=4 {
-        let x = c.x + c.w * i / 4;
-        let y = c.y + c.h * i / 4;
-        page.surface.line_aa(x, c.y, x, c.bottom(), GREEN_DIM);
-        page.surface.line_aa(c.x, y, c.right(), y, GREEN_DIM);
-    }
-    let px = c.x as f32 + az_frac.clamp(0.0, 1.0) * c.w as f32;
-    let py = c.bottom() as f32 - rng_frac.clamp(0.0, 1.0) * c.h as f32;
-    page.surface.circle(px as i32, py as i32, 5, AMBER);
-    page.label(c.x as f32 + 4.0, c.y as f32 + 4.0, "RWS", GREEN);
+pub fn hsd(page: &mut Page, pal: &Palette, bezel: &BezelState, t: f32) {
+    draw_format(page, Format::Hsd, pal, bezel, t);
 }
-
-/// Engine / systems style page — round gauges + tapes (jet EMS flavor).
-pub fn eng(page: &mut Page, rpm: f32, noz: f32, oil: f32, ftit: f32) {
-    page.clear();
-    page.bezel();
-    chrome(page, None, "ENG");
-    let c = page.content_rect((page.font_px * 2.8) as i32, (page.font_px * 1.6) as i32);
-    let half_w = c.w / 2;
-    page.round_gauge(
-        Rect::new(c.x, c.y, half_w, c.h / 2),
-        RoundGaugeOpts {
-            value: rpm,
-            redline: Some(0.85),
-            label: "RPM",
-            font_px: page.font_px * 0.85,
-            ..Default::default()
-        },
-    );
-    page.round_gauge(
-        Rect::new(c.x + half_w, c.y, half_w, c.h / 2),
-        RoundGaugeOpts {
-            value: noz,
-            redline: None,
-            label: "NOZ",
-            color: CYAN,
-            font_px: page.font_px * 0.85,
-            ..Default::default()
-        },
-    );
-    let tape_h = c.h / 2 - 8;
-    let ty = c.y + c.h / 2 + 4;
-    let tw = c.w / 2 - 8;
-    page.tape(
-        Rect::new(c.x + 4, ty, tw, tape_h),
-        TapeOpts {
-            orientation: TapeOrientation::Vertical,
-            font_px: page.font_px * 0.8,
-            color: AMBER,
-            value: oil,
-            label: "OIL",
-        },
-    );
-    page.tape(
-        Rect::new(c.x + tw + 8, ty, tw, tape_h),
-        TapeOpts {
-            orientation: TapeOrientation::Vertical,
-            font_px: page.font_px * 0.8,
-            color: RED,
-            value: ftit,
-            label: "FTIT",
-        },
-    );
+pub fn tgp(page: &mut Page, pal: &Palette, bezel: &BezelState, t: f32) {
+    draw_format(page, Format::Tgp, pal, bezel, t);
 }
-
-/// Data transfer / DTC style page — simple list.
-pub fn dte(page: &mut Page, lines: &[&str]) {
-    page.clear();
-    page.bezel();
-    chrome(page, Some(4), "DTE");
-    let c = page.content_rect((page.font_px * 2.8) as i32, (page.font_px * 1.6) as i32);
-    for (i, line) in lines.iter().enumerate().take(12) {
-        let y = c.y as f32 + 4.0 + i as f32 * (page.font_px + 4.0);
-        page.label(c.x as f32 + 8.0, y, line, GREEN);
-    }
+pub fn fcr(page: &mut Page, pal: &Palette, bezel: &BezelState, t: f32) {
+    draw_format(page, Format::Fcr, pal, bezel, t);
 }
-
-/// Built-in test page.
-pub fn test(page: &mut Page, ok: bool) {
-    page.clear();
-    page.bezel();
-    chrome(page, Some(5), "TEST");
-    let msg = if ok { "BIT GO" } else { "BIT FAIL" };
-    let col = if ok { GREEN } else { RED };
-    let (cx, cy) = page.bounds.center();
-    page.label_centered(cx as f32, cy as f32, msg, col);
+pub fn eng(page: &mut Page, pal: &Palette, bezel: &BezelState, t: f32) {
+    draw_format(page, Format::Eng, pal, bezel, t);
 }
-
-/// Blank page with chrome only.
-pub fn blank(page: &mut Page) {
-    page.clear();
-    page.bezel();
-    chrome(page, Some(0), "BLANK");
-}
-
-/// Fuel page — tapes (also reusable for automotive fuel).
-pub fn fuel(page: &mut Page, total: f32, internal: f32, external: f32) {
-    page.clear();
-    page.bezel();
-    chrome(page, None, "FUEL");
-    let c = page.content_rect((page.font_px * 2.8) as i32, (page.font_px * 1.6) as i32);
-    let tw = c.w / 3 - 6;
-    for (i, (lab, val, col)) in [
-        ("TOT", total, GREEN),
-        ("INT", internal, CYAN),
-        ("EXT", external, AMBER),
-    ]
-    .iter()
-    .enumerate()
-    {
-        page.tape(
-            Rect::new(c.x + i as i32 * (tw + 6), c.y, tw, c.h),
-            TapeOpts {
-                orientation: TapeOrientation::Vertical,
-                font_px: page.font_px * 0.85,
-                color: *col,
-                value: *val,
-                label: lab,
-            },
-        );
-    }
+pub fn fuel(page: &mut Page, pal: &Palette, bezel: &BezelState, t: f32) {
+    draw_format(page, Format::Fuel, pal, bezel, t);
 }

@@ -18,16 +18,19 @@
 #![allow(non_camel_case_types)]
 
 pub mod auto;
+pub mod bezel;
 pub mod color;
 pub mod font;
 pub mod frame;
 pub mod geom;
 pub mod jet;
 pub mod page;
+pub mod palette;
 pub mod surface;
 pub mod term;
 pub mod widget;
 
+pub use bezel::{BezelEvent, BezelKnob, BezelSource, BezelState, KeyboardBezel, NullBezel};
 pub use color::{
     rgb, Ink, AMBER, BLACK, CYAN, GREEN, GREEN_DIM, GREY, MAGENTA, PANEL, RED, TRANSPARENT, WHITE,
     YELLOW,
@@ -38,9 +41,12 @@ pub use font::{
 };
 pub use geom::Rect;
 pub use page::Page;
+pub use palette::{ColorMode, Palette};
 pub use surface::{engine_version, using_assembly, Surface, Xform};
 pub use widget::{
-    bezel_frame, label, label_centered, round_gauge, softkey_row, tape_gauge, RoundGaugeOpts,
+    bearing_pointer, bezel_frame, bscope_grid, caution_box, crosshair, horizon_cue, label,
+    label_centered, list_menu, numeric_readout, osb_chrome, progress_strip, range_rings,
+    round_gauge, softkey_row, station_grid, tape_gauge, track_gate, video_frame, RoundGaugeOpts,
     SoftkeyLayout, TapeOpts, TapeOrientation,
 };
 

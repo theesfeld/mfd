@@ -90,7 +90,14 @@ pub fn text_height(px: f32) -> f32 {
 }
 
 /// Draw text with a discrete baked size. `(x, y)` = top-left of line box.
-pub fn draw_text_size(surface: &mut Surface, x: f32, y: f32, text: &str, color: Color, sz: FontSize) {
+pub fn draw_text_size(
+    surface: &mut Surface,
+    x: f32,
+    y: f32,
+    text: &str,
+    color: Color,
+    sz: FontSize,
+) {
     let f = face(sz);
     let baseline = y + f.ascent as f32;
     let mut pen_x = x;
