@@ -170,10 +170,7 @@ fn terminal_winsize() -> Option<(u16, u16, u16, u16)> {
 pub fn cell_pixel_size() -> (f32, f32) {
     if let Some((cols, rows, xpix, ypix)) = terminal_winsize() {
         if xpix > 0 && ypix > 0 && cols > 0 && rows > 0 {
-            return (
-                xpix as f32 / cols as f32,
-                ypix as f32 / rows as f32,
-            );
+            return (xpix as f32 / cols as f32, ypix as f32 / rows as f32);
         }
     }
     // Typical terminal cell: half as wide as tall → N×N cells look *tall*.
@@ -181,15 +178,15 @@ pub fn cell_pixel_size() -> (f32, f32) {
 }
 
 fn max_pixels() -> (u32, u32) {
-    // Square MFD default 512 (keep present light). Override with MFD_MAX_*.
+    // Cap present payload. Physical 4" may want ~700–900 px on hi-DPI; default 768.
     let mw = std::env::var("MFD_MAX_W")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(512u32);
+        .unwrap_or(768u32);
     let mh = std::env::var("MFD_MAX_H")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(512u32);
+        .unwrap_or(768u32);
     (mw.max(64), mh.max(64))
 }
 
@@ -199,7 +196,6 @@ pub fn surface_size_for_viewport(backend: TermBackend, vp: Viewport) -> (u32, u3
     let cols = vp.cols.max(1) as u32;
     let rows = vp.rows.max(1) as u32;
     let (w, h) = match backend {
-        // Keep density modest — large Kitty payloads queue and crawl after minutes.
         TermBackend::Kitty => (cols * 6, rows * 12),
         TermBackend::HalfBlock => (cols, rows * 2),
         TermBackend::Ascii => (cols, rows),
@@ -212,18 +208,135 @@ pub fn suggested_surface_size(backend: TermBackend) -> (u32, u32) {
     surface_size_for_viewport(backend, Viewport::full_terminal())
 }
 
-/// **Visually square** cell viewport (F-16 MLU class ≈ **4×4 in / 10×10 cm**).
+/// Default physical face size (inches). F-16 MLU color MFD ≈ **4×4 in**.
+pub const MFD_FACE_INCHES_DEFAULT: f32 = 4.0;
+
+/// Face size in inches from `MFD_FACE_IN` or default 4.0.
+pub fn mfd_face_inches() -> f32 {
+    std::env::var("MFD_FACE_IN")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(MFD_FACE_INCHES_DEFAULT)
+        .clamp(1.0, 12.0)
+}
+
+/// Detect display **pixels per inch** (PPI).
 ///
-/// Terminal cells are **not** square (often ~1∶2 width∶height). Equal `cols==rows`
-/// therefore paints a **tall rectangle** and stretches a square framebuffer into
-/// ovals. This function measures cell pixel size and chooses `cols`/`rows` so
-/// that `cols * cell_w ≈ rows * cell_h` on screen.
+/// Order:
+/// 1. `MFD_PPI` env (manual ruler calibration)
+/// 2. DRM connector EDID (`/sys/class/drm/*/edid`) + active mode
+/// 3. Fallback **96** PPI
+pub fn display_ppi() -> f32 {
+    if let Ok(s) = std::env::var("MFD_PPI") {
+        if let Ok(v) = s.parse::<f32>() {
+            if v.is_finite() && v > 40.0 && v < 600.0 {
+                return v;
+            }
+        }
+    }
+    if let Some(ppi) = ppi_from_drm_edid() {
+        return ppi;
+    }
+    96.0
+}
+
+/// Read connected DRM EDID: physical cm + first mode → PPI.
+fn ppi_from_drm_edid() -> Option<f32> {
+    let drm = std::path::Path::new("/sys/class/drm");
+    let entries = std::fs::read_dir(drm).ok()?;
+    for ent in entries.flatten() {
+        let path = ent.path();
+        let name = path.file_name()?.to_string_lossy();
+        if !name.contains('-') {
+            continue; // skip card0, renderD*
+        }
+        let status = std::fs::read_to_string(path.join("status")).ok()?;
+        if !status.trim().eq_ignore_ascii_case("connected") {
+            continue;
+        }
+        let edid = std::fs::read(path.join("edid")).ok()?;
+        if edid.len() < 0x17 {
+            continue;
+        }
+        // EDID 1.3: 0x15 / 0x16 = max image size in cm (0 if projector / unknown).
+        let h_cm = edid[0x15] as f32;
+        let v_cm = edid[0x16] as f32;
+        if h_cm < 5.0 || v_cm < 5.0 {
+            continue;
+        }
+        // First listed mode "WIDTHxHEIGHT"
+        let modes = std::fs::read_to_string(path.join("modes")).ok()?;
+        let line = modes.lines().next()?;
+        let (rw, rh) = parse_mode_wh(line)?;
+        let ppi_w = rw as f32 / (h_cm / 2.54);
+        let ppi_h = rh as f32 / (v_cm / 2.54);
+        let ppi = (ppi_w + ppi_h) * 0.5;
+        if ppi.is_finite() && (50.0..500.0).contains(&ppi) {
+            return Some(ppi);
+        }
+    }
+    None
+}
+
+fn parse_mode_wh(s: &str) -> Option<(u32, u32)> {
+    let s = s.trim();
+    let (a, b) = s.split_once('x')?;
+    Some((a.parse().ok()?, b.parse().ok()?))
+}
+
+/// Target **framebuffer** side in pixels for a physical square face.
 ///
-/// `frac` = fraction of the smaller terminal side available for the face (0.4–1.0).
+/// `side = inches × PPI`, then clamped to fit the terminal and `MFD_MAX_*`.
+pub fn physical_mfd_side_px(inches: f32, backend: TermBackend) -> u32 {
+    let ppi = display_ppi();
+    let want = (inches.clamp(1.0, 12.0) * ppi).round() as u32;
+
+    let (cw, ch) = cell_pixel_size();
+    let (tc, tr) = terminal_cells();
+    // Largest square that fits the terminal window in **screen pixels**.
+    let fit_w = (tc as f32 * cw).floor() as u32;
+    let fit_h = (tr as f32 * ch).floor() as u32;
+    let fit = fit_w.min(fit_h).max(64);
+
+    let (mw, mh) = max_pixels();
+    let cap = mw.min(mh).max(64);
+
+    let mut side = want.min(fit).min(cap);
+    side = match backend {
+        TermBackend::Ascii => side.min(160),
+        TermBackend::HalfBlock => side.min(480),
+        TermBackend::Kitty => side,
+    };
+    side.max(128)
+}
+
+/// Square pixel surface sized to physical inches (ruler on the monitor).
+pub fn square_mfd_pixels(backend: TermBackend) -> (u32, u32) {
+    let side = physical_mfd_side_px(mfd_face_inches(), backend);
+    (side, side)
+}
+
+/// Cell viewport that displays a physical square of `inches` on the monitor.
+///
+/// Uses PPI + cell size so the on-glass box is ~N×N inches (clamped to window).
 pub fn square_mfd_viewport(frac: f32) -> Viewport {
+    physical_mfd_viewport(mfd_face_inches(), frac)
+}
+
+/// Same as [`square_mfd_viewport`] with explicit inches.
+pub fn physical_mfd_viewport(inches: f32, frac: f32) -> Viewport {
     let (tc, tr) = terminal_cells();
     let (cw, ch) = cell_pixel_size();
-    let (cols, rows) = visual_square_cells(tc, tr, cw, ch, frac);
+    let ppi = display_ppi();
+    let f = frac.clamp(0.5, 1.0);
+
+    // Desired screen pixels for N-inch face.
+    let mut side_px = inches.clamp(1.0, 12.0) * ppi;
+    // Must fit in the terminal (with frac of window).
+    let max_side = (tc as f32 * cw * f).min(tr as f32 * ch * f);
+    side_px = side_px.min(max_side).max(64.0);
+
+    let (cols, rows) = cells_for_screen_square(tc, tr, cw, ch, side_px);
     let col = tc.saturating_sub(cols) / 2;
     let row = tr.saturating_sub(rows) / 2;
     Viewport {
@@ -234,7 +347,37 @@ pub fn square_mfd_viewport(frac: f32) -> Viewport {
     }
 }
 
-/// Pure layout helper: cell counts for a visual square in the terminal.
+/// Cell counts so the **on-screen** box is `side_px`×`side_px` (aspect-correct).
+pub fn cells_for_screen_square(
+    term_cols: u16,
+    term_rows: u16,
+    cell_w: f32,
+    cell_h: f32,
+    side_px: f32,
+) -> (u16, u16) {
+    let tc = term_cols.max(1) as i32;
+    let tr = term_rows.max(1) as i32;
+    let cw = cell_w.max(1.0);
+    let ch = cell_h.max(1.0);
+    let side = side_px.max(1.0);
+
+    let mut cols = (side / cw).round() as i32;
+    let mut rows = (side / ch).round() as i32;
+    cols = cols.clamp(8, tc);
+    rows = rows.clamp(4, tr);
+
+    // Equalize visual width/height after integer snap.
+    let vis_w = cols as f32 * cw;
+    let vis_h = rows as f32 * ch;
+    if vis_w > vis_h + cw * 0.25 {
+        cols = ((vis_h / cw).round() as i32).clamp(8, tc);
+    } else if vis_h > vis_w + ch * 0.25 {
+        rows = ((vis_w / ch).round() as i32).clamp(4, tr);
+    }
+    (cols as u16, rows as u16)
+}
+
+/// Pure layout helper (tests / callers): square cells for a fraction of the TTY.
 pub fn visual_square_cells(
     term_cols: u16,
     term_rows: u16,
@@ -242,45 +385,11 @@ pub fn visual_square_cells(
     cell_h: f32,
     frac: f32,
 ) -> (u16, u16) {
-    let tc = term_cols.max(1) as i32;
-    let tr = term_rows.max(1) as i32;
-    let cw = cell_w.max(1.0);
-    let ch = cell_h.max(1.0);
+    let tc = term_cols.max(1) as f32;
+    let tr = term_rows.max(1) as f32;
     let f = frac.clamp(0.4, 1.0);
-
-    let max_w_px = tc as f32 * cw * f;
-    let max_h_px = tr as f32 * ch * f;
-    let side_px = max_w_px.min(max_h_px).max(1.0);
-
-    let mut cols = (side_px / cw).floor() as i32;
-    let mut rows = (side_px / ch).floor() as i32;
-    cols = cols.clamp(8, tc);
-    rows = rows.clamp(4, tr);
-
-    let vis_w = cols as f32 * cw;
-    let vis_h = rows as f32 * ch;
-    if vis_w > vis_h + 0.5 {
-        cols = ((vis_h / cw).floor() as i32).clamp(8, tc);
-    } else if vis_h > vis_w + 0.5 {
-        rows = ((vis_w / ch).floor() as i32).clamp(4, tr);
-    }
-    (cols as u16, rows as u16)
-}
-
-/// Square **pixel** surface for the MFD face (1∶1 framebuffer).
-///
-/// Kitty/half-block map this into [`square_mfd_viewport`]; the viewport cell
-/// counts must be aspect-corrected or the square is stretched on glass.
-pub fn square_mfd_pixels(backend: TermBackend) -> (u32, u32) {
-    let (mw, mh) = max_pixels();
-    let side = mw.min(mh).min(640);
-    let side = match backend {
-        TermBackend::Ascii => side.min(120),
-        TermBackend::HalfBlock => side.min(400),
-        TermBackend::Kitty => side,
-    };
-    let side = side.max(128);
-    (side, side)
+    let side = (tc * cell_w.max(1.0) * f).min(tr * cell_h.max(1.0) * f);
+    cells_for_screen_square(term_cols, term_rows, cell_w, cell_h, side)
 }
 
 /// Reusable present buffers (avoids multi-MB alloc/frame → terminal crawl).
@@ -804,10 +913,27 @@ mod tests {
     fn visual_square_uses_more_cols_when_cells_are_tall() {
         // 8×16 px cells → need ~2× cols as rows for a square.
         let (cols, rows) = visual_square_cells(200, 60, 8.0, 16.0, 0.9);
-        assert!(cols > rows, "cols={cols} should exceed rows={rows} for 1:2 cells");
+        assert!(
+            cols > rows,
+            "cols={cols} should exceed rows={rows} for 1:2 cells"
+        );
         let vis_w = cols as f32 * 8.0;
         let vis_h = rows as f32 * 16.0;
         let err = (vis_w - vis_h).abs() / vis_w.max(vis_h);
-        assert!(err < 0.15, "visual aspect error {err} (w={vis_w} h={vis_h})");
+        assert!(
+            err < 0.15,
+            "visual aspect error {err} (w={vis_w} h={vis_h})"
+        );
+    }
+
+    #[test]
+    fn physical_4in_at_96dpi() {
+        // 4" × 96 ppi = 384 px side before clamps.
+        let side = (4.0_f32 * 96.0).round() as u32;
+        assert_eq!(side, 384);
+        let (cols, rows) = cells_for_screen_square(120, 40, 8.0, 16.0, 384.0);
+        let w = cols as f32 * 8.0;
+        let h = rows as f32 * 16.0;
+        assert!((w - h).abs() / w.max(h) < 0.12, "w={w} h={h}");
     }
 }

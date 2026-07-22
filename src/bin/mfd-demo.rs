@@ -49,17 +49,19 @@ fn main() -> io::Result<()> {
         .unwrap_or(30u32);
 
     let backend = detect_backend();
-    let vp = square_mfd_viewport(0.85);
+    let inches = mfd::term::mfd_face_inches();
+    let ppi = mfd::term::display_ppi();
+    let vp = square_mfd_viewport(0.95);
     let (w, h) = square_mfd_pixels(backend);
     let (cw, ch) = mfd::term::cell_pixel_size();
+    let vis_w = vp.cols as f32 * cw;
+    let vis_h = vp.rows as f32 * ch;
     eprintln!(
-        "surface {w}x{h} (1:1)  viewport cells {}x{} @{},{}  cell≈{cw:.1}x{ch:.1}px  vis≈{:.0}x{:.0}",
+        "face {inches:.1}\" @ {ppi:.0} ppi → surface {w}x{h}px  viewport {}x{} cells  on-glass≈{:.1}\"×{:.1}\"",
         vp.cols,
         vp.rows,
-        vp.col,
-        vp.row,
-        vp.cols as f32 * cw,
-        vp.rows as f32 * ch
+        vis_w / ppi,
+        vis_h / ppi
     );
     debug_assert_eq!(w, h, "framebuffer must be square");
 
