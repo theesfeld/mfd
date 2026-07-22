@@ -4,10 +4,18 @@
 > **Status:** active · Version: `0.1.0-dev.1` · License: MIT · [Issues](https://github.com/theesfeld/vge/issues)
 <!-- agents:status:end -->
 
-VGE draws **true vectors**: geometry (`line`, `circle`, transform) lights **individual pixels**.  
-This is not a sprite or bitmap blitter.
+VGE is a **calligraphic stroke engine** for modern hosts.
 
-Hot path on **x86_64**: GNU assembly (`asm/x86_64/vge.s`).  
+Aircraft HUDs and 1970s vector CRTs did not paint full bitmaps as their native model.  
+They held a **display list** of beam commands (MOVE / DRAW). A refresh processor retraced the list. Phosphor held the glow.
+
+VGE uses that model in 2026:
+
+1. **`DisplayList`** — live stroke commands (source of truth)
+2. **`refresh`** — phosphor decay + software beam through the list → scanout pixels
+3. **Present** — Kitty / half-block / Linux FB shows the scanout only
+
+Hot path on **x86_64**: GNU assembly for beam pixel stores (`asm/x86_64/vge.s`).  
 Other targets use a portable C path with the same C ABI.
 
 <p align="center">
@@ -94,21 +102,30 @@ Link the static/shared library from `cargo build --release` (`libvge.a` / `libvg
 
 ---
 
-## Quick start (Rust)
+## Quick start (Rust) — stroke list
 
 ```rust
-use vge::{Surface, Xform, GREEN, BLACK};
+use vge::{DisplayList, Surface, GREEN, CYAN};
 
+let mut list = DisplayList::new();
+list.set_color(GREEN);
+list.line(10, 10, 630, 350);
+list.set_color(CYAN);
+list.circle(320, 180, 80);
+
+let mut scanout = Surface::new(640, 360);
+// decay 200/256 ≈ phosphor trail; 0 = hard clear each retrace
+list.refresh(&mut scanout, 200);
+// then present_at(&scanout, backend, viewport) or fb.present_from(&scanout)
+```
+
+Immediate beam (no list) still works:
+
+```rust
+use vge::{Surface, GREEN, BLACK};
 let mut s = Surface::new(640, 360);
 s.clear(BLACK);
 s.line(10, 10, 630, 350, GREEN);
-s.circle(320, 180, 80, GREEN);
-
-let m = Xform::identity()
-    .translate(320.0, 180.0)
-    .rotate_deg(15.0)
-    .translate(-320.0, -180.0);
-s.line_xf(&m, 100.0, 180.0, 540.0, 180.0, GREEN);
 ```
 
 Linux frame buffer (direct glass):
@@ -165,7 +182,17 @@ Quit: `q`, Esc, or Ctrl+C.
 
 ## API surface
 
-### Geometry (C + Rust)
+### Stroke display list (calligraphic core)
+
+| Type / method | Description |
+|---------------|-------------|
+| `DisplayList` | Refresh memory for beam commands |
+| `set_color` / `move_to` / `line_to` | Beam state + strokes |
+| `line` / `line_thick` / `circle` / `polyline` | Draw commands |
+| `stroke(surface)` | Execute beam (no clear) |
+| `refresh(surface, decay_256)` | Phosphor + full retrace |
+
+### Geometry scanout (C + Rust)
 
 | Function | Description |
 |----------|-------------|
@@ -222,14 +249,20 @@ include/vge.h           C ABI
 asm/x86_64/vge.s        assembly hot path
 c/vge_portable.c        transforms, blit, decay, portable raster
 src/lib.rs              Rust API
+src/stroke.rs           DisplayList (calligraphic core)
 src/term.rs             terminal present + viewport overlay
 src/fb.rs               Linux framebuffer
-src/frame.rs            FramePacer
+src/frame.rs            display refresh lock
 src/effects.rs          glow / bloom / radar / scanlines
-src/bin/vge-demo.rs     live demo
+src/bin/vge-demo.rs     stroke-list HUD demo
 examples/bench.rs       FPS bench
 docs/demo-hud.png       sample image
 ```
+
+## Architecture note
+
+This is intentional innovation on a known foundation: **refresh vector / calligraphic** display lists (see vector CRT / aircraft HUD stroke generators).  
+VGE reimplements that control path in software with a modern present stage (terminal graphics protocol or Linux frame buffer). The list is the picture. Pixels are only the scanout of the beam.
 
 ---
 
