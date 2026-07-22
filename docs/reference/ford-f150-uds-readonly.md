@@ -2,7 +2,7 @@
 
 **SoT issue:** [#79](https://github.com/theesfeld/mfd/issues/79)  
 **Safety:** display-only — see Issue [#73](https://github.com/theesfeld/mfd/issues/73) and `docs/hardware.md`.  
-**Truck class:** VIN `1FTEW1EP9KFC73499` (capture in `docs/odbii-session/`) — P552-era F-150; verify DIDs on your build.
+**Truck class:** VIN `1FTEW1EP9KFC73499` (capture in `docs/odbii-session/`) — **2019** F-150 P552 · **APIM = Sync 3**; verify DIDs on your build.
 
 This note records the **read-only** UDS/CAN protocol path for the color MFD.  
 DIDs and scalings from community / FORScan-style reverse engineering are **hints** until live capture confirms them.

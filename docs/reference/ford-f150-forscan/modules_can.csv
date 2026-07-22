@@ -3,7 +3,7 @@ PCM,PCM,7E0,7E8,HS,Powertrain — start here for Mode 01 and many 0x22
 BCM,BdyCM,726,,HS/MS,Body control — As-Built prefix 726-xx-xx; verify live req ID
 ABS,ABS,760,,HS,Brakes / wheel speeds / some TPMS — As-Built 760-xx-xx
 IPC,IPC,720,,HS,Cluster / odometer / gauges — As-Built 720-xx-xx
-APIM,APIM,7D0,,HS/MS,SYNC / media
+APIM,APIM (Sync 3),7D0,,HS/MS,This truck: Sync 3 only — not Sync 1/2
 FCIM,FCIM,7A7,,HS/MS,Front controls / HVAC UI
 SCCM,SCCM,724,,HS,Steering column
 PSCM,PSCM,730,,HS,Power steering — angle candidate
