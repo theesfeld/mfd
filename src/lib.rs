@@ -18,7 +18,10 @@ pub mod frame;
 pub mod stroke;
 pub mod term;
 
-pub use font::{draw_text, draw_text_centered, text_height, text_width};
+pub use font::{
+    draw_text, draw_text_centered, draw_text_stroke, draw_text_stroke_centered, stroke_text_height,
+    stroke_text_width, text_height, text_width,
+};
 pub use stroke::{DisplayList, Stroke, TimedStroke};
 
 use std::f32::consts::PI;
