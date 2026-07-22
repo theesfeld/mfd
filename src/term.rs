@@ -308,20 +308,28 @@ fn process_ancestor_pids() -> Vec<u32> {
 }
 
 fn niri_window_device_size(pids: &[u32]) -> Option<(f32, f32)> {
-    let wins = cmd_stdout(&["niri", "msg", "--json", "windows"])?;
-    let outs = cmd_stdout(&["niri", "msg", "--json", "outputs"])?;
-    let scale = json_first_f32(&outs, "\"scale\"")
-        .or_else(|| json_first_f32(&outs, "\"scale\":"))
-        .unwrap_or(1.0)
-        .clamp(0.5, 4.0);
-    // Prefer a window whose pid is in our ancestry.
-    let (lw, lh) = niri_pick_window_logical(&wins, pids)?;
+    let host = niri_host_display(pids)?;
+    let (lw, lh) = host.window_logical?;
+    let scale = host.scale.clamp(0.5, 4.0);
     Some((lw * scale, lh * scale))
 }
 
-fn niri_pick_window_logical(json: &str, pids: &[u32]) -> Option<(f32, f32)> {
-    // Walk `"pid"` keys; prefer a window in our process ancestry.
-    let mut best: Option<(f32, f32)> = None;
+/// niri: window → workspace → output (current mode + physical mm + scale).
+fn niri_host_display(pids: &[u32]) -> Option<HostDisplay> {
+    let wins = cmd_stdout(&["niri", "msg", "--json", "windows"])?;
+    let outs = cmd_stdout(&["niri", "msg", "--json", "outputs"])?;
+    let spaces = cmd_stdout(&["niri", "msg", "--json", "workspaces"]).unwrap_or_default();
+
+    let (ws_id, win_w, win_h) = niri_pick_window_ws(&wins, pids)?;
+    let out_name =
+        niri_workspace_output(&spaces, ws_id).or_else(|| niri_focused_output_name(&outs));
+    let mut host = niri_parse_output(&outs, out_name.as_deref())?;
+    host.window_logical = Some((win_w, win_h));
+    Some(host)
+}
+
+fn niri_pick_window_ws(json: &str, pids: &[u32]) -> Option<(u64, f32, f32)> {
+    let mut best: Option<(u64, f32, f32)> = None;
     let bytes = json.as_bytes();
     let mut i = 0;
     while i + 8 < bytes.len() {
@@ -334,13 +342,15 @@ fn niri_pick_window_logical(json: &str, pids: &[u32]) -> Option<(f32, f32)> {
             continue;
         };
         let pid = pid_f as u32;
-        let slice = &json[i..json.len().min(i + 800)];
+        let start = json[..i].rfind('{').unwrap_or(i);
+        let slice = &json[start..json.len().min(start + 2000)];
+        let ws = json_number_after(slice, "\"workspace_id\"").unwrap_or(0.0) as u64;
         if let Some((w, h)) = json_window_size_pair(slice) {
             if pids.contains(&pid) && w > 32.0 && h > 32.0 {
-                return Some((w, h));
+                return Some((ws, w, h));
             }
             if best.is_none() && w > 32.0 && h > 32.0 {
-                best = Some((w, h));
+                best = Some((ws, w, h));
             }
         }
         i += 4;
@@ -348,53 +358,182 @@ fn niri_pick_window_logical(json: &str, pids: &[u32]) -> Option<(f32, f32)> {
     best
 }
 
-fn hypr_window_device_size(pids: &[u32]) -> Option<(f32, f32)> {
-    let clients = cmd_stdout(&["hyprctl", "clients", "-j"])?;
-    let mon = cmd_stdout(&["hyprctl", "monitors", "-j"])?;
-    let scale = json_first_f32(&mon, "\"scale\"")
-        .unwrap_or(1.0)
-        .clamp(0.5, 4.0);
-    // Hyprland size is often already in layout px; with scale, device = size * scale
-    // when size is logical. Hypr reports `size` as [w,h] in layout pixels.
+fn niri_workspace_output(spaces: &str, ws_id: u64) -> Option<String> {
+    if spaces.is_empty() || ws_id == 0 {
+        return None;
+    }
+    let bytes = spaces.as_bytes();
     let mut i = 0;
-    let bytes = clients.as_bytes();
-    while i + 8 < bytes.len() {
-        if let Some(rel) = find_subslice(&bytes[i..], b"\"pid\"") {
+    while i + 6 < bytes.len() {
+        let Some(rel) = find_subslice(&bytes[i..], b"\"id\"") else {
+            break;
+        };
+        i += rel;
+        let start = spaces[..i].rfind('{').unwrap_or(i);
+        let slice = &spaces[start..spaces.len().min(start + 400)];
+        let id = match json_number_after(slice, "\"id\"") {
+            Some(v) => v as u64,
+            None => {
+                i += 4;
+                continue;
+            }
+        };
+        if id == ws_id {
+            if let Some(name) = json_string_after(slice, "\"output\"") {
+                return Some(name);
+            }
+        }
+        i += 4;
+    }
+    None
+}
+
+fn niri_focused_output_name(outs: &str) -> Option<String> {
+    if let Some(text) = cmd_stdout(&["niri", "msg", "--json", "focused-output"]) {
+        if let Some(n) = json_string_after(&text, "\"name\"") {
+            return Some(n);
+        }
+    }
+    niri_prefer_output_name(outs)
+}
+
+fn niri_prefer_output_name(outs: &str) -> Option<String> {
+    let mut names = Vec::new();
+    let mut i = 0;
+    let bytes = outs.as_bytes();
+    while i + 4 < bytes.len() {
+        if let Some(rel) = find_subslice(&bytes[i..], b"\"name\"") {
             i += rel;
-            let pid = json_number_after(&clients[i..], "\"pid\"")? as u32;
-            let slice = &clients[i..clients.len().min(i + 1200)];
-            // "size": [w, h]
-            if let Some((w, h)) = json_size_array(slice, "\"size\"") {
-                if pids.contains(&pid) && w > 32.0 && h > 32.0 {
-                    // Hypr size is typically logical-ish; multiply by scale for device.
-                    return Some((w * scale, h * scale));
+            if let Some(n) = json_string_after(&outs[i..], "\"name\"") {
+                if !names.contains(&n) {
+                    names.push(n);
                 }
             }
             i += 4;
         } else {
+            break;
+        }
+    }
+    names
+        .iter()
+        .find(|n| !n.starts_with("eDP"))
+        .cloned()
+        .or_else(|| names.first().cloned())
+}
+
+fn niri_parse_output(outs: &str, prefer: Option<&str>) -> Option<HostDisplay> {
+    let mut names = Vec::new();
+    if let Some(p) = prefer {
+        names.push(p.to_string());
+    }
+    let mut i = 0;
+    let bytes = outs.as_bytes();
+    while i + 8 < bytes.len() {
+        if let Some(rel) = find_subslice(&bytes[i..], b"\"name\"") {
+            i += rel;
+            if let Some(n) = json_string_after(&outs[i..], "\"name\"") {
+                if !names.contains(&n) {
+                    names.push(n);
+                }
+            }
+            i += 4;
+        } else {
+            break;
+        }
+    }
+    for name in &names {
+        if let Some(h) = niri_parse_one_output(outs, name) {
+            return Some(h);
+        }
+    }
+    None
+}
+
+fn niri_parse_one_output(outs: &str, name: &str) -> Option<HostDisplay> {
+    let needle = format!("\"name\":\"{name}\"");
+    let idx = outs
+        .find(&needle)
+        .or_else(|| outs.find(&format!("\"name\": \"{name}\"")))?;
+    let start = outs[..idx].rfind('{').unwrap_or(idx);
+    let slice = &outs[start..outs.len().min(start + 12000)];
+    let (phys_w, phys_h) = json_size_array(slice, "\"physical_size\"")?;
+    let cur = json_number_after(slice, "\"current_mode\"").unwrap_or(0.0) as usize;
+    let (mode_w, mode_h) = niri_mode_at(slice, cur).or_else(|| niri_mode_at(slice, 0))?;
+    let scale = json_number_after(slice, "\"scale\"")
+        .map(|v| v as f32)
+        .unwrap_or(1.0)
+        .clamp(0.5, 4.0);
+    Some(HostDisplay {
+        name: name.to_string(),
+        mode_w,
+        mode_h,
+        phys_w_mm: phys_w,
+        phys_h_mm: phys_h,
+        scale,
+        window_logical: None,
+    })
+}
+
+fn niri_mode_at(slice: &str, index: usize) -> Option<(u32, u32)> {
+    let modes_idx = slice.find("\"modes\"")?;
+    let rest = &slice[modes_idx..];
+    let arr = rest.find('[')?;
+    let mut body = &rest[arr + 1..];
+    let mut i = 0usize;
+    while let Some(obj_start) = body.find('{') {
+        body = &body[obj_start..];
+        let end = body.find('}').unwrap_or(body.len().min(200));
+        let obj = &body[..end];
+        if i == index {
+            let w = json_number_after(obj, "\"width\"")? as u32;
+            let h = json_number_after(obj, "\"height\"")? as u32;
+            if w >= 320 && h >= 200 {
+                return Some((w, h));
+            }
+            return None;
+        }
+        i += 1;
+        body = &body[end.saturating_add(1)..];
+        if i > 64 {
             break;
         }
     }
     None
 }
 
-fn sway_window_device_size(pids: &[u32]) -> Option<(f32, f32)> {
-    let tree = cmd_stdout(&["swaymsg", "-t", "get_tree"])?;
-    let outs = cmd_stdout(&["swaymsg", "-t", "get_outputs"])?;
-    let scale = json_first_f32(&outs, "\"scale\"")
-        .unwrap_or(1.0)
-        .clamp(0.5, 4.0);
+fn hypr_window_device_size(pids: &[u32]) -> Option<(f32, f32)> {
+    let host = hypr_host_display(pids)?;
+    let (lw, lh) = host.window_logical?;
+    let scale = host.scale.clamp(0.5, 4.0);
+    Some((lw * scale, lh * scale))
+}
+
+fn hypr_host_display(pids: &[u32]) -> Option<HostDisplay> {
+    let clients = cmd_stdout(&["hyprctl", "clients", "-j"])?;
+    let mon = cmd_stdout(&["hyprctl", "monitors", "-j"])?;
+    let mut mon_name: Option<String> = None;
+    let mut win: Option<(f32, f32)> = None;
     let mut i = 0;
-    let bytes = tree.as_bytes();
+    let bytes = clients.as_bytes();
     while i + 8 < bytes.len() {
         if let Some(rel) = find_subslice(&bytes[i..], b"\"pid\"") {
             i += rel;
-            let pid = json_number_after(&tree[i..], "\"pid\"")? as u32;
-            let slice = &tree[i..tree.len().min(i + 1500)];
-            // sway: "rect":{"x":..,"y":..,"width":W,"height":H}
-            if let Some((w, h)) = json_rect_wh(slice) {
-                if pids.contains(&pid) && w > 32.0 && h > 32.0 {
-                    return Some((w * scale, h * scale));
+            let start = clients[..i].rfind('{').unwrap_or(i);
+            let slice = &clients[start..clients.len().min(start + 1500)];
+            let pid = match json_number_after(slice, "\"pid\"") {
+                Some(v) => v as u32,
+                None => {
+                    i += 4;
+                    continue;
+                }
+            };
+            if pids.contains(&pid) {
+                if let Some((w, h)) = json_size_array(slice, "\"size\"") {
+                    if w > 32.0 && h > 32.0 {
+                        win = Some((w, h));
+                        mon_name = json_string_after(slice, "\"monitor\"");
+                        break;
+                    }
                 }
             }
             i += 4;
@@ -402,7 +541,213 @@ fn sway_window_device_size(pids: &[u32]) -> Option<(f32, f32)> {
             break;
         }
     }
+    let (win_w, win_h) = win?;
+    let mut host = hypr_parse_monitor(&mon, mon_name.as_deref())?;
+    host.window_logical = Some((win_w, win_h));
+    Some(host)
+}
+
+fn hypr_parse_monitor(mon: &str, prefer: Option<&str>) -> Option<HostDisplay> {
+    let bytes = mon.as_bytes();
+    let mut i = 0;
+    let mut first: Option<HostDisplay> = None;
+    while i + 8 < bytes.len() {
+        let Some(rel) = find_subslice(&bytes[i..], b"\"name\"") else {
+            break;
+        };
+        i += rel;
+        let start = mon[..i].rfind('{').unwrap_or(i);
+        let slice = &mon[start..mon.len().min(start + 2500)];
+        let name = match json_string_after(slice, "\"name\"") {
+            Some(n) => n,
+            None => {
+                i += 4;
+                continue;
+            }
+        };
+        let mode_w = json_number_after(slice, "\"width\"").unwrap_or(0.0) as u32;
+        let mode_h = json_number_after(slice, "\"height\"").unwrap_or(0.0) as u32;
+        let phys_w = json_number_after(slice, "\"widthMM\"")
+            .or_else(|| json_number_after(slice, "\"width_mm\""))
+            .unwrap_or(0.0) as f32;
+        let phys_h = json_number_after(slice, "\"heightMM\"")
+            .or_else(|| json_number_after(slice, "\"height_mm\""))
+            .unwrap_or(0.0) as f32;
+        let scale = json_number_after(slice, "\"scale\"")
+            .map(|v| v as f32)
+            .unwrap_or(1.0)
+            .clamp(0.5, 4.0);
+        if mode_w >= 320 && mode_h >= 200 {
+            let h = HostDisplay {
+                name: name.clone(),
+                mode_w,
+                mode_h,
+                phys_w_mm: phys_w,
+                phys_h_mm: phys_h,
+                scale,
+                window_logical: None,
+            };
+            if prefer.map(|p| p == name).unwrap_or(false) {
+                return Some(h);
+            }
+            if first.is_none() {
+                first = Some(h);
+            }
+        }
+        i += 4;
+    }
+    first
+}
+
+fn sway_window_device_size(pids: &[u32]) -> Option<(f32, f32)> {
+    let host = sway_host_display(pids)?;
+    let (lw, lh) = host.window_logical?;
+    let scale = host.scale.clamp(0.5, 4.0);
+    Some((lw * scale, lh * scale))
+}
+
+fn sway_host_display(pids: &[u32]) -> Option<HostDisplay> {
+    let tree = cmd_stdout(&["swaymsg", "-t", "get_tree"])?;
+    let outs = cmd_stdout(&["swaymsg", "-t", "get_outputs"])?;
+    let mut i = 0;
+    let bytes = tree.as_bytes();
+    let mut win: Option<(f32, f32)> = None;
+    let mut out_name: Option<String> = None;
+    while i + 8 < bytes.len() {
+        if let Some(rel) = find_subslice(&bytes[i..], b"\"pid\"") {
+            i += rel;
+            let start = tree[..i].rfind('{').unwrap_or(i);
+            let slice = &tree[start..tree.len().min(start + 2000)];
+            let pid = match json_number_after(slice, "\"pid\"") {
+                Some(v) => v as u32,
+                None => {
+                    i += 4;
+                    continue;
+                }
+            };
+            if pids.contains(&pid) {
+                if let Some((w, h)) = json_rect_wh(slice) {
+                    if w > 32.0 && h > 32.0 {
+                        win = Some((w, h));
+                        out_name = json_string_after(slice, "\"output\"");
+                        break;
+                    }
+                }
+            }
+            i += 4;
+        } else {
+            break;
+        }
+    }
+    let (win_w, win_h) = win?;
+    let mut host = sway_parse_output(&outs, out_name.as_deref())?;
+    host.window_logical = Some((win_w, win_h));
+    Some(host)
+}
+
+fn sway_parse_output(outs: &str, prefer: Option<&str>) -> Option<HostDisplay> {
+    let bytes = outs.as_bytes();
+    let mut i = 0;
+    let mut first: Option<HostDisplay> = None;
+    while i + 8 < bytes.len() {
+        let Some(rel) = find_subslice(&bytes[i..], b"\"name\"") else {
+            break;
+        };
+        i += rel;
+        let start = outs[..i].rfind('{').unwrap_or(i);
+        let slice = &outs[start..outs.len().min(start + 4000)];
+        let name = match json_string_after(slice, "\"name\"") {
+            Some(n) => n,
+            None => {
+                i += 4;
+                continue;
+            }
+        };
+        let active = json_bool_after(slice, "\"active\"").unwrap_or(true);
+        if !active {
+            i += 4;
+            continue;
+        }
+        let (mode_w, mode_h) = if let Some(cm) = slice.find("\"current_mode\"") {
+            let sub = &slice[cm..slice.len().min(cm + 300)];
+            let w = json_number_after(sub, "\"width\"").unwrap_or(0.0) as u32;
+            let h = json_number_after(sub, "\"height\"").unwrap_or(0.0) as u32;
+            (w, h)
+        } else {
+            (0, 0)
+        };
+        let phys_w = json_number_after(slice, "\"physical_width\"")
+            .or_else(|| json_number_after(slice, "\"physical_width_mm\""))
+            .unwrap_or(0.0) as f32;
+        let phys_h = json_number_after(slice, "\"physical_height\"")
+            .or_else(|| json_number_after(slice, "\"physical_height_mm\""))
+            .unwrap_or(0.0) as f32;
+        let scale = json_number_after(slice, "\"scale\"")
+            .map(|v| v as f32)
+            .unwrap_or(1.0)
+            .clamp(0.5, 4.0);
+        if mode_w >= 320 && mode_h >= 200 {
+            let h = HostDisplay {
+                name: name.clone(),
+                mode_w,
+                mode_h,
+                phys_w_mm: phys_w,
+                phys_h_mm: phys_h,
+                scale,
+                window_logical: None,
+            };
+            if prefer.map(|p| p == name).unwrap_or(false) {
+                return Some(h);
+            }
+            if first.is_none() {
+                first = Some(h);
+            }
+        }
+        i += 4;
+    }
+    first
+}
+
+/// Compositor report for the output that hosts this process's terminal window.
+#[derive(Clone, Debug)]
+struct HostDisplay {
+    name: String,
+    mode_w: u32,
+    mode_h: u32,
+    phys_w_mm: f32,
+    phys_h_mm: f32,
+    scale: f32,
+    window_logical: Option<(f32, f32)>,
+}
+
+impl HostDisplay {
+    fn ppi(&self) -> Option<f32> {
+        ppi_from_physical_mode(self.phys_w_mm, self.phys_h_mm, self.mode_w, self.mode_h)
+    }
+}
+
+fn host_display() -> Option<HostDisplay> {
+    let pids = process_ancestor_pids();
+    if let Some(h) = niri_host_display(&pids) {
+        return Some(h);
+    }
+    if let Some(h) = hypr_host_display(&pids) {
+        return Some(h);
+    }
+    if let Some(h) = sway_host_display(&pids) {
+        return Some(h);
+    }
     None
+}
+
+/// PPI from panel mm size + **current** mode pixels (device pixels / inch).
+fn ppi_from_physical_mode(phys_w_mm: f32, phys_h_mm: f32, mode_w: u32, mode_h: u32) -> Option<f32> {
+    if phys_w_mm < 50.0 || phys_h_mm < 50.0 || mode_w < 320 || mode_h < 200 {
+        return None;
+    }
+    let ppi_w = mode_w as f32 / (phys_w_mm / 25.4);
+    let ppi_h = mode_h as f32 / (phys_h_mm / 25.4);
+    valid_ppi((ppi_w + ppi_h) * 0.5)
 }
 
 fn cmd_stdout(argv: &[&str]) -> Option<String> {
@@ -433,6 +778,29 @@ fn json_number_after(s: &str, key: &str) -> Option<f64> {
     rest[..end].parse().ok()
 }
 
+fn json_string_after(s: &str, key: &str) -> Option<String> {
+    let idx = s.find(key)?;
+    let rest = s[idx + key.len()..].trim_start();
+    let rest = rest.strip_prefix(':')?.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+fn json_bool_after(s: &str, key: &str) -> Option<bool> {
+    let idx = s.find(key)?;
+    let rest = s[idx + key.len()..].trim_start();
+    let rest = rest.strip_prefix(':')?.trim_start();
+    if rest.starts_with("true") {
+        Some(true)
+    } else if rest.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+#[allow(dead_code)]
 fn json_first_f32(s: &str, key: &str) -> Option<f32> {
     json_number_after(s, key).map(|v| v as f32)
 }
@@ -518,6 +886,8 @@ pub fn mfd_face_inches() -> f32 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PpiSource {
     Env,
+    /// Compositor: current mode × physical size for the **host** output.
+    Compositor,
     EdidDetailed,
     EdidCm,
     Fallback96,
@@ -527,9 +897,15 @@ pub enum PpiSource {
 ///
 /// Order:
 /// 1. `MFD_PPI` — manual ruler calibration (always wins)
-/// 2. DRM EDID detailed timing size in **mm** (best automatic)
-/// 3. DRM EDID screen size in **cm** (coarser)
-/// 4. Fallback **96** (not ruler-accurate — calibrate with `MFD_PPI`)
+/// 2. Compositor host output: **current** mode × physical mm (niri / Hypr / sway)
+/// 3. DRM EDID detailed timing size in **mm** + best mode match
+/// 4. DRM EDID screen size in **cm** + best mode match
+/// 5. Fallback **96** (not ruler-accurate — calibrate with `MFD_PPI`)
+///
+/// Multi-monitor: uses the output that hosts this terminal window when the
+/// compositor reports it. Never takes first connector or first EDID mode alone —
+/// those are wrong on ultrawides (preferred ≠ current) and dual-head
+/// (laptop eDP PPI ≠ external panel).
 pub fn display_ppi() -> f32 {
     display_ppi_info().0
 }
@@ -543,10 +919,17 @@ pub fn display_ppi_info() -> (f32, PpiSource) {
             }
         }
     }
-    if let Some(ppi) = ppi_from_drm_edid(true) {
+    let host = host_display();
+    if let Some(ref h) = host {
+        if let Some(ppi) = h.ppi() {
+            return (ppi, PpiSource::Compositor);
+        }
+    }
+    let prefer_conn = host.as_ref().map(|h| h.name.as_str());
+    if let Some(ppi) = ppi_from_drm_edid(true, prefer_conn) {
         return (ppi, PpiSource::EdidDetailed);
     }
-    if let Some(ppi) = ppi_from_drm_edid(false) {
+    if let Some(ppi) = ppi_from_drm_edid(false, prefer_conn) {
         return (ppi, PpiSource::EdidCm);
     }
     (96.0, PpiSource::Fallback96)
@@ -656,25 +1039,37 @@ pub fn physical_mfd_layout(backend: TermBackend, inches: f32) -> PhysicalFace {
 }
 
 /// Read connected DRM EDID → PPI.
-/// `prefer_detailed`: use detailed-timing mm when present (more accurate than cm fields).
-fn ppi_from_drm_edid(prefer_detailed: bool) -> Option<f32> {
+///
+/// `prefer_detailed`: use detailed-timing mm when present (more accurate than cm).
+/// `prefer_connector`: connector suffix such as `HDMI-A-1` (from compositor).
+///
+/// Mode selection (never blind `modes` line 0 alone):
+/// 1. Compositor current mode for the preferred connector (when available)
+/// 2. Largest mode listed under sysfs `modes` (native / max density heuristic)
+/// 3. Preferred (first) mode as last resort
+fn ppi_from_drm_edid(prefer_detailed: bool, prefer_connector: Option<&str>) -> Option<f32> {
     let drm = std::path::Path::new("/sys/class/drm");
     let entries = std::fs::read_dir(drm).ok()?;
-    let mut best: Option<f32> = None;
+
+    let host = host_display();
+    let host_mode = host.as_ref().map(|h| (h.name.as_str(), h.mode_w, h.mode_h));
+
+    let mut candidates: Vec<(i32, f32)> = Vec::new();
     for ent in entries.flatten() {
         let path = ent.path();
-        let name = path.file_name()?.to_string_lossy();
+        let name = path.file_name()?.to_string_lossy().into_owned();
         if !name.contains('-') {
             continue;
         }
+        let conn = drm_connector_suffix(&name);
         let status = std::fs::read_to_string(path.join("status")).ok()?;
         if !status.trim().eq_ignore_ascii_case("connected") {
             continue;
         }
         let edid = std::fs::read(path.join("edid")).ok()?;
-        let modes = std::fs::read_to_string(path.join("modes")).ok()?;
-        let line = modes.lines().next()?;
-        let (rw, rh) = parse_mode_wh(line)?;
+        let modes_txt = std::fs::read_to_string(path.join("modes")).ok()?;
+        let phys = edid_physical_mm(&edid);
+        let (rw, rh) = select_drm_mode(&modes_txt, conn, host_mode, phys)?;
 
         let ppi = if prefer_detailed {
             edid_ppi_detailed(&edid, rw, rh)
@@ -682,17 +1077,114 @@ fn ppi_from_drm_edid(prefer_detailed: bool) -> Option<f32> {
             edid_ppi_cm(&edid, rw, rh)
         };
         if let Some(p) = ppi {
-            best = Some(match best {
-                Some(b) => b.max(p), // prefer denser / primary often listed first; take max valid
-                None => p,
-            });
-            // Prefer first connected with a good detailed size
-            if prefer_detailed {
-                return Some(p);
+            let mut rank = 0i32;
+            if prefer_connector
+                .map(|p| conn.eq_ignore_ascii_case(p))
+                .unwrap_or(false)
+            {
+                rank += 100;
+            }
+            if !conn.starts_with("eDP") {
+                rank += 10;
+            }
+            candidates.push((rank, p));
+        }
+    }
+    candidates.sort_by_key(|a| std::cmp::Reverse(a.0));
+    candidates.into_iter().next().map(|(_, p)| p)
+}
+
+/// `card0-HDMI-A-1` → `HDMI-A-1`
+fn drm_connector_suffix(sysfs_name: &str) -> &str {
+    if let Some(rest) = sysfs_name.strip_prefix("card") {
+        if let Some(idx) = rest.find('-') {
+            return &rest[idx + 1..];
+        }
+    }
+    sysfs_name
+}
+
+/// Pick pixel mode for PPI: host current → aspect-matched max → first line.
+fn select_drm_mode(
+    modes_txt: &str,
+    conn: &str,
+    host_mode: Option<(&str, u32, u32)>,
+    phys_mm: Option<(f32, f32)>,
+) -> Option<(u32, u32)> {
+    if let Some((host_name, mw, mh)) = host_mode {
+        if conn.eq_ignore_ascii_case(host_name) && mw >= 320 && mh >= 200 {
+            return Some((mw, mh));
+        }
+    }
+    let target_ar = phys_mm.and_then(|(pw, ph)| {
+        if pw >= 50.0 && ph >= 50.0 {
+            Some(pw / ph)
+        } else {
+            None
+        }
+    });
+    // Score: lower aspect error is better; then larger area.
+    let mut best: Option<(u32, u32, f32, u64)> = None; // w,h,ar_err,area
+    let mut first: Option<(u32, u32)> = None;
+    for line in modes_txt.lines() {
+        if let Some((w, h)) = parse_mode_wh(line) {
+            if h == 0 {
+                continue;
+            }
+            if first.is_none() {
+                first = Some((w, h));
+            }
+            let area = w as u64 * h as u64;
+            let ar_err = match target_ar {
+                Some(tar) => {
+                    let ar = w as f32 / h as f32;
+                    ((ar / tar) - 1.0).abs()
+                }
+                None => 0.0,
+            };
+            let better = match best {
+                None => true,
+                Some((_, _, e, a)) => {
+                    if target_ar.is_some() {
+                        ar_err + 1e-6 < e || ((ar_err - e).abs() < 1e-3 && area > a)
+                    } else {
+                        area > a
+                    }
+                }
+            };
+            if better {
+                best = Some((w, h, ar_err, area));
             }
         }
     }
-    best
+    best.map(|(w, h, _, _)| (w, h)).or(first)
+}
+
+/// Panel size in mm from EDID detailed descriptors or cm fields.
+fn edid_physical_mm(edid: &[u8]) -> Option<(f32, f32)> {
+    if edid.len() >= 126 {
+        for base in [54, 72, 90, 108] {
+            if base + 17 >= edid.len() {
+                break;
+            }
+            if edid[base] == 0 && edid[base + 1] == 0 {
+                continue;
+            }
+            let h_mm = edid[base + 12] as u16 | (((edid[base + 14] as u16) & 0xF0) << 4);
+            let v_mm = edid[base + 13] as u16 | (((edid[base + 14] as u16) & 0x0F) << 8);
+            if h_mm >= 50 && v_mm >= 50 {
+                return Some((h_mm as f32, v_mm as f32));
+            }
+        }
+    }
+    if edid.len() >= 0x17 {
+        let h_cm = edid[0x15] as f32;
+        let v_cm = edid[0x16] as f32;
+        if h_cm >= 5.0 && v_cm >= 5.0 {
+            return Some((h_cm * 10.0, v_cm * 10.0));
+        }
+    }
+    None
 }
 
 fn edid_ppi_cm(edid: &[u8], mode_w: u32, mode_h: u32) -> Option<f32> {
@@ -704,39 +1196,43 @@ fn edid_ppi_cm(edid: &[u8], mode_w: u32, mode_h: u32) -> Option<f32> {
     if h_cm < 5.0 || v_cm < 5.0 {
         return None;
     }
-    let ppi_w = mode_w as f32 / (h_cm / 2.54);
-    let ppi_h = mode_h as f32 / (v_cm / 2.54);
-    let ppi = (ppi_w + ppi_h) * 0.5;
-    valid_ppi(ppi)
+    ppi_from_physical_mode(h_cm * 10.0, v_cm * 10.0, mode_w, mode_h)
 }
 
-/// Detailed timing descriptors (18-byte blocks at 54,72,90,108) can store size in mm.
+/// Detailed timing descriptors (18-byte blocks at 54,72,90,108) store size in mm.
+///
+/// Uses the **caller-supplied mode** (current / max) with physical mm from a DTD.
+/// Panel size is fixed; mode pixels change with the active video mode.
 fn edid_ppi_detailed(edid: &[u8], mode_w: u32, mode_h: u32) -> Option<f32> {
     if edid.len() < 126 {
         return None;
     }
+    let mut any_mm: Option<(u16, u16)> = None;
+    let mut matched_mm: Option<(u16, u16)> = None;
     for base in [54, 72, 90, 108] {
         if base + 17 >= edid.len() {
             break;
         }
-        // Monitor descriptors have pixel clock = 0.
         if edid[base] == 0 && edid[base + 1] == 0 {
             continue;
         }
-        // Horizontal image size mm: low 8 @ +12, high 4 in +14[7:4]
-        // Vertical image size mm: low 8 @ +13, high 4 in +14[3:0]
+        let h_act = edid[base + 2] as u32 | (((edid[base + 4] as u32) & 0xF0) << 4);
+        let v_act = edid[base + 5] as u32 | (((edid[base + 7] as u32) & 0xF0) << 4);
         let h_mm = edid[base + 12] as u16 | (((edid[base + 14] as u16) & 0xF0) << 4);
         let v_mm = edid[base + 13] as u16 | (((edid[base + 14] as u16) & 0x0F) << 8);
         if h_mm < 50 || v_mm < 50 {
             continue;
         }
-        let ppi_w = mode_w as f32 / (h_mm as f32 / 25.4);
-        let ppi_h = mode_h as f32 / (v_mm as f32 / 25.4);
-        if let Some(p) = valid_ppi((ppi_w + ppi_h) * 0.5) {
-            return Some(p);
+        if any_mm.is_none() {
+            any_mm = Some((h_mm, v_mm));
+        }
+        if h_act == mode_w && v_act == mode_h {
+            matched_mm = Some((h_mm, v_mm));
+            break;
         }
     }
-    None
+    let (h_mm, v_mm) = matched_mm.or(any_mm)?;
+    ppi_from_physical_mode(h_mm as f32, v_mm as f32, mode_w, mode_h)
 }
 
 fn valid_ppi(ppi: f32) -> Option<f32> {
@@ -1387,5 +1883,66 @@ mod tests {
         assert!((w - 1528.0).abs() < 0.1 && (h - 1017.0).abs() < 0.1);
         let pid = json_number_after(j, "\"pid\"").unwrap();
         assert_eq!(pid as u32, 3183128);
+    }
+
+    #[test]
+    fn odyssey_current_mode_ppi_not_preferred() {
+        // Samsung Odyssey G91SD: current 5120×1440, phys 1190×340 mm → ~108 PPI.
+        // Preferred EDID mode 3840×1080 would wrongly yield ~81 PPI.
+        let ppi_cur = ppi_from_physical_mode(1190.0, 340.0, 5120, 1440).expect("current");
+        let ppi_pref = ppi_from_physical_mode(1190.0, 340.0, 3840, 1080).expect("preferred");
+        assert!((ppi_cur - 108.4).abs() < 1.0, "current ppi={ppi_cur}");
+        assert!((ppi_pref - 81.3).abs() < 1.0, "preferred ppi={ppi_pref}");
+        let side = 4.0 * ppi_cur;
+        assert!((side - 433.7).abs() < 4.0, "4\" side px={side}");
+        assert!(ppi_cur > ppi_pref * 1.2);
+    }
+
+    #[test]
+    fn select_drm_mode_prefers_host_then_aspect() {
+        let modes = "3840x1080\n3840x2160\n5120x1440\n1920x1080\n";
+        let phys = Some((1190.0_f32, 340.0_f32)); // Odyssey aspect ~3.5
+        let (w, h) =
+            select_drm_mode(modes, "HDMI-A-1", Some(("HDMI-A-1", 5120, 1440)), phys).unwrap();
+        assert_eq!((w, h), (5120, 1440));
+        // No host: prefer aspect match to panel (5120×1440), not max area (3840×2160).
+        let (w2, h2) = select_drm_mode(modes, "HDMI-A-1", None, phys).unwrap();
+        assert_eq!((w2, h2), (5120, 1440), "aspect-matched mode");
+        let (w3, h3) =
+            select_drm_mode(modes, "eDP-1", Some(("HDMI-A-1", 5120, 1440)), phys).unwrap();
+        assert_eq!((w3, h3), (5120, 1440), "host name mismatch → aspect");
+    }
+
+    #[test]
+    fn drm_connector_suffix_strips_card_prefix() {
+        assert_eq!(drm_connector_suffix("card0-HDMI-A-1"), "HDMI-A-1");
+        assert_eq!(drm_connector_suffix("card1-eDP-1"), "eDP-1");
+    }
+
+    #[test]
+    fn niri_mode_index_parses() {
+        let slice = r#"{
+            "name":"HDMI-A-1",
+            "physical_size":[1190,340],
+            "current_mode":4,
+            "modes":[
+                {"width":3840,"height":1080,"refresh_rate":119959},
+                {"width":3840,"height":2160,"refresh_rate":59940},
+                {"width":3840,"height":2160,"refresh_rate":29970},
+                {"width":5120,"height":1440,"refresh_rate":143987},
+                {"width":5120,"height":1440,"refresh_rate":119985}
+            ],
+            "logical":{"scale":1.0}
+        }"#;
+        let (w, h) = niri_mode_at(slice, 4).expect("mode 4");
+        assert_eq!((w, h), (5120, 1440));
+        let (w0, h0) = niri_mode_at(slice, 0).unwrap();
+        assert_eq!((w0, h0), (3840, 1080));
+        let wrapped = format!("{{\"HDMI-A-1\":{slice}}}");
+        let host = niri_parse_one_output(&wrapped, "HDMI-A-1").expect("parse");
+        assert_eq!(host.mode_w, 5120);
+        assert_eq!(host.mode_h, 1440);
+        let ppi = host.ppi().unwrap();
+        assert!((ppi - 108.4).abs() < 1.0, "ppi={ppi}");
     }
 }

@@ -184,13 +184,24 @@ viewport cells chosen so on-glass width = height = side
 | `MFD_PX_SCALE=0.76` | **Force** device_px per terminal winsize px (use if the face is still wrong) |
 | `MFD_MAX_W` / `MFD_MAX_H` | Cap FB (default **1024**) |
 
-PPI detection: `MFD_PPI` → EDID detailed mm → EDID cm → 96 (not accurate).
+PPI detection order:
 
-**Pixel space:** EDID PPI is panel **device** pixels. Ghostty `TIOCGWINSZ` is often **buffer** pixels at a different content scale than the compositor (e.g. content ~2, niri scale 1.5). The layout converts winsize cells to device pixels via the compositor window size when available (`niri` / `hyprctl` / `swaymsg`), or `MFD_PX_SCALE`.
+1. `MFD_PPI` (manual ruler calibration)
+2. Compositor **host** output: current mode × physical size mm (niri / Hypr / sway)
+3. DRM EDID mm/cm with **current/max** mode (not preferred-only), prefer host connector
+4. Fallback **96** (not accurate)
 
-Startup example:
+Dual-head and multi-mode panels need step 2. Example: Odyssey at `5120×1440` is ~108 PPI; EDID preferred `3840×1080` is ~81 PPI and must not be used alone. Laptop eDP PPI must not be used when the window is on HDMI.
+
+**Pixel space:** EDID/compositor PPI is panel **device** pixels. Ghostty `TIOCGWINSZ` is often **buffer** pixels at a different content scale than the compositor (e.g. content ~2, niri scale 1.5). The layout converts winsize cells to device pixels via the **same host output** scale when available, or `MFD_PX_SCALE`.
+
+Startup example (laptop eDP ~188 PPI):
 ```text
-ruler face 4.00" @ 191.2 ppi (EDID-cm)  px×0.763 (compositor)  cell 14.5×32.1dev  → 765×765px  cells 53×24  on-glass 4.00"×4.00"
+ruler face 4.00" @ 188.0 ppi (compositor)  px×0.763 (compositor)  → 752×752px  cells …  on-glass 4.00"
+```
+Startup example (Odyssey G91SD @ 5120×1440 ~108 PPI):
+```text
+ruler face 4.00" @ 108.4 ppi (compositor)  px×1.000 (compositor)  → 434×434px  cells …  on-glass 4.00"
 ```
 If the terminal is too small: `on-glass` drops and `[clipped to window]` is printed.
 
