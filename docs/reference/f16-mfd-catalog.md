@@ -6,17 +6,15 @@
 
 ## Public sources (start here)
 
-| Source | Notes |
-|--------|--------|
-| **`docs/HAF-F16.pdf`** = T.O. **GR1F16CJ-1** | HAF F-16C/D **basic** flight manual. **Does not contain MFD page art.** § Multfunction Display (1-222) only covers video select on the right MFD and defers detail to **T.O. GR1F16CJ-34-1-1** (Avionics and Nonnuclear Weapons Delivery). |
-| T.O. **GR1F16CJ-34-1-1** | Detailed MFD / SMS / FCR / TGP book. Often restricted; not in this repo. |
-| [DCS F-16C Early Access Guide](https://www.digitalcombatsimulator.com/) (Eagle Dynamics, public PDF) | Full **public** MFD format descriptions + OSB maps (study layout only). Distilled: `docs/reference/dcs-f16-mfd-notes.md` |
-| [Chuck’s F-16C Viper Guide](https://chucksguides.com/aircraft/dcs/f-16cm/) | Public training screenshots of FCR/HSD/SMS/TGP |
-| [Hoggit MFD wiki](https://wiki.hoggitworld.com/view/MFDs_(Typical)) | Master Menu OSB map |
-| [Internet Archive: F-16 flight manual](https://archive.org/search?query=F-16+flight+manual) | Search `1F-16`, `GR1F16`, `34-1-1` |
-| USAF / DVIDS / commons cockpit photos | Real chrome / color only — not full format dumps |
+| Source | Role for this library |
+|--------|------------------------|
+| **`docs/246416220-F16-MLU-M1-Pilot-s-Manual.pdf`** | **Primary CMFD SoT** — OSB numbering, format select (12/13/14), Master Menu, Table 1-1 colors, HSD/SMS/FCR figures. Digest: [`mlu-m1-cmfd.md`](mlu-m1-cmfd.md) |
+| **`docs/HAF-F16.pdf`** = T.O. **GR1F16CJ-1** | Basic flight manual. **Not** full MFD art; defers to **GR1F16CJ-34-1-1**. |
+| [Blu3wolf/F4-SMS](https://github.com/Blu3wolf/F4-SMS) | SMS sub-page list + **each page sets OSB labels** on enter |
+| [DCS F-16C Early Access Guide](https://www.digitalcombatsimulator.com/) | Extra public format detail. Distilled: `dcs-f16-mfd-notes.md` |
+| Chuck’s / Hoggit | Training screenshots / Master Menu map |
 
-**Library implementation is a study approximation** of public training layouts. It is **not** certified flight data and **not** a dump of classified TO figures.
+**Architecture:** reusable **widgets** + **page layouts** (OSB map + placement). Format select is first-class (`FormatSelect`). Study approximation — not certified flight data.
 
 ## Bezel layout (library model)
 
