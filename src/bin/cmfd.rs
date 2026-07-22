@@ -563,6 +563,7 @@ fn print_banner(ver: &str) {
 fn log_ruler(face: &mfd::PhysicalFace, cols: u16, rows: u16, w: u32, h: u32) {
     let src = match face.ppi_source {
         PpiSource::Env => "MFD_PPI",
+        PpiSource::Compositor => "compositor",
         PpiSource::EdidDetailed => "EDID-mm",
         PpiSource::EdidCm => "EDID-cm",
         PpiSource::Fallback96 => "fallback-96",
