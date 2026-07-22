@@ -1,11 +1,13 @@
 /* SPDX-License-Identifier: MIT
- * VGE — calligraphic vector graphics engine
+ * VGE — pure assembly vector graphics engine
  *
- * PRODUCT: pure assembly library (libvge) with this C ABI.
- * Link: -lvge -lm
- * Language bindings (Rust, etc.) are thin FFI only — not the core.
+ * PRODUCT = libvge (asm/x86_64/*.s only). No C. No Rust. No libc in the lib.
+ * This header is the calling convention document (System V AMD64).
  *
- * Geometry → individual pixels. Color format: 0xAARRGGBB.
+ *   make && make install
+ *   link: -lvge
+ *
+ * Color: 0xAARRGGBB. Geometry → individual pixels.
  */
 #ifndef VGE_H
 #define VGE_H
@@ -62,7 +64,7 @@ void vge_circle(VgeSurface *s, int32_t cx, int32_t cy, int32_t r, vge_color colo
 void vge_rect_fill(VgeSurface *s, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
                    vge_color color);
 
-/* --- Transform helpers (assembly; rotate uses libm sinf/cosf) --- */
+/* --- Transform helpers (pure assembly, no libm) --- */
 
 void vge_xform_identity(VgeXform *m);
 void vge_xform_translate(VgeXform *m, float tx, float ty);

@@ -1,24 +1,29 @@
-# VGE — pure assembly library (System V AMD64)
-# Product is libvge, not a Rust wrapper.
+# =============================================================================
+# VGE — PURE ASSEMBLY LIBRARY
+# =============================================================================
+# Source of the product: asm/x86_64/*.s ONLY.
+# No C. No Rust. No libc in the library.
 #
-#   make            → build/libvge.a build/libvge.so
-#   make test       → C smoke test
+#   make            → build/libvge.a  build/libvge.so
+#   make test       → pure-asm smoke (no C runtime)
 #   make install    → PREFIX (default ~/.local)
 #
-# Any language: link -lvge -lm and #include <vge.h>
+# Any language that can call the System V AMD64 C ABI can load this:
+#   #include "vge.h"
+#   -lvge
+# =============================================================================
 
-PREFIX   ?= $(HOME)/.local
-CC       ?= cc
-AS       ?= as
-AR       ?= ar
-CFLAGS   ?= -O2 -Wall -Wextra -Iinclude
-ASFLAGS  ?= --64
-LDFLAGS  ?= -Lbuild -lvge -lm
+PREFIX  ?= $(HOME)/.local
+AS      ?= as
+LD      ?= ld
+AR      ?= ar
+CC      ?= cc
 
-ASM_SRC  := asm/x86_64/vge.s asm/x86_64/vge_extra.s
-ASM_OBJ  := $(patsubst asm/x86_64/%.s,build/%.o,$(ASM_SRC))
+ASFLAGS ?= --64
+ASM_SRC := asm/x86_64/vge.s asm/x86_64/vge_extra.s
+ASM_OBJ := $(patsubst asm/x86_64/%.s,build/%.o,$(ASM_SRC))
 
-.PHONY: all clean test install shared static
+.PHONY: all clean test install static shared
 
 all: static shared
 
@@ -33,24 +38,31 @@ build/%.o: asm/x86_64/%.s | build
 
 build/libvge.a: $(ASM_OBJ)
 	$(AR) rcs $@ $(ASM_OBJ)
-	@echo "built $@"
+	@echo "OK  $@"
 
+# Shared object: pure asm, no -lc -lm
 build/libvge.so: $(ASM_OBJ)
-	$(CC) -shared -o $@ $(ASM_OBJ) -lm
-	@echo "built $@"
+	$(LD) -shared -o $@ $(ASM_OBJ)
+	@echo "OK  $@"
 
-build/smoke: examples/c/smoke.c build/libvge.a
-	$(CC) $(CFLAGS) -o $@ examples/c/smoke.c build/libvge.a -lm
+# Pure assembly smoke — no C, no Rust, no libc
+build/smoke_asm.o: examples/asm/smoke.s | build
+	$(AS) $(ASFLAGS) -o $@ $<
 
-test: build/smoke
-	./build/smoke
+build/smoke_asm: build/smoke_asm.o $(ASM_OBJ)
+	$(LD) -o $@ build/smoke_asm.o $(ASM_OBJ)
+	@echo "OK  $@"
+
+test: build/smoke_asm
+	./build/smoke_asm
+	@echo "OK  pure-asm smoke exit 0"
 
 install: all
 	install -d $(PREFIX)/lib $(PREFIX)/include
 	install -m 644 build/libvge.a $(PREFIX)/lib/
 	install -m 755 build/libvge.so $(PREFIX)/lib/
 	install -m 644 include/vge.h $(PREFIX)/include/
-	@echo "installed to $(PREFIX) — use: -I$(PREFIX)/include -L$(PREFIX)/lib -lvge -lm"
+	@echo "installed libvge → $(PREFIX)"
 
 clean:
 	rm -rf build
