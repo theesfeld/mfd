@@ -4,6 +4,7 @@
 
 ### Added
 
+- **Auto vehicle pages:** CLUSTER, FUEL/BAT, TEMPS, DRIVE, LIGHTS, TPM, BODY, CLIMATE, FLIR/CAM, OBD, SETUP. Widgets: status_grid, tire_grid, value_readout; tapes for continuous channels. FLIR via synthetic or `MFD_FLIR_PATH` PGM. Refs #58.
 - **MLU M1 visual OCR** of CMFD figures (1-14…1-38, 3-2): widgets, OSB maps, Table 1-1 colors. `docs/reference/mlu-m1-visual-ocr.md`. Ownship cyan. Refs #56.
 
 - **MLU M1 CMFD model** (Pilot’s Guide 16PR14341): `FormatSelect` OSB **12/13/14** + Master Menu, per-page OSB maps, Table 1-1 colors (`Palette.track` yellow, cyan safety, white ownship). Digest `docs/reference/mlu-m1-cmfd.md`. F4-SMS page pattern noted. Refs #54.
@@ -25,6 +26,7 @@
 
 ### Added
 
+- **Auto vehicle pages:** CLUSTER, FUEL/BAT, TEMPS, DRIVE, LIGHTS, TPM, BODY, CLIMATE, FLIR/CAM, OBD, SETUP. Widgets: status_grid, tire_grid, value_readout; tapes for continuous channels. FLIR via synthetic or `MFD_FLIR_PATH` PGM. Refs #58.
 - **MLU M1 visual OCR** of CMFD figures (1-14…1-38, 3-2): widgets, OSB maps, Table 1-1 colors. `docs/reference/mlu-m1-visual-ocr.md`. Ownship cyan. Refs #56.
 
 - F-16 format catalog + public source notes (`docs/reference/f16-mfd-catalog.md`)
@@ -39,6 +41,7 @@
 
 ### Added
 
+- **Auto vehicle pages:** CLUSTER, FUEL/BAT, TEMPS, DRIVE, LIGHTS, TPM, BODY, CLIMATE, FLIR/CAM, OBD, SETUP. Widgets: status_grid, tire_grid, value_readout; tapes for continuous channels. FLIR via synthetic or `MFD_FLIR_PATH` PGM. Refs #58.
 - **MLU M1 visual OCR** of CMFD figures (1-14…1-38, 3-2): widgets, OSB maps, Table 1-1 colors. `docs/reference/mlu-m1-visual-ocr.md`. Ownship cyan. Refs #56.
 
 - **Product rename:** library and demo are **MFD** (multi-function display)

@@ -11,7 +11,7 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-use mfd::auto::{self, AutoPage, ObdSnapshot};
+use mfd::auto::{self, AutoPage, DriveMode, GearSelect, VehicleSnapshot};
 use mfd::bezel::{BezelEvent, BezelSource, BezelState, KeyboardBezel};
 use mfd::frame::FramePacer;
 use mfd::jet::{self, Format, FormatSelect, FormatSelectAction};
@@ -37,11 +37,11 @@ fn main() -> io::Result<()> {
         eprintln!("error: mfd-demo requires pure-asm libmfd (x86_64)");
         std::process::exit(1);
     }
-    eprintln!("loaded libmfd {ver} · MLU CMFD 4x4 · format select OSB 12/13/14");
-    eprintln!("OSB 1-5 top · 6-10 right · 15-11 bot · 20-16 left · [ ] BRT");
-    eprintln!("format: press OSB 12/13/14 · press active again = Master Menu");
+    eprintln!("loaded libmfd {ver} · MLU CMFD 4x4 · jet + auto vehicle pages");
     eprintln!("Tab jet/auto · c color · g widget-QA · Esc quit");
-    eprintln!("start: FCR (slot OSB14) — MLU M1 page model");
+    eprintln!("JET: OSB 12/13/14 format select · active again = menu · m = menu");
+    eprintln!("AUTO: top CLST/FUEL/TEMP/DRV/LITE · right TPM/BODY/CLIM/FLIR/OBD");
+    eprintln!("FLIR: MFD_FLIR_PATH=/path/to/grey.pgm  (else synthetic)");
 
     install_sigint();
     // 30 Hz default keeps Kitty present from queuing into multi-second lag.
@@ -106,6 +106,7 @@ fn main() -> io::Result<()> {
     let mut fmt_sel = FormatSelect::default();
     let mut jet_fmt = fmt_sel.current();
     let mut auto_page = AutoPage::Cluster;
+    let mut vehicle = VehicleSnapshot::default();
     let mut color_mode = ColorMode::ColorMfd;
     let mut osb_tick: u32 = 0;
 
@@ -187,6 +188,46 @@ fn main() -> io::Result<()> {
                     Domain::Auto => {
                         if let Some(p) = AutoPage::from_top_osb(osb) {
                             auto_page = p;
+                        } else if let Some(p) = AutoPage::from_right_osb(osb) {
+                            auto_page = p;
+                        } else {
+                            // Page-local OSBs
+                            match (auto_page, osb) {
+                                (AutoPage::Cluster | AutoPage::Setup, 11 | 15) => {
+                                    vehicle.speed_unit = vehicle.speed_unit.cycle();
+                                }
+                                (AutoPage::Drive, 11) => vehicle.gear = GearSelect::Park,
+                                (AutoPage::Drive, 12) => vehicle.gear = GearSelect::Reverse,
+                                (AutoPage::Drive, 13) => vehicle.gear = GearSelect::Neutral,
+                                (AutoPage::Drive, 14) => vehicle.gear = GearSelect::Drive,
+                                (AutoPage::Drive, 15) => vehicle.gear = GearSelect::Manual,
+                                (AutoPage::Drive, 16) => vehicle.drive = DriveMode::FourLow,
+                                (AutoPage::Drive, 17) => vehicle.drive = DriveMode::FourHigh,
+                                (AutoPage::Drive, 18) => vehicle.drive = DriveMode::TwoHigh,
+                                (AutoPage::Lights, 11) => {
+                                    vehicle.light_interior = !vehicle.light_interior
+                                }
+                                (AutoPage::Lights, 12) => {
+                                    vehicle.light_drive = !vehicle.light_drive
+                                }
+                                (AutoPage::Lights, 13) => vehicle.light_fog = !vehicle.light_fog,
+                                (AutoPage::Lights, 14) => vehicle.light_high = !vehicle.light_high,
+                                (AutoPage::Lights, 15) => vehicle.light_low = !vehicle.light_low,
+                                (AutoPage::Clim, 16) => {
+                                    vehicle.hvac_fan = (vehicle.hvac_fan - 0.1).max(0.0)
+                                }
+                                (AutoPage::Clim, 17) => {
+                                    vehicle.hvac_fan = (vehicle.hvac_fan + 0.1).min(1.0)
+                                }
+                                (AutoPage::Clim, 18) => {
+                                    vehicle.hvac_defrost = !vehicle.hvac_defrost
+                                }
+                                (AutoPage::Clim, 20) => vehicle.hvac_ac = !vehicle.hvac_ac,
+                                (AutoPage::Setup, 10) | (_, 10) if auto_page == AutoPage::Obd => {
+                                    auto_page = AutoPage::Setup
+                                }
+                                _ => {}
+                            }
                         }
                     }
                 }
@@ -194,6 +235,22 @@ fn main() -> io::Result<()> {
         }
 
         let t = t0.elapsed().as_secs_f32();
+        // Live demo motion; keep operator gear/drive/lights toggles.
+        let mut live = auto::demo_vehicle(t);
+        live.speed_unit = vehicle.speed_unit;
+        live.gear = vehicle.gear;
+        live.gear_num = vehicle.gear_num;
+        live.drive = vehicle.drive;
+        live.light_low = vehicle.light_low;
+        live.light_high = vehicle.light_high;
+        live.light_drive = vehicle.light_drive;
+        live.light_fog = vehicle.light_fog;
+        live.light_interior = vehicle.light_interior;
+        live.hvac_ac = vehicle.hvac_ac;
+        live.hvac_defrost = vehicle.hvac_defrost;
+        live.hvac_fan = vehicle.hvac_fan;
+        vehicle = live;
+
         let pal = Palette::new(color_mode);
         let mut page = Page::new(&mut panel);
         page.font_px = if w.min(h) >= 480 { 14.0 } else { 12.0 };
@@ -203,18 +260,7 @@ fn main() -> io::Result<()> {
                 jet::draw_format_sel(&mut page, jet_fmt, &pal, &bezel, t, Some(&fmt_sel))
             }
             Domain::Auto => {
-                let obd = ObdSnapshot {
-                    rpm: 0.2 + 0.55 * (0.5 + 0.5 * (t * 0.6).sin()),
-                    speed: 0.3 + 0.4 * (0.5 + 0.5 * (t * 0.35).sin()),
-                    fuel: 0.62 + 0.08 * (t * 0.1).cos(),
-                    coolant: 0.5 + 0.1 * (t * 0.15).sin(),
-                    trans_temp: 0.4 + 0.12 * (t * 0.2).cos(),
-                    battery: 0.55 + 0.05 * (t * 0.25).sin(),
-                    throttle: 0.3 + 0.4 * (0.5 + 0.5 * (t * 0.8).sin()),
-                    load: 0.35 + 0.3 * (0.5 + 0.5 * (t * 0.55).cos()),
-                    dtc_count: 0,
-                };
-                auto::draw_auto(&mut page, auto_page, &pal, &bezel, &obd);
+                auto::draw_auto(&mut page, auto_page, &pal, &bezel, &vehicle, t);
             }
         }
 
