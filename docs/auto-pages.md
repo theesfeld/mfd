@@ -17,11 +17,11 @@ The spreadsheet is **Ford As-Built** vocabulary, not a full live PID dump. Live 
 
 | Bank | Pages | Content |
 |------|-------|---------|
-| **ENG** | ENG | RPM, load, TPS, MAF, oil/coolant (powerplant) |
-| **FUEL** | FUEL | Fuel %, pressure, battery, load (energy) |
-| **FLUID** | FLUID | Oil, coolant, TFT, IAT, EGT, ambient |
-| **ELEC** | ELEC | Battery V, load %, module voltage |
-| **DRV** | DRV | Gear, 4WD, speed, RPM cue |
+| **ENG** | ENG | Large RPM gauge + dense ENG numerics |
+| **FUEL** | FUEL | Big fuel % + FP + tape + matrix |
+| **FLUID** | FLUID | Four temp gauges (OIL/ECT/TFT/IAT) + matrix |
+| **ELEC** | ELEC | Battery gauge + load tape + strip |
+| **DRV** | DRV | Speed gauge + gear + RPM tape + matrix |
 | **CHAS** | CHAS | TPM, wheel speeds, brake/park |
 | **BODY** | BODY | Doors, belts |
 | **LITE** | LITE | Exterior/interior lamps |

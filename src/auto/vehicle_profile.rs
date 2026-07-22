@@ -86,13 +86,16 @@ fn load_feature_labels(path: &Path) -> Vec<String> {
 }
 
 /// Short labels for SETUP list (fit glass).
+/// Prefer live [`crate::auto::VehicleSnapshot::bus_link_lines`] when OBD is up.
 pub fn setup_help_lines(max: usize) -> Vec<String> {
     let mut lines = Vec::new();
     lines.push(identity_line());
     lines.push(format!("OBD BT  {OBD_BT_MAC}"));
+    lines.push("BT CH   1  (MFD_OBD_BT_CHANNEL)".into());
+    lines.push("ENV     MFD_OBD_BT / PORT / REPLAY".into());
     lines.push("DISPLAY ONLY  no As-Built write".into());
     lines.push("FEATURES (ref labels)".into());
-    for lab in asbuilt_feature_labels().iter().take(max.saturating_sub(4)) {
+    for lab in asbuilt_feature_labels().iter().take(max.saturating_sub(6)) {
         // trim long names for mono face
         let s = if lab.len() > 28 {
             format!("{}…", &lab[..27])
@@ -101,7 +104,7 @@ pub fn setup_help_lines(max: usize) -> Vec<String> {
         };
         lines.push(s);
     }
-    if lines.len() == 4 {
+    if lines.len() == 6 {
         lines.push("(no Common.csv labels)".into());
     }
     lines

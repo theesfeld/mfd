@@ -346,20 +346,16 @@ fn main() -> io::Result<()> {
                 Some(&caps_now),
                 Some(&active),
             );
-            let feed = if use_obd { "OBD" } else { "DEMO" };
             let cam = if cam_frame.is_some() { "CAM" } else { "SYN" };
             let aw = if active.is_empty() {
                 String::new()
             } else {
                 format!(" · {}", active[0].label)
             };
-            let status = format!(
-                "{} · {} · {}{aw} · n/p · [ ] BRT",
-                auto_page.title(),
-                feed,
-                cam
-            );
-            draw_demo_status(page.surface, &status, pal.dim, font_px * 0.6);
+            // Live BT / bus link on every page (OWN has the full block).
+            let link = vehicle.bus_status_short();
+            let status = format!("{} · {link} · {}{aw} · o=OWN", auto_page.title(), cam);
+            draw_demo_status(page.surface, &status, pal.dim, font_px * 0.55);
         }
 
         panel.apply_brightness(bezel.brightness.clamp(0.05, 1.0));

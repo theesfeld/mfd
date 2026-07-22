@@ -1,7 +1,7 @@
 # MFD — multi-function display library
 
 <!-- agents:status:begin -->
-> **Status:** active · `0.1.0-dev.1` · **vehicle CMFD** systems pages · display-only · [#86](https://github.com/theesfeld/mfd/issues/86) · MIT
+> **Status:** active · `0.1.0-dev.1` · **vehicle CMFD** · drive capture · display-only · [#93](https://github.com/theesfeld/mfd/issues/93) · MIT
 <!-- agents:status:end -->
 
 ## What this is
@@ -26,6 +26,24 @@ Composable **instrument pages** for:
 | **[docs/reference/f16-mfd-catalog.md](docs/reference/f16-mfd-catalog.md)** | Formats, OSB map, public manual sources |
 | **[docs/reference/mfd-photo-index.md](docs/reference/mfd-photo-index.md)** | Public photo search index |
 
+## Drive day (one command)
+
+```bash
+cd ~/Projects/mfd
+./cmfd.sh
+```
+
+Release build + live vehicle CMFD + **crush OBD/UDS capture** under `captures/drive-TIMESTAMP/`.  
+Quit with Esc. After the commute, parse that directory.
+
+| Mode | Command |
+|------|---------|
+| Drive (default) | `./cmfd.sh` |
+| Headless maximal capture | `./cmfd.sh capture --seconds 7200` |
+| Glass only | `./cmfd.sh glass` |
+
+Full notes: **[docs/drive-day.md](docs/drive-day.md)**.
+
 ## Build and demo
 
 ```bash
@@ -36,8 +54,7 @@ cargo run --release --bin mfd-demo
 MFD_TERM=kitty cargo run --release --bin mfd-demo
 ```
 
-Default demo: **AUTO vehicle MFD** (CLUSTER), **30 Hz**.  
-`MFD_DOMAIN=jet` starts on jet FCR instead.
+Default demo: **AUTO vehicle MFD** (ENG bank), **30 Hz**.
 
 ### Auto pages (default) — jump keys
 
@@ -71,6 +88,8 @@ OSB (auto): top CLST…LITE · right TPM/BODY/CLIM/FLIR/**RNG** · left OBD/SET/
 | `MFD_CAMERA=/dev/video0` or `auto` | Live V4L2 → FLIR |
 | `MFD_FLIR_PATH=grey.pgm` | Still greyscale |
 | `MFD_OBD_BT` / `MFD_OBD_PORT` / `MFD_OBD_REPLAY` | Live OBD (native stack) → vehicle pages |
+| `MFD_OBD_CAPTURE=dir` | Log frames/signals while glass runs (one BT client) |
+| `MFD_OBD_CRUSH=1` | Discover all Mode 01 PIDs + multi-module UDS |
 | `MFD_RANGE=2.1,3,2.8,1.2` | Range page (m) |
 | `MFD_AUTO_PAGE=FLIR` | Start page |
 

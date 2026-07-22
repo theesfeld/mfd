@@ -105,6 +105,11 @@ impl CaptureWriter {
         serde_json::to_writer(&mut self.frames, &f).map_err(|e| Error::Protocol(e.to_string()))?;
         writeln!(self.frames)?;
         self.frame_count += 1;
+        // Keep capture durable on kill / power loss (drive logs).
+        if self.frame_count % 8 == 0 {
+            let _ = self.frames.flush();
+            let _ = self.signals.flush();
+        }
         Ok(())
     }
 
@@ -129,6 +134,21 @@ impl CaptureWriter {
             bus
         )?;
         Ok(())
+    }
+
+    /// Force flush open capture files to disk.
+    pub fn flush(&mut self) -> Result<()> {
+        self.frames.flush()?;
+        self.signals.flush()?;
+        Ok(())
+    }
+
+    pub fn frame_count(&self) -> u64 {
+        self.frame_count
+    }
+
+    pub fn dir(&self) -> &Path {
+        &self.dir
     }
 
     pub fn finish(mut self) -> Result<PathBuf> {

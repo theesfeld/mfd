@@ -41,17 +41,22 @@ pub fn all_channels(v: &VehicleSnapshot) -> Vec<Channel> {
         });
     };
 
-    // ENG
+    // ENG — dense powerplant numerics
     push(&mut c, "ENG", "RPM", f0(v.rpm), "rpm");
     push(&mut c, "ENG", "RDLN", f0(v.rpm_redline), "rpm");
     push(&mut c, "ENG", "LOAD", f0(v.load * 100.0), "%");
     push(&mut c, "ENG", "TPS", f0(v.throttle * 100.0), "%");
     push(&mut c, "ENG", "MAF", f1(v.maf_gps), "g/s");
+    push(&mut c, "ENG", "ECT", f0(v.coolant_c), "C");
+    push(&mut c, "ENG", "OIL", f0(v.oil_temp_c), "C");
+    push(&mut c, "ENG", "IAT", f0(v.iat_c), "C");
     // FUEL / ELEC
     push(&mut c, "FUEL", "FUEL", f0(v.fuel * 100.0), "%");
     push(&mut c, "FUEL", "FP", f0(v.fuel_pressure_kpa), "kPa");
+    push(&mut c, "FUEL", "BATT", f1(v.battery_v), "V");
     push(&mut c, "ELEC", "BATT", f1(v.battery_v), "V");
     push(&mut c, "ELEC", "LOAD", f0(v.load * 100.0), "%");
+    push(&mut c, "ELEC", "MAF", f1(v.maf_gps), "g/s");
     // FLUID
     push(&mut c, "FLUID", "OIL", f0(v.oil_temp_c), "C");
     push(&mut c, "FLUID", "ECT", f0(v.coolant_c), "C");
@@ -59,6 +64,7 @@ pub fn all_channels(v: &VehicleSnapshot) -> Vec<Channel> {
     push(&mut c, "FLUID", "IAT", f0(v.iat_c), "C");
     push(&mut c, "FLUID", "EGT", f0(v.exhaust_temp_c), "C");
     push(&mut c, "FLUID", "AAT", f0(v.temp_out_c), "C");
+    push(&mut c, "FLUID", "CAB", f0(v.temp_in_c), "C");
     // DRV
     push(
         &mut c,
@@ -67,6 +73,8 @@ pub fn all_channels(v: &VehicleSnapshot) -> Vec<Channel> {
         f0(v.speed_unit.from_mph(v.speed_mph)),
         v.speed_unit.name(),
     );
+    push(&mut c, "DRV", "RPM", f0(v.rpm), "rpm");
+    push(&mut c, "DRV", "TPS", f0(v.throttle * 100.0), "%");
     push(&mut c, "DRV", "GEAR", v.gear.label().into(), "");
     push(&mut c, "DRV", "GNUM", format!("{}", v.gear_num), "");
     push(&mut c, "DRV", "4WD", v.drive.label().into(), "");
@@ -144,6 +152,44 @@ pub fn all_channels(v: &VehicleSnapshot) -> Vec<Channel> {
         "",
     );
     push(&mut c, "BIT", "DTC", format!("{}", v.dtc_count), "");
+    // LINK / Bluetooth
+    push(&mut c, "LINK", "STATE", v.bus_state.clone(), "");
+    push(&mut c, "LINK", "KIND", v.bus_kind.clone(), "");
+    push(
+        &mut c,
+        "LINK",
+        "ADDR",
+        if v.bus_addr.is_empty() {
+            "—".into()
+        } else {
+            v.bus_addr.clone()
+        },
+        "",
+    );
+    push(&mut c, "LINK", "CH", v.bus_channel.clone(), "");
+    push(
+        &mut c,
+        "LINK",
+        "ADPT",
+        if v.bus_adapter.is_empty() {
+            "—".into()
+        } else {
+            v.bus_adapter.clone()
+        },
+        "",
+    );
+    push(
+        &mut c,
+        "LINK",
+        "PROT",
+        if v.bus_proto.is_empty() {
+            "—".into()
+        } else {
+            v.bus_proto.clone()
+        },
+        "",
+    );
+    push(&mut c, "LINK", "TICK", format!("{}", v.bus_ticks), "");
     let _ = (GearSelect::Park, DriveMode::TwoHigh);
     c
 }

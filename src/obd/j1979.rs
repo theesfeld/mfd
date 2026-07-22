@@ -34,8 +34,47 @@ pub const PRIORITY_PIDS: &[u8] = &[
     0x46, // Ambient
 ];
 
+/// Mode 01 support PIDs used to discover available channels (J1979).
+pub const SUPPORT_PIDS: &[u8] = &[0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0];
+
+/// Parse Mode 01 support response `41 XX <4 bytes bitmap>` → list of supported PIDs.
+///
+/// For support PID `base` (0x00, 0x20, …), bit 7 of first data byte = PID `base+1`.
+pub fn parse_support_bitmap(support_pid: u8, payload: &[u8]) -> Vec<u8> {
+    // Expect 41 <support_pid> b0 b1 b2 b3
+    if payload.len() < 6 || payload[0] != 0x41 {
+        return Vec::new();
+    }
+    let base = payload[1];
+    if base != support_pid {
+        // still try using payload[1] as base
+    }
+    let base = support_pid;
+    let map = &payload[2..payload.len().min(6)];
+    let mut out = Vec::new();
+    for (i, &b) in map.iter().enumerate() {
+        for bit in 0..8 {
+            if b & (0x80u8 >> bit) != 0 {
+                let pid = base
+                    .saturating_add(1)
+                    .saturating_add((i as u8) * 8 + bit as u8);
+                if pid != 0 {
+                    out.push(pid);
+                }
+            }
+        }
+    }
+    out
+}
+
 pub fn pid_def(pid: u8) -> Option<PidDef> {
     Some(match pid {
+        0x03 => PidDef {
+            pid,
+            name: "fuel_system_status",
+            unit: "",
+            bytes: 2,
+        },
         0x04 => PidDef {
             pid,
             name: "engine_load",
@@ -48,6 +87,30 @@ pub fn pid_def(pid: u8) -> Option<PidDef> {
             unit: "C",
             bytes: 1,
         },
+        0x06 => PidDef {
+            pid,
+            name: "stft_b1",
+            unit: "%",
+            bytes: 1,
+        },
+        0x07 => PidDef {
+            pid,
+            name: "ltft_b1",
+            unit: "%",
+            bytes: 1,
+        },
+        0x0A => PidDef {
+            pid,
+            name: "fuel_pressure",
+            unit: "kPa",
+            bytes: 1,
+        },
+        0x0B => PidDef {
+            pid,
+            name: "map",
+            unit: "kPa",
+            bytes: 1,
+        },
         0x0C => PidDef {
             pid,
             name: "engine_rpm",
@@ -58,6 +121,12 @@ pub fn pid_def(pid: u8) -> Option<PidDef> {
             pid,
             name: "vehicle_speed",
             unit: "km/h",
+            bytes: 1,
+        },
+        0x0E => PidDef {
+            pid,
+            name: "timing_advance",
+            unit: "deg",
             bytes: 1,
         },
         0x0F => PidDef {
@@ -78,10 +147,34 @@ pub fn pid_def(pid: u8) -> Option<PidDef> {
             unit: "%",
             bytes: 1,
         },
+        0x1F => PidDef {
+            pid,
+            name: "run_time",
+            unit: "s",
+            bytes: 2,
+        },
+        0x21 => PidDef {
+            pid,
+            name: "distance_mil",
+            unit: "km",
+            bytes: 2,
+        },
+        0x23 => PidDef {
+            pid,
+            name: "fuel_rail_pressure",
+            unit: "kPa",
+            bytes: 2,
+        },
         0x2F => PidDef {
             pid,
             name: "fuel_level",
             unit: "%",
+            bytes: 1,
+        },
+        0x33 => PidDef {
+            pid,
+            name: "baro",
+            unit: "kPa",
             bytes: 1,
         },
         0x42 => PidDef {
@@ -90,10 +183,52 @@ pub fn pid_def(pid: u8) -> Option<PidDef> {
             unit: "V",
             bytes: 2,
         },
+        0x43 => PidDef {
+            pid,
+            name: "abs_load",
+            unit: "%",
+            bytes: 2,
+        },
+        0x45 => PidDef {
+            pid,
+            name: "throttle_rel",
+            unit: "%",
+            bytes: 1,
+        },
         0x46 => PidDef {
             pid,
             name: "ambient_temp",
             unit: "C",
+            bytes: 1,
+        },
+        0x47 => PidDef {
+            pid,
+            name: "throttle_abs_b",
+            unit: "%",
+            bytes: 1,
+        },
+        0x49 => PidDef {
+            pid,
+            name: "accel_pedal_d",
+            unit: "%",
+            bytes: 1,
+        },
+        0x4A => PidDef {
+            pid,
+            name: "accel_pedal_e",
+            unit: "%",
+            bytes: 1,
+        },
+        0x4C => PidDef {
+            pid,
+            name: "throttle_cmd",
+            unit: "%",
+            bytes: 1,
+        },
+        0x5A => PidDef {
+            pid,
+            name: "accel_pedal",
+            unit: "%",
             bytes: 1,
         },
         0x5C => PidDef {
@@ -101,6 +236,12 @@ pub fn pid_def(pid: u8) -> Option<PidDef> {
             name: "oil_temp",
             unit: "C",
             bytes: 1,
+        },
+        0x5E => PidDef {
+            pid,
+            name: "fuel_rate",
+            unit: "L/h",
+            bytes: 2,
         },
         _ => return None,
     })
@@ -118,27 +259,53 @@ pub fn decode_mode01(payload: &[u8]) -> Result<LiveValue> {
     }
     let pid = payload[1];
     let data = &payload[2..];
-    let def = pid_def(pid).ok_or_else(|| Error::Decode(format!("unknown PID {pid:02X}")))?;
-    if data.len() < def.bytes as usize {
-        return Err(Error::Decode(format!(
-            "PID {pid:02X} needs {} bytes, got {}",
-            def.bytes,
-            data.len()
-        )));
+    if let Some(def) = pid_def(pid) {
+        if data.len() < def.bytes as usize {
+            return Err(Error::Decode(format!(
+                "PID {pid:02X} needs {} bytes, got {}",
+                def.bytes,
+                data.len()
+            )));
+        }
+        let value = match pid {
+            0x03 => data[0] as f64,
+            0x04 | 0x11 | 0x2F | 0x45 | 0x47 | 0x49 | 0x4A | 0x4C | 0x5A => {
+                data[0] as f64 * 100.0 / 255.0
+            }
+            0x05 | 0x0F | 0x46 | 0x5C => data[0] as f64 - 40.0,
+            0x06 | 0x07 => data[0] as f64 * 100.0 / 128.0 - 100.0,
+            0x0A => data[0] as f64 * 3.0,
+            0x0B | 0x0D | 0x33 => data[0] as f64,
+            0x0C => ((data[0] as u16) << 8 | data[1] as u16) as f64 / 4.0,
+            0x0E => data[0] as f64 / 2.0 - 64.0,
+            0x10 => ((data[0] as u16) << 8 | data[1] as u16) as f64 / 100.0,
+            0x1F | 0x21 => ((data[0] as u16) << 8 | data[1] as u16) as f64,
+            0x23 => ((data[0] as u16) << 8 | data[1] as u16) as f64 * 10.0,
+            0x42 => ((data[0] as u16) << 8 | data[1] as u16) as f64 / 1000.0,
+            0x43 => ((data[0] as u16) << 8 | data[1] as u16) as f64 * 100.0 / 255.0,
+            0x5E => ((data[0] as u16) << 8 | data[1] as u16) as f64 / 20.0,
+            _ => return Err(Error::Decode(format!("no formula for PID {pid:02X}"))),
+        };
+        return Ok(LiveValue {
+            name: def.name,
+            value,
+            unit: def.unit,
+            mode: 1,
+            pid,
+        });
     }
-    let value = match pid {
-        0x04 | 0x11 | 0x2F => data[0] as f64 * 100.0 / 255.0,
-        0x05 | 0x0F | 0x46 | 0x5C => data[0] as f64 - 40.0,
-        0x0C => ((data[0] as u16) << 8 | data[1] as u16) as f64 / 4.0,
-        0x0D => data[0] as f64,
-        0x10 => ((data[0] as u16) << 8 | data[1] as u16) as f64 / 100.0,
-        0x42 => ((data[0] as u16) << 8 | data[1] as u16) as f64 / 1000.0,
-        _ => return Err(Error::Decode(format!("no formula for PID {pid:02X}"))),
+    // Unknown PID: still emit raw so crush capture keeps every answer.
+    let value = if data.len() >= 2 {
+        ((data[0] as u16) << 8 | data[1] as u16) as f64
+    } else if !data.is_empty() {
+        data[0] as f64
+    } else {
+        0.0
     };
     Ok(LiveValue {
-        name: def.name,
+        name: "pid_raw",
         value,
-        unit: def.unit,
+        unit: "raw",
         mode: 1,
         pid,
     })

@@ -1,14 +1,23 @@
 //! Background poller → [`VehicleSnapshot`](crate::auto::VehicleSnapshot).
 //!
 //! Startup: capability probe (BIT), then DTC + Mode 01 / Ford DID poll.
+//! Optional **capture** via `MFD_OBD_CAPTURE` (same process owns Bluetooth — only one
+//! RFCOMM client can attach to the ELM).
+//! Optional **crush** via `MFD_OBD_CRUSH=1`: discover every Mode 01 PID + multi-module
+//! known UDS DIDs and log every TX/RX.
+//!
 //! Read-only — never Mode 04 clear.
 
 use crate::auto::caps::VehicleCaps;
 use crate::auto::probe;
 use crate::auto::{DtcEntry, DtcKind, VehicleSnapshot};
+use crate::obd::capture::CaptureWriter;
+use crate::obd::ford::{self, DecodedDid, HDR_ABS, HDR_BCM, HDR_IPC, HDR_PCM, HDR_PSCM};
 use crate::obd::j1979::{self, PRIORITY_PIDS};
 use crate::obd::session::Session;
+use crate::obd::uds::{self, PROBE_DIDS};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -24,6 +33,14 @@ struct Telemetry {
     dtcs: Vec<DtcEntry>,
     dtc_loaded: bool,
     caps: VehicleCaps,
+    capture_dir: Option<String>,
+    /// BT · SERIAL · REPLAY
+    link_kind: String,
+    /// MAC or path
+    link_addr: String,
+    link_channel: String,
+    adapter_id: String,
+    protocol: String,
 }
 
 /// Background OBD poller (native stack).
@@ -47,14 +64,20 @@ impl ObdFeed {
     }
 
     pub fn from_session(session: Session) -> Result<Self, String> {
+        let (kind, addr, channel) = link_from_env_and_name(session.name());
         let stop = Arc::new(AtomicBool::new(false));
         let tele = Arc::new(Mutex::new(Telemetry {
             status: format!("probe {}", session.name()),
             caps: VehicleCaps {
                 phase: "POWER ON".into(),
-                link: session.name().into(),
+                link: format!("{kind} {addr}"),
                 ..Default::default()
             },
+            link_kind: kind,
+            link_addr: addr,
+            link_channel: channel,
+            adapter_id: session.identity().to_string(),
+            protocol: session.protocol().to_string(),
             ..Default::default()
         }));
         let stop_t = Arc::clone(&stop);
@@ -87,21 +110,78 @@ impl ObdFeed {
         self.tele
             .lock()
             .map(|t| {
+                let addr = if t.link_addr.is_empty() {
+                    "—".into()
+                } else {
+                    t.link_addr.clone()
+                };
                 if !t.caps.ready {
-                    format!("BIT {:.0}% {}", t.caps.progress * 100.0, t.caps.phase)
+                    format!(
+                        "BIT {:.0}% {} · {} {}",
+                        t.caps.progress * 100.0,
+                        t.caps.phase,
+                        t.link_kind,
+                        addr
+                    )
                 } else if let Some(e) = &t.error {
-                    format!("OBD ERR {e}")
+                    format!("{} ERR {e} · {addr}", t.link_kind)
                 } else {
                     let d = if t.dtc_loaded {
                         format!(" DTC{}", t.dtcs.len())
                     } else {
                         String::new()
                     };
-                    format!("{} · t{}{d}", t.status, t.ticks)
+                    let cap = t
+                        .capture_dir
+                        .as_ref()
+                        .map(|p| format!(" CAP {}", short_path(p)))
+                        .unwrap_or_default();
+                    format!(
+                        "{} LIVE · {addr} · {} · t{}{d}{cap}",
+                        t.link_kind,
+                        if t.protocol.is_empty() {
+                            "—"
+                        } else {
+                            &t.protocol
+                        },
+                        t.ticks
+                    )
                 }
             })
             .unwrap_or_else(|_| "OBD lock".into())
     }
+}
+
+/// Resolve link kind / address / channel for glass from env + transport name.
+fn link_from_env_and_name(transport_name: &str) -> (String, String, String) {
+    if let Ok(mac) = std::env::var("MFD_OBD_BT") {
+        if !mac.is_empty() {
+            let ch = std::env::var("MFD_OBD_BT_CHANNEL").unwrap_or_else(|_| "1".into());
+            return ("BT".into(), mac, ch);
+        }
+    }
+    if let Ok(port) = std::env::var("MFD_OBD_PORT") {
+        if !port.is_empty() {
+            return ("SERIAL".into(), port, "-".into());
+        }
+    }
+    if let Ok(rep) = std::env::var("MFD_OBD_REPLAY") {
+        if !rep.is_empty() {
+            return ("REPLAY".into(), rep, "-".into());
+        }
+    }
+    // Fallback: parse transport name (bt://MAC, path, …)
+    let n = transport_name.trim();
+    if let Some(rest) = n.strip_prefix("bt://") {
+        return ("BT".into(), rest.to_string(), "1".into());
+    }
+    if n.contains("replay") {
+        return ("REPLAY".into(), n.into(), "-".into());
+    }
+    if n.starts_with('/') {
+        return ("SERIAL".into(), n.into(), "-".into());
+    }
+    ("OBD".into(), n.into(), "-".into())
 }
 
 impl Drop for ObdFeed {
@@ -113,6 +193,14 @@ impl Drop for ObdFeed {
     }
 }
 
+fn short_path(p: &str) -> String {
+    let path = std::path::Path::new(p);
+    path.file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(p)
+        .to_string()
+}
+
 fn map_kind(k: j1979::DtcKind) -> DtcKind {
     match k {
         j1979::DtcKind::Stored => DtcKind::Stored,
@@ -121,9 +209,67 @@ fn map_kind(k: j1979::DtcKind) -> DtcKind {
     }
 }
 
-fn load_dtcs(session: &mut Session, tele: &Arc<Mutex<Telemetry>>) {
+fn env_truthy(name: &str) -> bool {
+    matches!(
+        std::env::var(name).ok().as_deref(),
+        Some("1")
+            | Some("true")
+            | Some("TRUE")
+            | Some("yes")
+            | Some("YES")
+            | Some("on")
+            | Some("ON")
+    )
+}
+
+fn open_capture(adapter: &str) -> Option<CaptureWriter> {
+    let path = std::env::var_os("MFD_OBD_CAPTURE").map(PathBuf::from)?;
+    if path.as_os_str().is_empty() {
+        return None;
+    }
+    let software = format!("mfd-feed {}", env!("CARGO_PKG_VERSION"));
+    match CaptureWriter::create(&path, &software, adapter) {
+        Ok(mut c) => {
+            c.set_caps(serde_json::json!({
+                "link": adapter,
+                "crush": env_truthy("MFD_OBD_CRUSH"),
+                "source": "ObdFeed",
+            }));
+            eprintln!("mfd obd: capture → {}", path.display());
+            Some(c)
+        }
+        Err(e) => {
+            eprintln!("mfd obd: capture open failed: {e}");
+            None
+        }
+    }
+}
+
+fn cap_frame(cap: &mut Option<CaptureWriter>, dir: &str, data: &str, note: Option<&str>) {
+    if let Some(c) = cap.as_mut() {
+        let _ = c.log_frame(dir, "hs", data, note);
+    }
+}
+
+fn cap_signal(
+    cap: &mut Option<CaptureWriter>,
+    name: &str,
+    value: f64,
+    unit: &str,
+    mode: u8,
+    pid: u8,
+) {
+    if let Some(c) = cap.as_mut() {
+        let _ = c.log_signal(name, value, unit, mode, pid, "hs");
+    }
+}
+
+fn load_dtcs(session: &mut Session, tele: &Arc<Mutex<Telemetry>>, cap: &mut Option<CaptureWriter>) {
     match session.read_all_dtcs() {
         Ok(list) => {
+            for d in &list {
+                cap_frame(cap, "rx", &d.code, Some(&format!("dtc {}", d.kind.label())));
+            }
             if let Ok(mut t) = tele.lock() {
                 t.dtcs = list
                     .into_iter()
@@ -137,6 +283,7 @@ fn load_dtcs(session: &mut Session, tele: &Arc<Mutex<Telemetry>>) {
             }
         }
         Err(e) => {
+            cap_frame(cap, "rx", &format!("ERR:{e}"), Some("dtc"));
             if let Ok(mut t) = tele.lock() {
                 let msg = e.to_string();
                 if !msg.contains("NO DATA") {
@@ -148,71 +295,311 @@ fn load_dtcs(session: &mut Session, tele: &Arc<Mutex<Telemetry>>) {
     }
 }
 
+/// Live DID entry for continuous poll (owned header + static name).
+struct LiveDid {
+    header: String,
+    did: u16,
+    name: &'static str,
+}
+
 fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemetry>>) {
+    let adapter = format!("{} · {}", session.name(), session.protocol());
+    // Refresh adapter identity / protocol after session is live.
+    if let Ok(mut t) = tele.lock() {
+        if t.adapter_id.is_empty() {
+            t.adapter_id = session.identity().to_string();
+        }
+        if t.protocol.is_empty() {
+            t.protocol = session.protocol().to_string();
+        }
+        // Prefer ATI / ATDP once available
+        let id = session.identity().to_string();
+        let proto = session.protocol().to_string();
+        if !id.is_empty() {
+            t.adapter_id = id;
+        }
+        if !proto.is_empty() {
+            t.protocol = proto;
+        }
+    }
+    let mut cap = open_capture(&adapter);
+    if let Some(ref c) = cap {
+        if let Ok(mut t) = tele.lock() {
+            t.capture_dir = Some(c.dir().display().to_string());
+        }
+    }
+    let crush = env_truthy("MFD_OBD_CRUSH");
+
     // ── BIT / capability probe first ──────────────────────────────────────
     let caps = probe::run_live_probe(&mut session);
     if let Ok(mut t) = tele.lock() {
         t.caps = caps;
         t.status = format!("live {}", session.name());
+        t.adapter_id = session.identity().to_string();
+        t.protocol = session.protocol().to_string();
+        t.caps.link = format!("{} {}", t.link_kind, t.link_addr);
     }
     if stop.load(Ordering::Relaxed) {
+        finish_cap(cap);
         return;
     }
 
-    load_dtcs(&mut session, &tele);
-
+    // Mode 09 VIN + extras
     if let Ok(vin) = session.read_vin_mode09() {
+        cap_frame(&mut cap, "rx", &format!("VIN:{vin}"), Some("mode09"));
+        if let Some(c) = cap.as_mut() {
+            c.set_vin(&vin);
+        }
         if let Ok(mut t) = tele.lock() {
             t.vin = Some(vin);
         }
     }
-    let _ = crate::obd::ford::prepare_pcm_read(&mut session);
+    for cmd in ["090A", "0904", "0906"] {
+        cap_frame(&mut cap, "tx", cmd, Some("mode09"));
+        match session.request_raw(cmd) {
+            Ok(b) => cap_frame(&mut cap, "rx", &uds::hex_bytes(&b), Some("mode09")),
+            Err(e) => cap_frame(&mut cap, "rx", &format!("ERR:{e}"), Some("mode09")),
+        }
+    }
 
-    let ford_dids: Vec<_> = crate::obd::ford::feed_poll_dids().collect();
+    load_dtcs(&mut session, &tele, &mut cap);
+    let _ = ford::prepare_pcm_read(&mut session);
+
+    // Discover Mode 01 PIDs (always when live; essential for crush)
+    let mut poll_pids: Vec<u8> = session
+        .discover_mode01_pids()
+        .unwrap_or_else(|_| PRIORITY_PIDS.to_vec());
+    for &p in PRIORITY_PIDS {
+        if !poll_pids.contains(&p) {
+            poll_pids.push(p);
+        }
+    }
+    {
+        let list = poll_pids
+            .iter()
+            .map(|p| format!("{p:02X}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        cap_frame(&mut cap, "rx", &format!("PIDS:{list}"), Some("discover"));
+        eprintln!("mfd obd: {} Mode 01 PIDs", poll_pids.len());
+    }
+
+    let mut live_dids: Vec<LiveDid> = Vec::new();
+    let ford_dids: Vec<_> = ford::feed_poll_dids().collect();
+
+    if crush {
+        // Multi-module known DIDs (fast) — full range scan stays in mfd-obd-capture --crush
+        let modules: &[(&str, &str)] = &[
+            ("PCM", HDR_PCM),
+            ("BCM", HDR_BCM),
+            ("ABS", HDR_ABS),
+            ("IPC", HDR_IPC),
+            ("PSCM", HDR_PSCM),
+        ];
+        for &(mod_name, hdr) in modules {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+            eprintln!("mfd obd: UDS module {mod_name} {hdr}");
+            cap_frame(&mut cap, "tx", &format!("ATSH{hdr}"), Some(mod_name));
+            let _ = session.elm_mut().set_header(hdr);
+            let _ = session.extended_session();
+            let _ = session.tester_present();
+            for &(did, name) in PROBE_DIDS {
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                let req = format!("22{did:04X}");
+                cap_frame(&mut cap, "tx", &req, Some(name));
+                match session.read_did(hdr, did) {
+                    Ok(data) => {
+                        cap_frame(&mut cap, "rx", &uds::hex_bytes(&data), Some(name));
+                        live_dids.push(LiveDid {
+                            header: hdr.into(),
+                            did,
+                            name,
+                        });
+                    }
+                    Err(e) => {
+                        cap_frame(&mut cap, "rx", &format!("ERR:{e}"), Some(name));
+                    }
+                }
+            }
+            if hdr == HDR_PCM {
+                for def in ford::probe_dids() {
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let _ = session.elm_mut().set_header(def.header);
+                    let req = format!("22{:04X}", def.did);
+                    cap_frame(&mut cap, "tx", &req, Some(def.name));
+                    match ford::read_did(&mut session, def) {
+                        Ok(DecodedDid::Number { name, value, unit }) => {
+                            cap_frame(&mut cap, "rx", &format!("{value}"), Some(name));
+                            cap_signal(&mut cap, name, value, unit, 0x22, (def.did & 0xFF) as u8);
+                            if let Ok(mut t) = tele.lock() {
+                                t.values.insert(name.to_string(), value);
+                            }
+                            live_dids.push(LiveDid {
+                                header: def.header.into(),
+                                did: def.did,
+                                name: def.name,
+                            });
+                        }
+                        Ok(DecodedDid::Text { name, value }) => {
+                            cap_frame(&mut cap, "rx", &value, Some(name));
+                            if name == "vin" && value.len() >= 11 {
+                                if let Some(c) = cap.as_mut() {
+                                    c.set_vin(&value);
+                                }
+                                if let Ok(mut t) = tele.lock() {
+                                    t.vin = Some(value);
+                                }
+                            }
+                            live_dids.push(LiveDid {
+                                header: def.header.into(),
+                                did: def.did,
+                                name: def.name,
+                            });
+                        }
+                        Ok(DecodedDid::Hex { name, value }) => {
+                            cap_frame(&mut cap, "rx", &value, Some(name));
+                            live_dids.push(LiveDid {
+                                header: def.header.into(),
+                                did: def.did,
+                                name: def.name,
+                            });
+                        }
+                        Err(e) => {
+                            cap_frame(&mut cap, "rx", &format!("ERR:{e}"), Some(def.name));
+                        }
+                    }
+                }
+            }
+        }
+        live_dids.sort_by(|a, b| (a.header.as_str(), a.did).cmp(&(b.header.as_str(), b.did)));
+        live_dids.dedup_by(|a, b| a.header == b.header && a.did == b.did);
+        cap_frame(
+            &mut cap,
+            "rx",
+            &format!("LIVE_DIDS:{}", live_dids.len()),
+            Some("discover"),
+        );
+        eprintln!(
+            "mfd obd: crush ready — {} PIDs · {} live DIDs",
+            poll_pids.len(),
+            live_dids.len()
+        );
+    }
+
+    if let Some(c) = cap.as_mut() {
+        let _ = c.flush();
+    }
+
     let mut i = 0usize;
     let mut fi = 0usize;
+    let mut di = 0usize;
     let mut keep = 0u32;
     while !stop.load(Ordering::Relaxed) {
-        keep += 1;
+        keep = keep.wrapping_add(1);
         if keep % 50 == 1 {
-            load_dtcs(&mut session, &tele);
+            load_dtcs(&mut session, &tele, &mut cap);
         }
         if keep % 40 == 0 {
+            cap_frame(&mut cap, "tx", "3E80", Some("TesterPresent"));
             let _ = session.tester_present();
         }
+
+        // Ford high-priority DIDs
         if keep % 8 == 0 && !ford_dids.is_empty() {
             let def = ford_dids[fi % ford_dids.len()];
             fi = fi.wrapping_add(1);
-            match crate::obd::ford::read_did(&mut session, def) {
-                Ok(crate::obd::ford::DecodedDid::Number { name, value, .. }) => {
+            let req = format!("22{:04X}", def.did);
+            cap_frame(&mut cap, "tx", &req, Some(def.name));
+            match ford::read_did(&mut session, def) {
+                Ok(DecodedDid::Number { name, value, unit }) => {
+                    cap_frame(&mut cap, "rx", &format!("{value}"), Some(name));
+                    cap_signal(&mut cap, name, value, unit, 0x22, (def.did & 0xFF) as u8);
                     if let Ok(mut t) = tele.lock() {
                         t.values.insert(name.to_string(), value);
                         t.ticks = t.ticks.wrapping_add(1);
                     }
                 }
-                Ok(crate::obd::ford::DecodedDid::Text { name: "vin", value }) => {
-                    if let Ok(mut t) = tele.lock() {
-                        if value.len() >= 11 {
+                Ok(DecodedDid::Text { name: "vin", value }) => {
+                    cap_frame(&mut cap, "rx", &value, Some("vin"));
+                    if value.len() >= 11 {
+                        if let Some(c) = cap.as_mut() {
+                            c.set_vin(&value);
+                        }
+                        if let Ok(mut t) = tele.lock() {
                             t.vin = Some(value);
                         }
                     }
                 }
-                Ok(_) => {}
-                Err(_) => {}
+                Ok(other) => {
+                    let (n, s) = match other {
+                        DecodedDid::Text { name, value } => (name, value),
+                        DecodedDid::Hex { name, value } => (name, value),
+                        DecodedDid::Number { name, value, .. } => (name, format!("{value}")),
+                    };
+                    cap_frame(&mut cap, "rx", &s, Some(n));
+                }
+                Err(e) => {
+                    cap_frame(&mut cap, "rx", &format!("ERR:{e}"), Some(def.name));
+                }
             }
         }
-        let pid = PRIORITY_PIDS[i % PRIORITY_PIDS.len()];
+
+        // Rotate live DIDs discovered in crush
+        if crush && !live_dids.is_empty() && keep % 5 == 0 {
+            let entry = &live_dids[di % live_dids.len()];
+            di = di.wrapping_add(1);
+            let req = format!("22{:04X}", entry.did);
+            cap_frame(&mut cap, "tx", &req, Some(entry.name));
+            match session.read_did(&entry.header, entry.did) {
+                Ok(data) => {
+                    let hex = uds::hex_bytes(&data);
+                    cap_frame(&mut cap, "rx", &hex, Some(entry.name));
+                    if let Some(&b0) = data.first() {
+                        cap_signal(
+                            &mut cap,
+                            entry.name,
+                            b0 as f64,
+                            "raw",
+                            0x22,
+                            (entry.did & 0xFF) as u8,
+                        );
+                    }
+                }
+                Err(e) => {
+                    cap_frame(&mut cap, "rx", &format!("ERR:{e}"), Some(entry.name));
+                }
+            }
+        }
+
+        // Mode 01 (primary high-rate path)
+        let pid = poll_pids[i % poll_pids.len()];
         i = i.wrapping_add(1);
+        let cmd = j1979::mode01_command(pid);
+        cap_frame(&mut cap, "tx", &cmd, None);
         match session.read_pid(pid) {
             Ok(v) => {
+                let key = if v.name == "pid_raw" {
+                    format!("pid_{:02X}", v.pid)
+                } else {
+                    v.name.to_string()
+                };
+                cap_frame(&mut cap, "rx", &format!("OK:{:02X}", v.pid), Some(&key));
+                cap_signal(&mut cap, &key, v.value, v.unit, v.mode, v.pid);
                 if let Ok(mut t) = tele.lock() {
-                    t.values.insert(v.name.to_string(), v.value);
+                    t.values.insert(key, v.value);
                     t.ticks = t.ticks.wrapping_add(1);
                     t.error = None;
                     t.status = format!("live {}", session.name());
                 }
             }
             Err(e) => {
+                cap_frame(&mut cap, "rx", &format!("ERR:{e}"), None);
                 if let Ok(mut t) = tele.lock() {
                     let msg = e.to_string();
                     if !msg.contains("NO DATA") {
@@ -221,11 +608,68 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
                 }
             }
         }
-        thread::sleep(Duration::from_millis(20));
+
+        if keep % 25 == 0 {
+            if let Some(c) = cap.as_mut() {
+                let _ = c.flush();
+            }
+        }
+        thread::sleep(Duration::from_millis(if crush { 12 } else { 20 }));
+    }
+
+    finish_cap(cap);
+}
+
+fn finish_cap(cap: Option<CaptureWriter>) {
+    if let Some(c) = cap {
+        match c.finish() {
+            Ok(dir) => eprintln!(
+                "mfd obd: capture closed → {} (frames.ndjson signals.csv meta.toml session.json)",
+                dir.display()
+            ),
+            Err(e) => eprintln!("mfd obd: capture finish: {e}"),
+        }
     }
 }
 
 fn apply_telemetry(t: &Telemetry, v: &mut VehicleSnapshot) {
+    // Always refresh bus / Bluetooth block for OWN · SETUP · BUS glass.
+    v.bus_kind = if t.link_kind.is_empty() {
+        "OBD".into()
+    } else {
+        t.link_kind.clone()
+    };
+    v.bus_addr = t.link_addr.clone();
+    v.bus_channel = if t.link_channel.is_empty() {
+        "-".into()
+    } else {
+        t.link_channel.clone()
+    };
+    v.bus_adapter = if t.adapter_id.is_empty() {
+        "—".into()
+    } else {
+        t.adapter_id.clone()
+    };
+    v.bus_proto = if t.protocol.is_empty() {
+        "—".into()
+    } else {
+        t.protocol.clone()
+    };
+    v.bus_ticks = t.ticks;
+    v.bus_capture = t
+        .capture_dir
+        .as_ref()
+        .map(|p| short_path(p))
+        .unwrap_or_default();
+    if !t.caps.ready {
+        v.bus_state = "BIT".into();
+    } else if t.error.is_some() {
+        v.bus_state = "ERR".into();
+    } else {
+        v.bus_state = "LIVE".into();
+    }
+    v.bus_error = t.error.clone().unwrap_or_default();
+
     if let Some(rpm) = t.values.get("engine_rpm") {
         v.rpm = *rpm as f32;
     }
@@ -233,6 +677,9 @@ fn apply_telemetry(t: &Telemetry, v: &mut VehicleSnapshot) {
         v.speed_mph = (*kmh as f32) / 1.60934;
     }
     if let Some(th) = t.values.get("throttle") {
+        v.throttle = (*th as f32 / 100.0).clamp(0.0, 1.0);
+    }
+    if let Some(th) = t.values.get("accel_pedal") {
         v.throttle = (*th as f32 / 100.0).clamp(0.0, 1.0);
     }
     if let Some(load) = t.values.get("engine_load") {
@@ -277,6 +724,12 @@ fn apply_telemetry(t: &Telemetry, v: &mut VehicleSnapshot) {
     }
     if let Some(f) = t.values.get("fuel_level") {
         v.fuel = (*f as f32 / 100.0).clamp(0.0, 1.0);
+    }
+    if let Some(fp) = t.values.get("fuel_pressure") {
+        v.fuel_pressure_kpa = *fp as f32;
+    }
+    if let Some(fp) = t.values.get("fuel_rail_pressure") {
+        v.fuel_pressure_kpa = *fp as f32;
     }
     if let Some(volt) = t.values.get("battery_v") {
         v.battery_v = *volt as f32;

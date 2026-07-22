@@ -113,6 +113,47 @@ impl Session {
         j1979::decode_mode01(&bytes)
     }
 
+    /// Discover supported Mode 01 PIDs via 0100 / 0120 / … bitmaps.
+    pub fn discover_mode01_pids(&mut self) -> Result<Vec<u8>> {
+        let mut all = Vec::new();
+        for &sp in j1979::SUPPORT_PIDS {
+            let cmd = j1979::mode01_command(sp);
+            match self.elm.request_hex(&cmd) {
+                Ok(bytes) => {
+                    let found = j1979::parse_support_bitmap(sp, &bytes);
+                    if found.is_empty() {
+                        break;
+                    }
+                    // Next support PID is indicated by last bit of each group
+                    all.extend(
+                        found
+                            .iter()
+                            .copied()
+                            .filter(|&p| !j1979::SUPPORT_PIDS.contains(&p)),
+                    );
+                    // Continue chain only if next support PID listed
+                    let next = sp.saturating_add(0x20);
+                    if !found.contains(&next) && sp != 0x00 {
+                        // still try continue once
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        all.sort_unstable();
+        all.dedup();
+        if all.is_empty() {
+            // Fallback: priority list
+            all.extend_from_slice(j1979::PRIORITY_PIDS);
+        }
+        Ok(all)
+    }
+
+    /// Raw ELM request; returns hex payload bytes (for logging).
+    pub fn request_raw(&mut self, cmd: &str) -> Result<Vec<u8>> {
+        self.elm.request_hex(cmd)
+    }
+
     /// Mode 03 stored DTCs (read-only).
     pub fn read_dtc_stored(&mut self) -> Result<Vec<j1979::Dtc>> {
         self.read_dtc_mode("03", j1979::DtcKind::Stored)

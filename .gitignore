@@ -10,6 +10,7 @@
 /target
 /target/
 .vscode/
+/captures/
 docs/HAF-F16.pdf
 docs/246416220-F16-MLU-M1-Pilot-s-Manual.pdf
 docs/reference/mlu-m1-ocr/

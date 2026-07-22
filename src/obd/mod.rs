@@ -24,6 +24,8 @@
 //! | `MFD_OBD_PORT=/dev/ttyUSB0` | Serial / rfcomm device |
 //! | `MFD_OBD_BAUD=115200` | Serial baud |
 //! | `MFD_OBD_REPLAY=path` | Capture dir or frames.ndjson |
+//! | `MFD_OBD_CAPTURE=dir` | Live capture dir (same process as glass) |
+//! | `MFD_OBD_CRUSH=1` | Discover all Mode 01 PIDs + multi-module UDS |
 
 #![cfg(feature = "obd")]
 
