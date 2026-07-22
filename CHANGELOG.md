@@ -18,6 +18,7 @@
 
 ### Added
 
+- **`DisplayList` / stroke commands** — calligraphic refresh model (1970s vector CRT / HUD style)
 - True vector engine: geometry lights individual pixels (no sprite/bitmap draw path)
 - **Fast path:** inlined Bresenham stores, bulk clear, RAM back-buffer + single blit present
 - `vge_blit` / `Surface::blit_to` / `Framebuffer::present_from`

@@ -14,7 +14,10 @@ pub mod effects;
 #[cfg(target_os = "linux")]
 pub mod fb;
 pub mod frame;
+pub mod stroke;
 pub mod term;
+
+pub use stroke::{DisplayList, Stroke};
 
 use std::f32::consts::PI;
 
