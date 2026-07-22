@@ -6,7 +6,7 @@
 //! Hardware: same tone PCM can feed a device speaker (ALSA / I2S later).
 
 use crate::audio::{self, Callout};
-use crate::auto::VehicleSnapshot;
+use crate::auto::{AutoPage, VehicleSnapshot};
 use std::time::Instant;
 
 /// Fuel fraction that triggers **BINGO** (classic low-fuel callout).
@@ -97,6 +97,45 @@ pub fn evaluate(v: &VehicleSnapshot) -> Vec<ActiveWarn> {
         });
     }
     out
+}
+
+/// Format that **owns** this warn for slot-flash / local detail (Lockheed PDR).
+///
+/// `None` = no format-slot flash (use master strip + DTC path only).
+pub fn owning_format(id: WarnId) -> Option<AutoPage> {
+    match id {
+        WarnId::Bingo => Some(AutoPage::Fuel),
+        WarnId::ParkBrake => Some(AutoPage::Drive),
+        WarnId::TireAlert => Some(AutoPage::Chas),
+        WarnId::DoorAjar => Some(AutoPage::Body),
+        WarnId::LowBattery => Some(AutoPage::Elec),
+        WarnId::DtcPresent | WarnId::MasterCaution => None,
+    }
+}
+
+/// Highest-priority warning that may flash a **format slot** when off-glass.
+/// Warning-class only; caution (DTC, low batt) never slot-flash.
+pub fn slot_flash_owner(warns: &[ActiveWarn]) -> Option<AutoPage> {
+    let mut best: Option<(i32, AutoPage)> = None;
+    for w in warns {
+        if w.level != WarnLevel::Warning {
+            continue;
+        }
+        let Some(page) = owning_format(w.id) else {
+            continue;
+        };
+        let pri = match w.id {
+            WarnId::ParkBrake => 50,
+            WarnId::DoorAjar => 40,
+            WarnId::TireAlert => 30,
+            WarnId::Bingo => 20,
+            _ => 10,
+        };
+        if best.map(|(p, _)| pri > p).unwrap_or(true) {
+            best = Some((pri, page));
+        }
+    }
+    best.map(|(_, p)| p)
 }
 
 /// Flash phase: true = “on” (show red field). ~2 Hz.

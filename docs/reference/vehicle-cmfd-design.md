@@ -134,6 +134,27 @@ GO formats only. Pick assigns into the slot that opened the menu. Duplicate on a
 
 **Yes — everything product-critical is reachable with 20 OSB + rockers.** No dependence on n/p/color hardware.
 
+## Active format SOI (must)
+
+| Rule | Detail |
+|------|--------|
+| **Lit OSB** | Underline + bright label on the OSB that **owns the glass** |
+| **Format on slot** | Light that slot (12/13/14) |
+| **OWN / DTC / SET / BUS** | Light 15 / 16 / 19 / 20 |
+| **Source of truth** | Displayed page, not last button press |
+| **Title** | `MNEM  ·  FULL TITLE` in white under chrome |
+
+## Warnings (Lockheed freeze)
+
+| Layer | Role |
+|-------|------|
+| **Master strip** (top of content) | On **every** format when any caution/warning is active |
+| **Format-local fields** | BINGO title, PARK flash, tire cell, … on owning page |
+| **Format-slot flash** | Only **warning-class** and only when owning format is on a slot **and not displayed** |
+| **No slot flash** | DTC present, low batt (caution) — strip + DTC OSB only |
+
+Owner map: BINGO→FUEL · PARK→DRV · TIRE→CHAS · DOOR→BODY · LOW BATT→ELEC (strip only).
+
 ## Anti-patterns (rejected)
 
 - Reshuffle OSB after probe  

@@ -1,7 +1,7 @@
 //! Additional MFD widgets (rings, gates, grids, lists, …).
 
 use crate::color::WHITE;
-use crate::font::{draw_text, draw_text_centered, text_width};
+use crate::font::{draw_text, draw_text_centered, text_height, text_width};
 use crate::geom::Rect;
 use crate::{Color, Surface};
 use std::f32::consts::PI;
@@ -189,6 +189,9 @@ pub fn video_frame(s: &mut Surface, rect: Rect, color: Color) {
 /// Side labels use a reserved margin and short strings. Real MFD OSB text sits
 /// in the bezel outside glass; on a single square framebuffer we reserve a
 /// border so labels stay visible.
+///
+/// * `active` — SOI OSB (displayed format/support). Steady bright + underline box.
+/// * `flash` — off-glass owning format slot (warn pointer). Uses `flash_color` when `flash_on`.
 #[allow(clippy::too_many_arguments)]
 pub fn osb_chrome(
     s: &mut Surface,
@@ -201,8 +204,28 @@ pub fn osb_chrome(
     color: Color,
     active: Option<u8>,
 ) {
+    osb_chrome_ex(
+        s, bounds, top, right, bottom, left, font_px, color, active, None, false, WHITE,
+    );
+}
+
+/// Extended chrome: active SOI + optional warning flash on a second OSB.
+#[allow(clippy::too_many_arguments)]
+pub fn osb_chrome_ex(
+    s: &mut Surface,
+    bounds: Rect,
+    top: &[&str; 5],
+    right: &[&str; 5],
+    bottom: &[&str; 5],
+    left: &[&str; 5],
+    font_px: f32,
+    color: Color,
+    active: Option<u8>,
+    flash: Option<u8>,
+    flash_on: bool,
+    flash_color: Color,
+) {
     let fp = font_px.clamp(8.0, 14.0);
-    // Margin for OSB legend strip inside the square face.
     let margin = (fp * 2.2).ceil() as i32 + 6;
     let margin = margin.min(bounds.w / 6).min(bounds.h / 6).max(18);
 
@@ -216,48 +239,60 @@ pub fn osb_chrome(
     let inner_x0 = bounds.x + margin;
     let inner_y0 = bounds.y + margin;
 
+    let color_for = |osb: u8| -> Color {
+        if flash == Some(osb) && flash_on {
+            flash_color
+        } else if active == Some(osb) {
+            WHITE
+        } else {
+            color
+        }
+    };
+
+    let mark_active =
+        |s: &mut Surface, cx: f32, cy: f32, lab: &str, osb: u8, col: Color, fsz: f32| {
+            if lab.is_empty() {
+                return;
+            }
+            draw_text_centered(s, cx, cy, lab, col, fsz);
+            if active == Some(osb) {
+                // Underline box — pilot knows SOI without reading content.
+                let tw = text_width(lab, fsz);
+                let y = (cy + text_height(fsz) * 0.42) as i32;
+                let x0 = (cx - tw * 0.5) as i32 - 2;
+                let x1 = (cx + tw * 0.5) as i32 + 2;
+                s.line_aa(x0, y, x1, y, WHITE);
+                s.line_aa(x0, y + 1, x1, y + 1, WHITE);
+            }
+        };
+
     for i in 0..5usize {
         let ii = i as i32;
-        // Top OSB 1-5
-        let col = if active == Some((i + 1) as u8) {
-            WHITE
-        } else {
-            color
-        };
         let cx = (inner_x0 + slot_w * ii + slot_w / 2) as f32;
-        draw_text_centered(s, cx, top_y as f32, top[i], col, fp);
 
-        // Bottom OSB 15..11 (left-to-right visual bottom[i])
-        let col = if active == Some((15 - i) as u8) {
-            WHITE
-        } else {
-            color
-        };
-        draw_text_centered(s, cx, bot_y as f32, bottom[i], col, fp);
+        // Top OSB 1-5
+        let osb = (i + 1) as u8;
+        mark_active(s, cx, top_y as f32, top[i], osb, color_for(osb), fp);
+
+        // Bottom OSB 15..11
+        let osb = (15 - i) as u8;
+        mark_active(s, cx, bot_y as f32, bottom[i], osb, color_for(osb), fp);
+
+        let cy = (inner_y0 + slot_h * ii + slot_h / 2) as f32;
 
         // Right OSB 6-10
-        let col = if active == Some((i + 6) as u8) {
-            WHITE
-        } else {
-            color
-        };
-        let cy = (inner_y0 + slot_h * ii + slot_h / 2) as f32;
-        // Clip long labels: measure and nudge left if needed
+        let osb = (i + 6) as u8;
         let lab = right[i];
         let tw = text_width(lab, fp * 0.8);
         let rx = (right_x as f32).min(bounds.right() as f32 - tw * 0.5 - 2.0);
-        draw_text_centered(s, rx, cy, lab, col, fp * 0.8);
+        mark_active(s, rx, cy, lab, osb, color_for(osb), fp * 0.8);
 
         // Left OSB 20-16
-        let col = if active == Some((20 - i) as u8) {
-            WHITE
-        } else {
-            color
-        };
+        let osb = (20 - i) as u8;
         let lab = left[i];
         let tw = text_width(lab, fp * 0.8);
         let lx = (left_x as f32).max(bounds.x as f32 + tw * 0.5 + 2.0);
-        draw_text_centered(s, lx, cy, lab, col, fp * 0.8);
+        mark_active(s, lx, cy, lab, osb, color_for(osb), fp * 0.8);
     }
 }
 

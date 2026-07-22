@@ -17,9 +17,7 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-use mfd::auto::{
-    self, AutoFormatSelect, AutoPage, DemoProbe, FormatSelectAction, VehicleSnapshot,
-};
+use mfd::auto::{self, AutoFormatSelect, AutoPage, DemoProbe, FormatSelectAction, VehicleSnapshot};
 use mfd::bezel::{BezelEvent, BezelSource, BezelState, KeyboardBezel};
 use mfd::font::{draw_text, text_width};
 use mfd::frame::FramePacer;
@@ -244,6 +242,7 @@ fn main() -> io::Result<()> {
                 match fmt_sel.handle_osb(osb, osb_tick, allow) {
                     FormatSelectAction::Show(p) => {
                         auto_page = p;
+                        fmt_sel.sync_active_to_page(p);
                         continue;
                     }
                     FormatSelectAction::OpenMenu { .. } | FormatSelectAction::CloseMenu => {
@@ -259,6 +258,7 @@ fn main() -> io::Result<()> {
                 if let Some(p) = AutoPage::from_left_support_osb(osb) {
                     if AutoFormatSelect::is_allowed(p, allow) {
                         auto_page = p;
+                        // Support SOI lights DTC/SET/BUS OSB — do not reassign format slots.
                     }
                     continue;
                 }
@@ -509,7 +509,6 @@ fn goto_format(
     available: &[AutoPage],
 ) {
     if available.is_empty() {
-        // Pre-boot: allow only defaults
         *auto_page = page;
         return;
     }
@@ -517,8 +516,19 @@ fn goto_format(
         return;
     }
     *auto_page = page;
-    if !matches!(page, AutoPage::Own) {
+    // Support jumps (OWN/DTC/SET/BUS): do not steal a format slot.
+    if matches!(
+        page,
+        AutoPage::Own | AutoPage::Faults | AutoPage::Setup | AutoPage::Bus
+    ) {
+        return;
+    }
+    // If already on a slot, just light that slot; else assign into active slot.
+    if fmt_sel.slot_osb_for_page(page).is_some() {
+        fmt_sel.sync_active_to_page(page);
+    } else {
         fmt_sel.assign(fmt_sel.active, page);
+        fmt_sel.sync_active_to_page(page);
     }
 }
 

@@ -31,15 +31,17 @@ pub use format_select::{AutoFormatSelect, FormatSelectAction, FormatSlot};
 pub use probe::DemoProbe;
 
 use crate::bezel::BezelState;
+use crate::color::WHITE;
 use crate::color::{rgb, CYAN};
 use crate::geom::Rect;
 use crate::page::Page;
 use crate::palette::Palette;
 use crate::video::{blit_grey_flir, GreyFrame};
+use crate::warn::slot_flash_owner;
 use crate::warn::{self, ActiveWarn, WarnId, WarnLevel};
 use crate::widget::{
     attitude_ball, content_after_osb, crosshair, heading_display, label, master_warn_strip,
-    osb_chrome, progress_strip, range_display, round_gauge, schematic_topo_map, status_grid,
+    osb_chrome_ex, progress_strip, range_display, round_gauge, schematic_topo_map, status_grid,
     status_grid_flash, tape_gauge, tire_grid, track_gate, value_readout, RangeSnapshot,
     RoundGaugeOpts, StatusItem, TapeOpts, TapeOrientation, TireReading,
 };
@@ -686,11 +688,7 @@ fn option_legends(
             ["", "", "", "", ""],
             left,
         ),
-        AutoPage::Cam => (
-            ["", "", "", "", ""],
-            ["", "", "", "", ""],
-            left,
-        ),
+        AutoPage::Cam => (["", "", "", "", ""], ["", "", "", "", ""], left),
         AutoPage::Range => (["", "", "", "", ""], ["", "", "", "", ""], left),
         AutoPage::Own => (["", "", "", "", ""], ["", "", "", "", ""], left),
         // SET: UNIT + PAL (color mode) — production hardware path for prefs.
@@ -751,54 +749,82 @@ fn chrome(
     allowed: Option<&[AutoPage]>,
     feat: Option<&crate::auto::caps::FeatureCaps>,
     fmt: Option<&AutoFormatSelect>,
+    warns: Option<&[ActiveWarn]>,
+    t: f32,
 ) {
     let b = page.bounds.inset(2);
     let allow = allowed.unwrap_or(AutoPage::ALL);
-    let (top, right, bottom, left, active_osb) = if let Some(f) = fmt {
+    let menu = fmt.map(|f| f.menu_open).unwrap_or(false);
+    let (top, right, bottom, left) = if let Some(f) = fmt {
         if f.menu_open {
-            let (t, r, bot, l) = format_select::master_menu_legends(allow);
-            (t, r, bot, l, Some(f.menu_target.osb()))
+            format_select::master_menu_legends(allow)
         } else {
             let (t, r, l) = option_legends(which, v, feat);
-            let bot = format_select_bottom(f);
-            (t, r, bot, l, Some(f.active.osb()))
+            (t, r, format_select_bottom(f), l)
         }
     } else {
         let (t, r, l) = option_legends(which, v, feat);
-        (t, r, ["OWN", "", "", "", "DCLT"], l, None)
+        (t, r, ["OWN", "", "", "", "DCLT"], l)
     };
-    // Sticky format-slot highlight (SOI). Momentary press flash only while held.
-    // Never leave last_osb as permanent "active format" color.
-    let active = (1..=20u8).find(|&id| bezel.is_down(id)).or(active_osb);
-    let _ = bezel.last_osb; // press edge tracked elsewhere; not chrome SOI
-    osb_chrome(
+
+    // SOI = OSB that owns **displayed** page (slot or support), not last press.
+    let soi = if menu {
+        fmt.map(|f| f.menu_target.osb())
+    } else {
+        fmt.and_then(|f| f.soi_osb_for_page(which)).or(match which {
+            AutoPage::Own => Some(15),
+            AutoPage::Faults => Some(16),
+            AutoPage::Setup => Some(19),
+            AutoPage::Bus => Some(20),
+            _ => None,
+        })
+    };
+    // Press flash only while held (does not replace SOI after release).
+    let active = (1..=20u8).find(|&id| bezel.is_down(id)).or(soi);
+
+    // Off-glass owning format slot flashes (warning-class only).
+    let flash_page = if menu {
+        None
+    } else {
+        warns.and_then(slot_flash_owner).filter(|&p| p != which)
+    };
+    let flash_osb = flash_page.and_then(|p| fmt.and_then(|f| f.slot_osb_for_page(p)));
+    let flash_lit = warn::flash_warn_on(t);
+
+    osb_chrome_ex(
         page.surface,
         b,
         &top,
         &right,
         &bottom,
         &left,
-        page.font_px * 0.65,
+        page.font_px * 0.7,
         pal.dim,
         active,
+        flash_osb,
+        flash_lit,
+        pal.warning,
     );
-    let c = content_after_osb(b, page.font_px * 0.65);
-    let title = if fmt.map(|f| f.menu_open).unwrap_or(false) {
-        "MASTER MENU"
+
+    let c = content_after_osb(b, page.font_px * 0.7);
+    let title = if menu { "MASTER MENU" } else { which.title() };
+    // Bright title + short mnemonic so page ID is obvious even if slot blank.
+    let head = if menu {
+        title.to_string()
     } else {
-        which.title()
+        format!("{}  ·  {}", which.name(), title)
     };
     page.label_centered(
         c.center().0 as f32,
-        c.y as f32 + page.font_px * 0.45,
-        title,
-        pal.primary,
+        c.y as f32 + page.font_px * 0.55,
+        &head,
+        WHITE,
     );
-    if !v.vin.is_empty() && !fmt.map(|f| f.menu_open).unwrap_or(false) {
+    if !v.vin.is_empty() && !menu {
         let os = format!("OS  {}", short_vin(&v.vin));
         page.label_centered(
             c.center().0 as f32,
-            c.y as f32 + page.font_px * 1.25,
+            c.y as f32 + page.font_px * 1.4,
             &os,
             pal.readout,
         );
@@ -890,25 +916,23 @@ pub fn draw_auto_with_video(
     let allowed_slice = allowed_pages.as_deref();
     let feat = caps.map(|c| &c.features);
     let dclt = fmt.map(|f| f.dclt).unwrap_or(0);
-    chrome(page, pal, which, bezel, v, allowed_slice, feat, fmt);
+    chrome(
+        page,
+        pal,
+        which,
+        bezel,
+        v,
+        allowed_slice,
+        feat,
+        fmt,
+        warns,
+        t,
+    );
     let mut c = content(page);
     let fh = page.font_px;
     let flash = warn::flash_warn_on(t);
 
-    // Master Menu glass: format catalog (GO only)
-    if fmt.map(|f| f.menu_open).unwrap_or(false) {
-        let allow = allowed_slice.unwrap_or(AutoPage::ALL);
-        let mut lines: Vec<String> = allow.iter().map(|p| format!("· {}", p.title())).collect();
-        if lines.is_empty() {
-            lines.push("NO FORMATS".into());
-        }
-        lines.insert(0, "SELECT FORMAT".into());
-        lines.push("PRESS OSB 12-14 TO CANCEL".into());
-        numeric_matrix(page.surface, c.inset(4), &lines, fh * 0.75, pal.readout, 1);
-        return;
-    }
-
-    // Master caution / warning strip (top of content)
+    // Global master strip on **every** format (incl. Master Menu) — Lockheed (c).
     if let Some(ws) = warns {
         if !ws.is_empty() {
             let has_w = ws.iter().any(|w| w.level == WarnLevel::Warning);
@@ -927,6 +951,19 @@ pub fn draw_auto_with_video(
             );
             c = Rect::new(c.x, c.y + strip_h + 2, c.w, (c.h - strip_h - 2).max(20));
         }
+    }
+
+    // Master Menu glass: format catalog (GO only)
+    if fmt.map(|f| f.menu_open).unwrap_or(false) {
+        let allow = allowed_slice.unwrap_or(AutoPage::ALL);
+        let mut lines: Vec<String> = allow.iter().map(|p| format!("· {}", p.title())).collect();
+        if lines.is_empty() {
+            lines.push("NO FORMATS".into());
+        }
+        lines.insert(0, "SELECT FORMAT".into());
+        lines.push("PRESS ACTIVE SLOT TO CANCEL".into());
+        numeric_matrix(page.surface, c.inset(4), &lines, fh * 0.75, pal.readout, 1);
+        return;
     }
 
     match which {

@@ -163,6 +163,54 @@ impl AutoFormatSelect {
         self.slots[slot as usize] = Some(page);
     }
 
+    /// If `page` is on a format slot, make that slot active (SOI tracks glass).
+    pub fn sync_active_to_page(&mut self, page: AutoPage) {
+        for (i, s) in self.slots.iter().enumerate() {
+            if *s == Some(page) {
+                self.active = match i {
+                    0 => FormatSlot::Osb14,
+                    1 => FormatSlot::Osb13,
+                    _ => FormatSlot::Osb12,
+                };
+                return;
+            }
+        }
+    }
+
+    /// OSB that owns this page on the bezel (slot or support), for SOI light.
+    pub fn soi_osb_for_page(&self, page: AutoPage) -> Option<u8> {
+        for (i, s) in self.slots.iter().enumerate() {
+            if *s == Some(page) {
+                return Some(match i {
+                    0 => 14,
+                    1 => 13,
+                    _ => 12,
+                });
+            }
+        }
+        match page {
+            AutoPage::Own => Some(15),
+            AutoPage::Faults => Some(16),
+            AutoPage::Setup => Some(19),
+            AutoPage::Bus => Some(20),
+            _ => None, // not on strip — Master Menu only
+        }
+    }
+
+    /// OSB of a format slot holding `page`, if any (for warn flash).
+    pub fn slot_osb_for_page(&self, page: AutoPage) -> Option<u8> {
+        for (i, s) in self.slots.iter().enumerate() {
+            if *s == Some(page) {
+                return Some(match i {
+                    0 => 14,
+                    1 => 13,
+                    _ => 12,
+                });
+            }
+        }
+        None
+    }
+
     /// Handle global format-select OSBs. `allowed` = probe GO formats.
     pub fn handle_osb(&mut self, osb: u8, tick: u32, allowed: &[AutoPage]) -> FormatSelectAction {
         // Master Menu has priority: OSB 11 = RNG, 15 = OWN pick (not DCLT/OWN jump).

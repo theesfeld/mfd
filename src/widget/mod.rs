@@ -17,8 +17,8 @@ pub use attitude::{attitude_ball, heading_cardinal, heading_display, heading_ros
 pub use bezel::bezel_frame;
 pub use extra::{
     bearing_pointer, bscope_grid, caution_box, content_after_osb, crosshair, horizon_cue,
-    list_menu, numeric_readout, osb_chrome, progress_strip, range_rings, station_grid, track_gate,
-    video_frame,
+    list_menu, numeric_readout, osb_chrome, osb_chrome_ex, progress_strip, range_rings,
+    station_grid, track_gate, video_frame,
 };
 pub use label::{label, label_centered};
 pub use range_sensor::{range_display, RangeSnapshot};
