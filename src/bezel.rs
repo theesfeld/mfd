@@ -1,42 +1,91 @@
 //! Bezel / OSB input model — **plug in real buttons later without rewriting pages**.
 //!
+//! # Hardware SoT
+//!
+//! Full production button types, OSB map, and rocker roles:
+//! **`docs/hardware-bezel.md`**.
+//!
 //! # Layout (F-16-class 20-OSB)
 //!
 //! ```text
-//!         1   2   3   4   5
+//!         1   2   3   4   5     top options (active format)
 //!    20                       6
 //!    19                       7
-//!    18      [  GLASS  ]      8
+//!    18      [  GLASS  ]      8     right options
 //!    17                       9
 //!    16                      10
-//!        15  14  13  12  11
+//!        15  14  13  12  11     OWN · fmtA · fmtB · fmtC · DCLT
 //! ```
 //!
-//! Corner knobs: brightness, contrast, symbology, gain.
+//! Frozen product roles: OSB 11=DCLT, 12–14=format slots, 15=OWN,
+//! 16=DTC, 19=SET, 20=BUS. See [`osb_role`].
+//!
+//! Corner knobs: BRT / CON / SYM / GAIN ([`BezelKnob`]).
 //!
 //! Pages only consume [`BezelEvent`]. Sources implement [`BezelSource`]:
-//! keyboard (POC), later GPIO / HID / CAN.
+//! keyboard (POC), later GPIO / HID.
 
-/// OSB index 1..=20 (not zero-based).
+/// OSB index **1..=20** (not zero-based). Matches face silkscreen.
 pub type OsbId = u8;
 
+/// Frozen production OSB numbers (hardware silkscreen / GPIO map).
+pub mod osb_role {
+    use super::OsbId;
+
+    pub const DCLT: OsbId = 11;
+    pub const FORMAT_C: OsbId = 12; // default ATT
+    pub const FORMAT_B: OsbId = 13; // default DRV
+    pub const FORMAT_A: OsbId = 14; // default ENG; active → Master Menu
+    pub const OWN: OsbId = 15;
+    pub const DTC: OsbId = 16;
+    pub const SET: OsbId = 19;
+    pub const BUS: OsbId = 20;
+
+    /// Top option row OSB 1..=5.
+    pub fn is_top_option(osb: OsbId) -> bool {
+        (1..=5).contains(&osb)
+    }
+    /// Right option column OSB 6..=10.
+    pub fn is_right_option(osb: OsbId) -> bool {
+        (6..=10).contains(&osb)
+    }
+    /// Bottom format-select strip OSB 11..=15.
+    pub fn is_bottom_format_strip(osb: OsbId) -> bool {
+        (11..=15).contains(&osb)
+    }
+    /// Left support column OSB 16..=20.
+    pub fn is_left_support(osb: OsbId) -> bool {
+        (16..=20).contains(&osb)
+    }
+}
+
 /// Continuous bezel controls (corners / rockers).
+///
+/// Hardware: absolute 0.0..=1.0 after host scaling, or relative steps
+/// converted by firmware before emitting [`BezelEvent::Knob`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BezelKnob {
+    /// Glass brightness (lower-left rocker class).
     Brightness,
+    /// Glass contrast (lower-right rocker class).
     Contrast,
+    /// Symbology intensity (upper-right class).
     Symbology,
+    /// CAM/FLIR gain when video GO; else software no-op (upper-left class).
     Gain,
 }
 
 /// Edge-triggered and level events from a bezel.
+///
+/// **Production:** GPIO matrix emits only these variants.  
+/// **POC:** [`KeyboardBezel`] maps keys → same events.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BezelEvent {
-    /// OSB pressed (1..=20).
+    /// OSB pressed (`osb` in 1..=20).
     OsbDown(OsbId),
-    /// OSB released (1..=20).
+    /// OSB released (`osb` in 1..=20).
     OsbUp(OsbId),
-    /// Knob moved to absolute 0.0..=1.0.
+    /// Rocker/knob absolute level 0.0..=1.0.
     Knob(BezelKnob, f32),
 }
 

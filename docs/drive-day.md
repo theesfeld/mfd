@@ -1,5 +1,19 @@
 # Drive day — one command
 
+## Bezel (lab keys → production buttons)
+
+See **[`hardware-bezel.md`](hardware-bezel.md)** for production OSB/rocker types.
+
+| Side | Lab keys | Production |
+|------|----------|------------|
+| Top options | `1`–`5` | OSB 1–5 |
+| Right options | `6`–`9` `0` | OSB 6–10 |
+| Bottom | `q` `w` `e` `r` `t` | OSB 15–11 (OWN · formats · DCLT) |
+| Left | `a` `s` `d` `f` `g` | OSB 16–20 (DTC · SET · BUS) |
+| BRT | `[` `]` | BRT rocker |
+
+Format change: press bottom format slots or **`m`** Master Menu (lab). Hardware: active format OSB only.
+
 ## Command
 
 ```sh

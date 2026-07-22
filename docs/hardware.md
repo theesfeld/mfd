@@ -70,6 +70,8 @@ Standard Mode 01 alone does **not** carry attitude. Expect UDS `0x22` on body/AB
 
 ## Related docs
 
+- **Bezel buttons / rockers (hardware SoT):** [`hardware-bezel.md`](hardware-bezel.md)
+- Product OSB law: [`reference/vehicle-cmfd-design.md`](reference/vehicle-cmfd-design.md)
 - Sensors env and OBD: [`auto-sensors.md`](auto-sensors.md)
 - Ford F-150 UDS read path: [`reference/ford-f150-uds-readonly.md`](reference/ford-f150-uds-readonly.md)
 - Bezel ABI: [`API.md`](API.md) § Bezel

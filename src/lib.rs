@@ -35,7 +35,9 @@ pub mod video;
 pub mod warn;
 pub mod widget;
 
-pub use bezel::{BezelEvent, BezelKnob, BezelSource, BezelState, KeyboardBezel, NullBezel};
+pub use bezel::{
+    osb_role, BezelEvent, BezelKnob, BezelSource, BezelState, KeyboardBezel, NullBezel, OsbId,
+};
 pub use color::{
     rgb, Ink, AMBER, BLACK, CYAN, GREEN, GREEN_DIM, GREY, MAGENTA, PANEL, RED, TRANSPARENT, WHITE,
     YELLOW,

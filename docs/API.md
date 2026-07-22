@@ -79,15 +79,22 @@ s.apply_brightness(bezel.brightness);
 
 ## 4. Bezel input ABI (plug-in hardware)
 
+**Hardware design SoT (button types, roles, harness):** [`hardware-bezel.md`](hardware-bezel.md)
+
 ### Events
 
 ```rust
+pub type OsbId = u8; // 1..=20
+
 pub enum BezelEvent {
-    OsbDown(u8),  // 1..=20
-    OsbUp(u8),
+    OsbDown(OsbId),
+    OsbUp(OsbId),
     Knob(BezelKnob, f32), // 0..=1 absolute
 }
 pub enum BezelKnob { Brightness, Contrast, Symbology, Gain }
+
+// Frozen production OSB numbers:
+// mfd::osb_role::{DCLT, FORMAT_A, FORMAT_B, FORMAT_C, OWN, DTC, SET, BUS}
 ```
 
 ### Source trait
@@ -98,26 +105,37 @@ pub trait BezelSource {
 }
 ```
 
-- **POC:** `KeyboardBezel`  
-- **Future:** `GpioBezel`, `HidBezel` — same events  
+- **POC:** `KeyboardBezel` (maps 1–5 / 6–0 / qwert / asdfg / rocker keys)  
+- **Future:** `GpioBezel`, `HidBezel` — **same events only**
 
 Pages **must not** read keyboard or GPIO. They only read `BezelState` / handle events in the app loop.
 
-### OSB numbering
+### OSB numbering (production silkscreen)
 
 ```
-        1  2  3  4  5
+        1  2  3  4  5     top = options for active format
    20                 6
    19                 7
    18    [ GLASS ]    8
    17                 9
    16                10
-       15 14 13 12 11
+       15 14 13 12 11     OWN · fmtA · fmtB · fmtC · DCLT
 ```
+
+| OSB | Frozen role |
+|-----|-------------|
+| 1–5 | Format options (e.g. Lights LO/HI/FOG) |
+| 6–10 | Format options |
+| 11 | DCLT |
+| 12–14 | Format slots (default ATT / DRV / ENG) |
+| 15 | OWN |
+| 16 | DTC |
+| 19 | SET |
+| 20 | BUS |
 
 ### Brightness
 
-`Surface::apply_brightness(factor)` scales RGB after draw. Demo maps `BezelState.brightness` (knobs `[` `]`) to this call. **BRT is not cosmetic text only.**
+`Surface::apply_brightness(factor)` scales RGB after draw. Map `BezelState.brightness` from the **BRT rocker** (POC: `[` `]`). **BRT is not cosmetic text only.**
 
 ## 5. Color modes
 
