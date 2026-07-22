@@ -68,10 +68,10 @@ s.apply_brightness(bezel.brightness);
 | Item | Value |
 |------|--------|
 | F-16 MLU color MFD (Honeywell class) | **≈ 4×4 in (10×10 cm)** square LCD |
-| Library default | **Square** pixel surface (default **512×512**, cap via `MFD_MAX_W/H`) |
-| Terminal demo | Centered **square cell viewport** + square surface |
+| Library framebuffer | **1∶1 pixels** (default **512×512**) |
+| Terminal present box | **Visually square**: `cols/rows` corrected for **cell aspect** (cells are tall; equal cols×rows looks rectangular) |
 
-Not a full-wide TTY fill. Wide panels are optional later.
+`square_mfd_viewport` uses `TIOCGWINSZ` pixel size when available (else assumes ~1∶2 cells) so Kitty does not stretch circles into ovals.
 
 ## 4. Bezel input ABI (plug-in hardware)
 

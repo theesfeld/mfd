@@ -134,6 +134,9 @@ fn atty_stdout() -> bool {
 
 /// Terminal size in character cells `(cols, rows)`.
 pub fn terminal_cells() -> (u16, u16) {
+    if let Some((c, r, _, _)) = terminal_winsize() {
+        return (c, r);
+    }
     if let (Ok(c), Ok(r)) = (std::env::var("COLUMNS"), std::env::var("LINES")) {
         if let (Ok(c), Ok(r)) = (c.parse::<u16>(), r.parse::<u16>()) {
             if c > 0 && r > 0 {
@@ -141,19 +144,40 @@ pub fn terminal_cells() -> (u16, u16) {
             }
         }
     }
+    (80, 24)
+}
+
+/// `(cols, rows, pixel_w, pixel_h)` from `TIOCGWINSZ` when available.
+/// `pixel_*` may be 0 on some terminals.
+fn terminal_winsize() -> Option<(u16, u16, u16, u16)> {
     #[cfg(unix)]
-    {
-        unsafe {
-            let mut ws: libc::winsize = std::mem::zeroed();
-            if libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) == 0
-                && ws.ws_col > 0
-                && ws.ws_row > 0
-            {
-                return (ws.ws_col, ws.ws_row);
-            }
+    unsafe {
+        let mut ws: libc::winsize = std::mem::zeroed();
+        if libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) == 0
+            && ws.ws_col > 0
+            && ws.ws_row > 0
+        {
+            return Some((ws.ws_col, ws.ws_row, ws.ws_xpixel, ws.ws_ypixel));
         }
     }
-    (80, 24)
+    let _ = ();
+    None
+}
+
+/// Approximate pixel size of one character cell `(width, height)`.
+///
+/// Prefer real `ws_xpixel`/`ws_ypixel`. Fallback **1∶2** (common mono fonts).
+pub fn cell_pixel_size() -> (f32, f32) {
+    if let Some((cols, rows, xpix, ypix)) = terminal_winsize() {
+        if xpix > 0 && ypix > 0 && cols > 0 && rows > 0 {
+            return (
+                xpix as f32 / cols as f32,
+                ypix as f32 / rows as f32,
+            );
+        }
+    }
+    // Typical terminal cell: half as wide as tall → N×N cells look *tall*.
+    (8.0, 16.0)
 }
 
 fn max_pixels() -> (u32, u32) {
@@ -188,24 +212,18 @@ pub fn suggested_surface_size(backend: TermBackend) -> (u32, u32) {
     surface_size_for_viewport(backend, Viewport::full_terminal())
 }
 
-/// Square cell viewport (F-16 class face is square — MLU color MFD ≈ **4×4 in / 10×10 cm**).
+/// **Visually square** cell viewport (F-16 MLU class ≈ **4×4 in / 10×10 cm**).
 ///
-/// Centered in the terminal. `frac` of the smaller terminal dimension (0.5–1.0).
+/// Terminal cells are **not** square (often ~1∶2 width∶height). Equal `cols==rows`
+/// therefore paints a **tall rectangle** and stretches a square framebuffer into
+/// ovals. This function measures cell pixel size and chooses `cols`/`rows` so
+/// that `cols * cell_w ≈ rows * cell_h` on screen.
+///
+/// `frac` = fraction of the smaller terminal side available for the face (0.4–1.0).
 pub fn square_mfd_viewport(frac: f32) -> Viewport {
     let (tc, tr) = terminal_cells();
-    let f = frac.clamp(0.4, 1.0);
-    // Cell aspect is ~0.5 width:height of a cell; for a *visual* square use more cols.
-    // Approx: square pixels when cols ≈ rows * 2 for half-block; for Kitty we map
-    // surface to cell box so use equal cell-side using min dimension in "cell units".
-    let side = ((tc.min(tr) as f32) * f) as u16;
-    let side = side.max(12);
-    // Prefer slightly wider cell box so letterboxing matches square image.
-    let cols = side.min(tc).max(10);
-    let rows = side.min(tr).max(8);
-    // Use min of square-ish cell count
-    let edge = cols.min(rows);
-    let cols = edge;
-    let rows = edge;
+    let (cw, ch) = cell_pixel_size();
+    let (cols, rows) = visual_square_cells(tc, tr, cw, ch, frac);
     let col = tc.saturating_sub(cols) / 2;
     let row = tr.saturating_sub(rows) / 2;
     Viewport {
@@ -216,7 +234,43 @@ pub fn square_mfd_viewport(frac: f32) -> Viewport {
     }
 }
 
-/// Square pixel size for an MFD face (default 512, square, capped).
+/// Pure layout helper: cell counts for a visual square in the terminal.
+pub fn visual_square_cells(
+    term_cols: u16,
+    term_rows: u16,
+    cell_w: f32,
+    cell_h: f32,
+    frac: f32,
+) -> (u16, u16) {
+    let tc = term_cols.max(1) as i32;
+    let tr = term_rows.max(1) as i32;
+    let cw = cell_w.max(1.0);
+    let ch = cell_h.max(1.0);
+    let f = frac.clamp(0.4, 1.0);
+
+    let max_w_px = tc as f32 * cw * f;
+    let max_h_px = tr as f32 * ch * f;
+    let side_px = max_w_px.min(max_h_px).max(1.0);
+
+    let mut cols = (side_px / cw).floor() as i32;
+    let mut rows = (side_px / ch).floor() as i32;
+    cols = cols.clamp(8, tc);
+    rows = rows.clamp(4, tr);
+
+    let vis_w = cols as f32 * cw;
+    let vis_h = rows as f32 * ch;
+    if vis_w > vis_h + 0.5 {
+        cols = ((vis_h / cw).floor() as i32).clamp(8, tc);
+    } else if vis_h > vis_w + 0.5 {
+        rows = ((vis_w / ch).floor() as i32).clamp(4, tr);
+    }
+    (cols as u16, rows as u16)
+}
+
+/// Square **pixel** surface for the MFD face (1∶1 framebuffer).
+///
+/// Kitty/half-block map this into [`square_mfd_viewport`]; the viewport cell
+/// counts must be aspect-corrected or the square is stretched on glass.
 pub fn square_mfd_pixels(backend: TermBackend) -> (u32, u32) {
     let (mw, mh) = max_pixels();
     let side = mw.min(mh).min(640);
@@ -225,7 +279,8 @@ pub fn square_mfd_pixels(backend: TermBackend) -> (u32, u32) {
         TermBackend::HalfBlock => side.min(400),
         TermBackend::Kitty => side,
     };
-    (side.max(128), side.max(128))
+    let side = side.max(128);
+    (side, side)
 }
 
 /// Reusable present buffers (avoids multi-MB alloc/frame → terminal crawl).
@@ -743,5 +798,16 @@ mod tests {
         let (w, h) = surface_size_for_viewport(TermBackend::Kitty, vp);
         let (mw, mh) = max_pixels();
         assert!(w <= mw && h <= mh);
+    }
+
+    #[test]
+    fn visual_square_uses_more_cols_when_cells_are_tall() {
+        // 8×16 px cells → need ~2× cols as rows for a square.
+        let (cols, rows) = visual_square_cells(200, 60, 8.0, 16.0, 0.9);
+        assert!(cols > rows, "cols={cols} should exceed rows={rows} for 1:2 cells");
+        let vis_w = cols as f32 * 8.0;
+        let vis_h = rows as f32 * 16.0;
+        let err = (vis_w - vis_h).abs() / vis_w.max(vis_h);
+        assert!(err < 0.15, "visual aspect error {err} (w={vis_w} h={vis_h})");
     }
 }
