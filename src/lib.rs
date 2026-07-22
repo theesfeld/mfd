@@ -17,7 +17,7 @@ pub mod frame;
 pub mod stroke;
 pub mod term;
 
-pub use stroke::{DisplayList, Stroke};
+pub use stroke::{DisplayList, Stroke, TimedStroke};
 
 use std::f32::consts::PI;
 

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Per-stroke lifespan** on `DisplayList`: `set_lifespan`, `tick`, `TimedStroke`, `stroke_life` / `refresh_life` (fade by remaining life)
+- Demo: **needle gauges + tape gauges** with several draw types; optional `VGE_TTL` needle tip trail
+- Center mark uses **`vge_xform_rotate` + `vge_line_xf`**
+
+### Changed
+
+- Demo is instrument-oriented (clear → many independent draws → present), not a full HUD scene/sweep path
+
 ### Fixed
 
 - `vge-demo --fb` release segfault: do not use `dyn Canvas` with the asm FFI path (monomorphize)
