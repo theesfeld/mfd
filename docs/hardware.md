@@ -71,6 +71,13 @@ Standard Mode 01 alone does **not** carry attitude. Expect UDS `0x22` on body/AB
 ## Related docs
 
 - **Bezel buttons / rockers (hardware SoT):** [`hardware-bezel.md`](hardware-bezel.md)
+- **Universal CMFD platform (PCB · print · BOM · #137):** [`hardware/cmfd-platform-requirements.md`](hardware/cmfd-platform-requirements.md)
+- Connector ICD: [`hardware/cmfd-connector-icd.md`](hardware/cmfd-connector-icd.md)
+- Power / 18650: [`hardware/cmfd-power.md`](hardware/cmfd-power.md)
+- Flash / recovery: [`hardware/cmfd-flash.md`](hardware/cmfd-flash.md)
+- Industrial design: [`hardware/cmfd-industrial-design.md`](hardware/cmfd-industrial-design.md)
+- Fab + print tree: [`../hardware/README.md`](../hardware/README.md)
+- Exploded view: [`../hardware/viewer/index.html`](../hardware/viewer/index.html)
 - Product OSB law: [`reference/vehicle-cmfd-design.md`](reference/vehicle-cmfd-design.md)
 - Sensors env and OBD: [`auto-sensors.md`](auto-sensors.md)
 - Ford F-150 UDS read path: [`reference/ford-f150-uds-readonly.md`](reference/ford-f150-uds-readonly.md)

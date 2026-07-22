@@ -1,0 +1,7 @@
+Designator,Val,Package,Mid X,Mid Y,Rotation,Layer
+U5,BQ25895,QFN-24,95.00mm,60.00mm,0,Top
+U6,ISO1042,SOIC-8,95.00mm,40.00mm,0,Top
+U7,RTL8201F,QFN-32,95.00mm,22.00mm,0,Top
+U8,BMP280,LGA-8,50.00mm,70.00mm,0,Top
+J3,USB-C,USB-C-16P,30.00mm,8.00mm,0,Top
+J4,USB-C,USB-C-16P,55.00mm,8.00mm,0,Top

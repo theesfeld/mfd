@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Universal CMFD hardware design package:** two-board Gerbers (bezel MCU + SoM carrier), BOM/CPL, durable 3D-print STLs, connector ICD, power/flash docs, Three.js exploded view (`hardware/`, `docs/hardware/`, `site/hardware/`). Refs #137.
+
 ### Changed
 
 - **CMFD design P1/P2 (Lockheed review):** green SOI box; empty Master Menu glass; round_gauge uses palette structure + white needle; SYM/CON rockers affect glass; ATT sky blue / ground brown; short format ID header; DCLT label fixed. Refs #135.

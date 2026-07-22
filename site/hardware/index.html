@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CMFD platform — exploded view · mfd #137</title>
+  <style>
+    :root {
+      --bg: #0e1116;
+      --panel: #1a2030;
+      --text: #e8eef7;
+      --muted: #8b9bb4;
+      --accent: #3d8bfd;
+      --blue: #2a6db5;
+      --silver: #c5ced9;
+      --warn: #e8b84a;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%;
+      background: var(--bg); color: var(--text);
+      font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    }
+    #app { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
+    aside {
+      background: var(--panel);
+      border-right: 1px solid #2a3348;
+      padding: 1rem 1.1rem;
+      overflow: auto;
+    }
+    h1 { font-size: 1.05rem; margin: 0 0 0.25rem; font-weight: 600; }
+    .sub { color: var(--muted); font-size: 0.8rem; margin-bottom: 1rem; line-height: 1.35; }
+    label.row {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.85rem; margin: 0.35rem 0; cursor: pointer;
+    }
+    input[type="range"] { width: 100%; }
+    .ctrl { margin: 1rem 0; }
+    .ctrl h2 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 0.4rem; }
+    button {
+      background: #243049; color: var(--text); border: 1px solid #3a4a66;
+      border-radius: 6px; padding: 0.45rem 0.7rem; cursor: pointer; font-size: 0.8rem;
+      margin: 0.2rem 0.2rem 0.2rem 0;
+    }
+    button:hover { background: #2d3c5c; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    #c { width: 100%; height: 100%; display: block; }
+    .legend { font-size: 0.75rem; color: var(--muted); margin-top: 1rem; line-height: 1.45; }
+    .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+    a { color: var(--accent); }
+    @media (max-width: 800px) {
+      #app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+      aside { max-height: 40vh; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <aside>
+      <h1>CMFD platform</h1>
+      <p class="sub">Universal multi-function display · F-16 CMFD spirit + late-80s industrial skin · Issue <a href="https://github.com/theesfeld/mfd/issues/137">#137</a></p>
+
+      <div class="ctrl">
+        <h2>Explode</h2>
+        <input id="explode" type="range" min="0" max="100" value="55" />
+      </div>
+      <div class="ctrl">
+        <h2>Rotation</h2>
+        <button type="button" id="spin">Toggle spin</button>
+        <button type="button" id="reset">Reset view</button>
+      </div>
+      <div class="ctrl">
+        <h2>Layers</h2>
+        <label class="row"><input type="checkbox" data-layer="bumpers" checked /> Corner bumpers (TPU)</label>
+        <label class="row"><input type="checkbox" data-layer="front" checked /> Front bezel</label>
+        <label class="row"><input type="checkbox" data-layer="caps" checked /> OSB caps ×20</label>
+        <label class="row"><input type="checkbox" data-layer="rockers" checked /> Rockers ×4</label>
+        <label class="row"><input type="checkbox" data-layer="glass" checked /> Cover glass + LCD</label>
+        <label class="row"><input type="checkbox" data-layer="boardA" checked /> Board A — bezel MCU</label>
+        <label class="row"><input type="checkbox" data-layer="boardB" checked /> Board B — SoM carrier</label>
+        <label class="row"><input type="checkbox" data-layer="som" checked /> Linux SoM</label>
+        <label class="row"><input type="checkbox" data-layer="battery" checked /> 18650 tray</label>
+        <label class="row"><input type="checkbox" data-layer="rear" checked /> Rear shell</label>
+      </div>
+      <div class="ctrl">
+        <h2>Presets</h2>
+        <button type="button" class="primary" id="preset-exploded">Exploded</button>
+        <button type="button" id="preset-closed">Closed unit</button>
+        <button type="button" id="preset-electronics">Electronics only</button>
+      </div>
+      <p class="legend">
+        <span class="swatch" style="background:#9ec0e8"></span> Front bezel (PETG)<br/>
+        <span class="swatch" style="background:#2a6db5"></span> Walkman blue accents<br/>
+        <span class="swatch" style="background:#3d5a40"></span> Board A · <span class="swatch" style="background:#1e3a5f"></span> Board B<br/>
+        <span class="swatch" style="background:#c5a04a"></span> SoM · <span class="swatch" style="background:#666"></span> Cells<br/>
+        Drag to orbit · scroll to zoom · not flight hardware
+      </p>
+    </aside>
+    <canvas id="c"></canvas>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    const canvas = document.getElementById('c');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setClearColor(0x0e1116, 1);
+    renderer.shadowMap.enabled = true;
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x0e1116, 40, 90);
+
+    const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
+    camera.position.set(28, 22, 32);
+
+    const controls = new OrbitControls(camera, canvas);
+    controls.enableDamping = true;
+    controls.target.set(0, 0, 0);
+
+    const amb = new THREE.AmbientLight(0x8899bb, 0.55);
+    scene.add(amb);
+    const key = new THREE.DirectionalLight(0xffffff, 1.1);
+    key.position.set(15, 25, 12);
+    key.castShadow = true;
+    scene.add(key);
+    const fill = new THREE.DirectionalLight(0x6688cc, 0.35);
+    fill.position.set(-12, 8, -10);
+    scene.add(fill);
+    const rim = new THREE.DirectionalLight(0x2a6db5, 0.4);
+    rim.position.set(0, -5, -15);
+    scene.add(rim);
+
+    // ground shadow disc
+    const ground = new THREE.Mesh(
+      new THREE.CircleGeometry(18, 48),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -8;
+    scene.add(ground);
+
+    const OUTER = 14.8; // cm for readability (1 unit = 1 cm); real is 148 mm
+    const S = 0.1; // scale factor mm→scene: 148mm → 14.8 units already as cm
+    // Use cm: outer 14.8, glass 10.2, depth 5.8
+
+    const layers = {};
+    const basePos = {};
+    const explodeDir = {};
+
+    function mat(color, opts = {}) {
+      return new THREE.MeshStandardMaterial({
+        color, metalness: opts.metalness ?? 0.25, roughness: opts.roughness ?? 0.55,
+        transparent: !!opts.opacity && opts.opacity < 1,
+        opacity: opts.opacity ?? 1,
+      });
+    }
+
+    function roundedBox(w, h, d, r, material) {
+      // approximate with box (r for future)
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      return m;
+    }
+
+    function addLayer(name, mesh, home, dir) {
+      layers[name] = mesh;
+      basePos[name] = home.clone();
+      explodeDir[name] = dir.clone().normalize();
+      mesh.position.copy(home);
+      scene.add(mesh);
+    }
+
+    // --- Rear shell ---
+    {
+      const g = new THREE.Group();
+      const shell = roundedBox(14.8, 4.4, 14.8, 0.8, mat(0x6a7585, { metalness: 0.35, roughness: 0.45 }));
+      shell.position.y = 0;
+      g.add(shell);
+      // port nubs
+      const portMat = mat(0x222830, { metalness: 0.6, roughness: 0.3 });
+      [[-4, -7.2, -1.5], [-2, -7.2, -1.5], [1, -7.2, -1.2], [4, -7.2, -1.5]].forEach(([x, z, y]) => {
+        const p = roundedBox(0.9, 0.45, 0.4, 0.05, portMat);
+        p.position.set(x, y, z);
+        g.add(p);
+      });
+      addLayer('rear', g, new THREE.Vector3(0, -3.5, 0), new THREE.Vector3(0, -1, 0));
+    }
+
+    // --- Battery tray + cells ---
+    {
+      const g = new THREE.Group();
+      const tray = roundedBox(4.2, 2.2, 7.8, 0.2, mat(0x3a3f48));
+      g.add(tray);
+      const cellMat = mat(0x2a2a2a, { metalness: 0.7, roughness: 0.25 });
+      for (let i = 0; i < 2; i++) {
+        const cell = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.9, 0.9, 6.5, 24),
+          cellMat
+        );
+        cell.rotation.x = Math.PI / 2;
+        cell.position.set(-1 + i * 2, 0.2, 0);
+        // wrap blue accent
+        const band = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.92, 0.92, 1.2, 24),
+          mat(0x2a6db5, { metalness: 0.4, roughness: 0.4 })
+        );
+        band.rotation.x = Math.PI / 2;
+        band.position.copy(cell.position);
+        g.add(cell);
+        g.add(band);
+      }
+      addLayer('battery', g, new THREE.Vector3(0, -2.2, 0), new THREE.Vector3(0, -1, 0.15));
+    }
+
+    // --- Board B ---
+    {
+      const g = new THREE.Group();
+      const pcb = roundedBox(12.0, 0.16, 9.0, 0.1, mat(0x1e3a5f, { metalness: 0.1, roughness: 0.7 }));
+      g.add(pcb);
+      // chips
+      [[-2, 0.2, 0], [3, 0.15, 1], [3, 0.12, -1.5], [0, 0.1, 2]].forEach(([x, y, z], i) => {
+        const chip = roundedBox(1.2 + (i % 2) * 0.5, 0.2, 1.0, 0.05, mat(0x111111, { metalness: 0.5, roughness: 0.4 }));
+        chip.position.set(x, y, z);
+        g.add(chip);
+      });
+      // USB-C
+      [-2.5, 0.5].forEach((x) => {
+        const u = roundedBox(0.9, 0.25, 0.35, 0.05, mat(0xcccccc, { metalness: 0.8, roughness: 0.2 }));
+        u.position.set(x, 0, -4.3);
+        g.add(u);
+      });
+      addLayer('boardB', g, new THREE.Vector3(0, -0.8, 0), new THREE.Vector3(0, -0.3, 0));
+    }
+
+    // --- SoM ---
+    {
+      const g = new THREE.Group();
+      const som = roundedBox(4.5, 0.35, 3.2, 0.1, mat(0xc5a04a, { metalness: 0.45, roughness: 0.35 }));
+      g.add(som);
+      const shield = roundedBox(3.2, 0.25, 2.2, 0.05, mat(0x9aa3ad, { metalness: 0.7, roughness: 0.3 }));
+      shield.position.y = 0.25;
+      g.add(shield);
+      addLayer('som', g, new THREE.Vector3(-2.5, -0.4, 0.5), new THREE.Vector3(-0.4, 0.2, 0));
+    }
+
+    // --- Board A (frame with aperture) ---
+    {
+      const g = new THREE.Group();
+      const shape = new THREE.Shape();
+      const o = 7.0, i = 5.25;
+      shape.moveTo(-o, -o); shape.lineTo(o, -o); shape.lineTo(o, o); shape.lineTo(-o, o); shape.lineTo(-o, -o);
+      const hole = new THREE.Path();
+      hole.moveTo(-i, -i); hole.lineTo(-i, i); hole.lineTo(i, i); hole.lineTo(i, -i); hole.lineTo(-i, -i);
+      shape.holes.push(hole);
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.16, bevelEnabled: false });
+      geo.rotateX(-Math.PI / 2);
+      const pcb = new THREE.Mesh(geo, mat(0x3d5a40, { metalness: 0.15, roughness: 0.65 }));
+      pcb.castShadow = true;
+      g.add(pcb);
+      // MCU blob
+      const mcu = roundedBox(1.0, 0.15, 1.0, 0.05, mat(0x111111));
+      mcu.position.set(0, 0.15, -5.8);
+      g.add(mcu);
+      addLayer('boardA', g, new THREE.Vector3(0, 0.5, 0), new THREE.Vector3(0, 0.5, 0));
+    }
+
+    // --- Glass + LCD ---
+    {
+      const g = new THREE.Group();
+      const lcd = roundedBox(10.2, 0.12, 10.2, 0.05, mat(0x0a1210, { metalness: 0.6, roughness: 0.15 }));
+      g.add(lcd);
+      // symbology fake
+      const grid = new THREE.GridHelper(9, 12, 0x1a4a2a, 0x0d2818);
+      grid.position.y = 0.08;
+      g.add(grid);
+      const glass = roundedBox(10.4, 0.08, 10.4, 0.05, mat(0x88aacc, { metalness: 0.9, roughness: 0.05, opacity: 0.25 }));
+      glass.position.y = 0.15;
+      g.add(glass);
+      addLayer('glass', g, new THREE.Vector3(0, 1.0, 0), new THREE.Vector3(0, 0.7, 0));
+    }
+
+    // --- Front bezel ---
+    {
+      const g = new THREE.Group();
+      const shape = new THREE.Shape();
+      const o = 7.4, i = 5.1;
+      // outer rounded approx as square
+      shape.moveTo(-o, -o); shape.lineTo(o, -o); shape.lineTo(o, o); shape.lineTo(-o, o); shape.closePath();
+      const hole = new THREE.Path();
+      hole.moveTo(-i, -i); hole.lineTo(-i, i); hole.lineTo(i, i); hole.lineTo(i, -i); hole.closePath();
+      shape.holes.push(hole);
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: 1.4, bevelEnabled: false });
+      geo.rotateX(-Math.PI / 2);
+      const bezel = new THREE.Mesh(geo, mat(0xb8c6d6, { metalness: 0.4, roughness: 0.4 }));
+      g.add(bezel);
+      // blue face plate insert (Walkman)
+      const blue = roundedBox(13.6, 0.08, 13.6, 0.3, mat(0x2a6db5, { metalness: 0.35, roughness: 0.45 }));
+      blue.position.y = 0.75;
+      // cut center of blue mentally — use ring via same extrude smaller
+      g.add(blue);
+      // hide center of blue with dark
+      const cut = roundedBox(10.5, 0.1, 10.5, 0.1, mat(0xb8c6d6, { metalness: 0.4, roughness: 0.4 }));
+      cut.position.y = 0.76;
+      g.add(cut);
+      addLayer('front', g, new THREE.Vector3(0, 1.8, 0), new THREE.Vector3(0, 1, 0));
+    }
+
+    // --- OSB caps ---
+    {
+      const g = new THREE.Group();
+      const capMat = mat(0xdde3ea, { metalness: 0.2, roughness: 0.5 });
+      const span = 9.2, step = span / 4, inset = 1.1, c = 0;
+      const centers = [];
+      // top 1-5
+      for (let i = 0; i < 5; i++) centers.push([-span / 2 + i * step, span / 2 + inset * 0.3]);
+      // right 6-10
+      for (let i = 0; i < 5; i++) centers.push([span / 2 + inset * 0.3, span / 2 - i * step]);
+      // bottom L→R = 15..11
+      for (let i = 0; i < 5; i++) centers.push([-span / 2 + i * step, -span / 2 - inset * 0.3]);
+      // left 20..16
+      for (let i = 0; i < 5; i++) centers.push([-span / 2 - inset * 0.3, span / 2 - i * step]);
+      centers.forEach(([x, z], idx) => {
+        const cap = roundedBox(1.1, 0.45, 1.1, 0.15, capMat);
+        cap.position.set(x * 1.15, 0, z * 1.15);
+        g.add(cap);
+        // number sprite-like
+        if (idx === 0 || idx === 5 || idx === 10 || idx === 15) {
+          const tip = roundedBox(0.25, 0.1, 0.25, 0.02, mat(0x2a6db5));
+          tip.position.set(x * 1.15, 0.28, z * 1.15);
+          g.add(tip);
+        }
+      });
+      addLayer('caps', g, new THREE.Vector3(0, 2.6, 0), new THREE.Vector3(0, 1.1, 0));
+    }
+
+    // --- Rockers ---
+    {
+      const g = new THREE.Group();
+      const rk = mat(0x8a93a0, { metalness: 0.35, roughness: 0.4 });
+      const pos = [[-5.5, 5.5], [5.5, 5.5], [-5.5, -5.5], [5.5, -5.5]];
+      pos.forEach(([x, z]) => {
+        const r = roundedBox(1.4, 0.35, 1.0, 0.1, rk);
+        r.position.set(x, 0, z);
+        g.add(r);
+      });
+      addLayer('rockers', g, new THREE.Vector3(0, 2.9, 0), new THREE.Vector3(0, 1.2, 0));
+    }
+
+    // --- Bumpers ---
+    {
+      const g = new THREE.Group();
+      const bm = mat(0x3a3a3a, { metalness: 0.05, roughness: 0.9 });
+      [[-7.2, -7.2], [7.2, -7.2], [7.2, 7.2], [-7.2, 7.2]].forEach(([x, z]) => {
+        const b = roundedBox(2.0, 5.0, 2.0, 0.4, bm);
+        b.position.set(x, 0, z);
+        g.add(b);
+      });
+      addLayer('bumpers', g, new THREE.Vector3(0, -0.5, 0), new THREE.Vector3(0, 0, 0));
+    }
+
+    let explode = 0.55;
+    let spinning = true;
+
+    function applyExplode() {
+      const e = explode * 6.5;
+      for (const name of Object.keys(layers)) {
+        const home = basePos[name];
+        const dir = explodeDir[name];
+        layers[name].position.set(
+          home.x + dir.x * e,
+          home.y + dir.y * e,
+          home.z + dir.z * e
+        );
+      }
+    }
+
+    document.getElementById('explode').addEventListener('input', (ev) => {
+      explode = Number(ev.target.value) / 100;
+      applyExplode();
+    });
+
+    document.querySelectorAll('input[data-layer]').forEach((el) => {
+      el.addEventListener('change', () => {
+        const n = el.getAttribute('data-layer');
+        if (layers[n]) layers[n].visible = el.checked;
+      });
+    });
+
+    document.getElementById('spin').onclick = () => { spinning = !spinning; };
+    document.getElementById('reset').onclick = () => {
+      camera.position.set(28, 22, 32);
+      controls.target.set(0, 0, 0);
+    };
+    document.getElementById('preset-exploded').onclick = () => {
+      explode = 0.7;
+      document.getElementById('explode').value = 70;
+      Object.keys(layers).forEach((n) => { layers[n].visible = true; });
+      document.querySelectorAll('input[data-layer]').forEach((el) => { el.checked = true; });
+      applyExplode();
+    };
+    document.getElementById('preset-closed').onclick = () => {
+      explode = 0;
+      document.getElementById('explode').value = 0;
+      applyExplode();
+    };
+    document.getElementById('preset-electronics').onclick = () => {
+      explode = 0.5;
+      document.getElementById('explode').value = 50;
+      const show = new Set(['boardA', 'boardB', 'som', 'battery', 'glass']);
+      Object.keys(layers).forEach((n) => {
+        layers[n].visible = show.has(n);
+      });
+      document.querySelectorAll('input[data-layer]').forEach((el) => {
+        el.checked = show.has(el.getAttribute('data-layer'));
+      });
+      applyExplode();
+    };
+
+    function resize() {
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      if (canvas.width !== w || canvas.height !== h) {
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+      }
+    }
+
+    applyExplode();
+
+    function frame(t) {
+      resize();
+      if (spinning) {
+        scene.rotation.y = t * 0.00015;
+      }
+      controls.update();
+      renderer.render(scene, camera);
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>

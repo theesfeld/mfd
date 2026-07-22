@@ -1,0 +1,19 @@
+config,populate,item,description,qty,vendor,est_usd,priority
+lean,yes,LCD,4.0in square IPS MIPI ≥720²,1,panel vendor,45,P0
+lean,yes,Cover glass,102x102x1.1mm AR optional,1,cut glass,8,P0
+lean,yes,18650 cell,protected 3000mAh,2,any,8,P0
+lean,yes,Battery holder,2x18650 tray PCB or clips,1,C70378,3,P0
+lean,yes,Speaker,20mm 8Ω 1W,1,C96587,1,P0
+lean,yes,Mic,analog MEMS,1,C72437,1,P1
+lean,yes,SoM,RK3566 2GB+16GB class,1,vendor,35,P0
+lean,yes,Board A fab+asm,see elec/fab/board-a,1,JLCPCB,25,P0
+lean,yes,Board B fab+asm,see elec/fab/board-b,1,JLCPCB,40,P0
+lean,yes,OSB caps print,PETG x20,20,print,2,P0
+lean,yes,Case print,PETG front+rear+tray,1,print,15,P0
+lean,yes,TPU bumpers,x4,4,print,2,P0
+lean,yes,Fasteners,M3 inserts+screws kit,1,McMaster/Amazon,5,P0
+full,yes,GNSS antenna,active ceramic,1,C97521,3,P2
+full,yes,WiFi/BT antenna,IPEX,1,C22398,1,P1
+full,yes,M12 panel set,optional rugged kit,3,Phoenix/Amphenol,40,P2
+full,no,Camera module,CSI DNP,1,,15,P3
+full,yes,Cable OBD adapter,CAN→J1962 read-only,1,custom,12,P1

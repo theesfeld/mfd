@@ -1,0 +1,4 @@
+Designator,Val,Package,Mid X,Mid Y,Rotation,Layer
+U1,STM32G431CBU6,LQFP-48,70.00mm,12.00mm,0,Top
+U2,BMI270,LGA-14,122.00mm,70.00mm,0,Top
+U3,VEML7700,QFN-6,122.00mm,50.00mm,0,Top
