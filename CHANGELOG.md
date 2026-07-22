@@ -4,8 +4,9 @@
 
 ### Added
 
-- **WIDG gallery** format: every public widget on one face (`softkey_row`, tapes V/H, gauges, rings, radar, video gate, list, station, caution, progress, horizon, labels). Demo starts here; `g` or left OSB **WIDG**. Refs #50.
-- Richer pages: WPN softkeys, HAD rings, FUEL horizontal tape, ECM progress; auto Setup softkeys + caution + BRT strip.
+- **Real F-16-class MFD formats** from public manuals (DCS F-16C EA Guide / Chuck / Hoggit): Master **MENU**, **FCR** RWS B-scope, **HSD** (ownship, rings, STPT route, bullseye, threats), **SMS INV** stations 1–9, **TGP** FOV/gate/laser, format-specific OSB legends. Demo starts on **FCR**. Notes: HAF GR1F16CJ-1 has no MFD art (defers to 34-1-1). Refs #52.
+- **WIDG** gallery retained for widget QA (`g`). Refs #50.
+- Richer pages: WPN, HAD, FUEL, ECM; auto Setup.
 
 ### Fixed
 

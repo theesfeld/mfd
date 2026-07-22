@@ -39,8 +39,8 @@ fn main() -> io::Result<()> {
     }
     eprintln!("loaded libmfd {ver} · square MFD face (~4x4 in class)");
     eprintln!("OSB 1-5 top · 6-0 right · qwert bot · asdfg left · [ ] BRT");
-    eprintln!("Tab jet/auto · c color · / bank · g gallery · Esc quit");
-    eprintln!("start: WIDG gallery (every widget type)");
+    eprintln!("Tab jet/auto · c color · / bank · g gallery · m menu · Esc quit");
+    eprintln!("start: FCR RWS (public F-16 MFD layout)");
 
     install_sigint();
     // 30 Hz default keeps Kitty present from queuing into multi-second lag.
@@ -101,8 +101,8 @@ fn main() -> io::Result<()> {
     let mut bezel_src = KeyboardBezel::new();
     let mut bezel = BezelState::default();
     let mut domain = Domain::Jet;
-    // Start on WIDG gallery so every public widget is visible at once.
-    let mut jet_fmt = Format::Gallery;
+    // Start on FCR RWS (typical left-MFD air-to-air radar format).
+    let mut jet_fmt = Format::Fcr;
     let mut jet_bank = 0usize;
     let mut auto_page = AutoPage::Cluster;
     let mut color_mode = ColorMode::ColorMfd;
@@ -138,6 +138,10 @@ fn main() -> io::Result<()> {
                     domain = Domain::Jet;
                     jet_fmt = Format::Gallery;
                 }
+                b'm' | b'M' => {
+                    domain = Domain::Jet;
+                    jet_fmt = Format::Menu;
+                }
                 _ => bezel_src.push_key_state(k, &bezel),
             }
         }
@@ -153,22 +157,23 @@ fn main() -> io::Result<()> {
                         if let Some(f) = Format::from_top_osb(osb, jet_bank) {
                             jet_fmt = f;
                         } else {
+                            // Real F-16 OSB map (public Master Menu / format select).
                             match osb {
-                                11 => jet_fmt = Format::Cni,
-                                12 => jet_fmt = Format::Fuel,
-                                13 => jet_fmt = Format::Eng,
-                                14 => jet_fmt = Format::Test,
-                                15 => jet_fmt = Format::Dte,
-                                16 => jet_fmt = Format::Gallery,
-                                17 => jet_fmt = Format::HudRpt,
-                                18 => jet_fmt = Format::Ecm,
-                                19 => jet_fmt = Format::Flir,
-                                20 => jet_fmt = Format::Had,
-                                6 => jet_fmt = Format::FcrGm,
-                                7 => jet_fmt = Format::FcrSea,
-                                8 => jet_fmt = Format::Stores,
-                                9 => jet_fmt = Format::Ufc,
-                                10 => jet_fmt = Format::Pfl,
+                                6 => jet_fmt = Format::Sms,
+                                7 => jet_fmt = Format::Hsd,
+                                8 => jet_fmt = Format::Dte,
+                                9 => jet_fmt = Format::Test,
+                                10 => jet_fmt = Format::Menu,
+                                11 => jet_fmt = Format::Gallery,
+                                12 => jet_fmt = Format::Sms,
+                                13 => jet_fmt = Format::Hsd,
+                                14 => jet_fmt = Format::Fcr,
+                                15 => jet_fmt = Format::Menu, // SWAP → menu for demo
+                                16 => jet_fmt = Format::Flir,
+                                17 => jet_fmt = Format::Tfr,
+                                18 => jet_fmt = Format::Wpn,
+                                19 => jet_fmt = Format::Tgp,
+                                20 => jet_fmt = Format::Fcr,
                                 _ => {}
                             }
                         }

@@ -8,14 +8,15 @@
 
 | Source | Notes |
 |--------|--------|
-| [Internet Archive search: F-16 flight manual](https://archive.org/search?query=F-16+flight+manual) | Flight manuals, training pubs |
-| [Archive: F-16 Combat Pilot (game manual, MFD concepts)](https://archive.org/download/World_of_Spectrum_June_2017_Mirror/World%20of%20Spectrum%20June%202017%20Mirror.zip/World%20of%20Spectrum%20June%202017%20Mirror/sinclair/games-info/f/F-16CombatPilot.pdf) | Early public MFD flexibility discussion |
-| [publicintelligence HAF F-16 flight manual PDF](https://info.publicintelligence.net/HAF-F16.pdf) | Greek AF F-16C/D flight manual (public copy online; verify currency) |
-| [F-16.net MLU MFD notes](https://www.f-16.net/f-16_versions_article2.html) | Color MFD / HSD description |
-| DCS F-16C Early Access Guide (Eagle Dynamics, public) | Format names for training (not official USAF) |
-| USAF / DVIDS / commons cockpit photos | Visual layout of OSB chrome |
+| **`docs/HAF-F16.pdf`** = T.O. **GR1F16CJ-1** | HAF F-16C/D **basic** flight manual. **Does not contain MFD page art.** § Multfunction Display (1-222) only covers video select on the right MFD and defers detail to **T.O. GR1F16CJ-34-1-1** (Avionics and Nonnuclear Weapons Delivery). |
+| T.O. **GR1F16CJ-34-1-1** | Detailed MFD / SMS / FCR / TGP book. Often restricted; not in this repo. |
+| [DCS F-16C Early Access Guide](https://www.digitalcombatsimulator.com/) (Eagle Dynamics, public PDF) | Full **public** MFD format descriptions + OSB maps (study layout only). Distilled: `docs/reference/dcs-f16-mfd-notes.md` |
+| [Chuck’s F-16C Viper Guide](https://chucksguides.com/aircraft/dcs/f-16cm/) | Public training screenshots of FCR/HSD/SMS/TGP |
+| [Hoggit MFD wiki](https://wiki.hoggitworld.com/view/MFDs_(Typical)) | Master Menu OSB map |
+| [Internet Archive: F-16 flight manual](https://archive.org/search?query=F-16+flight+manual) | Search `1F-16`, `GR1F16`, `34-1-1` |
+| USAF / DVIDS / commons cockpit photos | Real chrome / color only — not full format dumps |
 
-Search Archive.org for: `1F-16`, `TO GR1F16`, `F-16C/D flight manual`, `multifunction display`.
+**Library implementation is a study approximation** of public training layouts. It is **not** certified flight data and **not** a dump of classified TO figures.
 
 ## Bezel layout (library model)
 

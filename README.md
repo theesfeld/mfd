@@ -36,7 +36,8 @@ cargo run --release --bin mfd-demo
 MFD_TERM=kitty cargo run --release --bin mfd-demo
 ```
 
-Default demo: **WIDG** gallery (every public widget), **30 Hz**, square face.  
+Default demo: **FCR RWS** (public F-16 radar format), **30 Hz**, square face.  
+Keys: `m` Master Menu · `g` widget QA · OSB map matches public F-16 menu (FCR/HSD/SMS/TGP/…).  
 `[` `]` change **real brightness** (scales RGB after draw).
 
 ### Bezel keys (events, not hard-wired pages)
