@@ -178,6 +178,7 @@ fn main() -> io::Result<()> {
                             let prev = cycle_auto(auto_page, -1, &available_pages);
                             goto_format(&mut auto_page, &mut fmt_sel, prev, &available_pages);
                         }
+                        // arrows already handled above
                         EscAction::Ignore | EscAction::PageNext | EscAction::PagePrev => {}
                     }
                     ki += consumed;
@@ -203,7 +204,15 @@ fn main() -> io::Result<()> {
                 //   n/p  cycle · m Master Menu · Tab next format slot
                 // Dedicated OSB keys always go to bezel (see KeyboardBezel):
                 //   1-5 top options · 6-0 right · qwert bottom · asdfg left
-                // Lab cycle: n = next. Prev = arrows only (`p` is OSB 11 DCLT).
+                // Lab: [ ] = format prev/next (rocker). n = next. m = Master Menu.
+                b'[' => {
+                    let prev = cycle_auto(auto_page, -1, &available_pages);
+                    goto_format(&mut auto_page, &mut fmt_sel, prev, &available_pages);
+                }
+                b']' => {
+                    let next = cycle_auto(auto_page, 1, &available_pages);
+                    goto_format(&mut auto_page, &mut fmt_sel, next, &available_pages);
+                }
                 b'n' | b'N' => {
                     let next = cycle_auto(auto_page, 1, &available_pages);
                     goto_format(&mut auto_page, &mut fmt_sel, next, &available_pages);
@@ -215,9 +224,7 @@ fn main() -> io::Result<()> {
                         let _ = fmt_sel.handle_osb(fmt_sel.active.osb(), osb_tick, allow);
                     }
                 }
-                // All OSB / rocker keys → BezelEvent (production input plane).
-                // Numeric face map: 1-0 · yuiop bottom · asdfg left · [ ] BRT
-                // (UNIT/PAL only via SET OSBs — no letter steal of bottom OSB keys.)
+                // Linear OSB: 1234567890qwertyuiop → 1..20 · BRT on -/=
                 _ => bezel_src.push_key_state(k, &bezel),
             }
             ki += 1;
@@ -533,20 +540,18 @@ fn print_banner(ver: &str) {
     eprintln!("  STARTUP");
     eprintln!("    CMFD power-on until capability probe finishes");
     eprintln!();
-    eprintln!("  OSB KEYS (numeric face map — matches OSB numbers / face sides)");
-    eprintln!("    TOP     1 2 3 4 5           OSB 1–5   page options");
-    eprintln!("    RIGHT   6 7 8 9 0           OSB 6–10  page options");
-    eprintln!("    BOTTOM  y u i o p           OSB 15–11 OWN · *A · B · C · DCLT");
-    eprintln!("            (legacy q w e r t same strip)");
-    eprintln!("    LEFT    a s d f g           OSB 16–20 DTC · · · SET · BUS");
+    eprintln!("  OSB KEYS (linear — one key per OSB 1..20)");
+    eprintln!("    1 2 3 4 5 6 7 8 9 0 q w e r t y u i o p");
+    eprintln!("    1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20");
+    eprintln!("    top 1-5 · right 6-10 · DCLT=q · slots w/e/r · OWN=t · DTC=y · SET=o · BUS=p");
     eprintln!();
     eprintln!("  FORMAT (MLU)");
-    eprintln!("    Other format slot  →  select that format");
-    eprintln!("    Lit *slot (active) →  MASTER MENU  (then pick a format OSB)");
-    eprintln!("    n/p or arrows      →  cycle formats (lab only)");
-    eprintln!("    m                  →  open Master Menu (lab only)");
+    eprintln!("    Other format slot  →  select   (keys w e r = OSB 12 13 14)");
+    eprintln!("    Lit *slot (active) →  MASTER MENU  (then pick format OSB 1-20)");
+    eprintln!("    [ ]                →  prev / next format (lab rocker)");
+    eprintln!("    m                  →  open Master Menu (lab)");
     eprintln!();
-    eprintln!("  OTHER  [ ] BRT · Esc quit  ·  UNIT/PAL on SET page OSBs");
+    eprintln!("  ROCKERS  - = BRT · ; ' CON · , . GAIN · Esc quit");
     eprintln!("  Drive: ./cmfd.sh  ·  MFD_OBD_BT=00:04:3E:96:B8:F1");
     eprintln!();
 }

@@ -4,7 +4,7 @@
 
 ### Changed
 
-- **Bezel / lab OSB map:** numeric face map (`1`–`0`, bottom `yuiop` = OSB 15–11, left `asdfg` = 16–20). MLU kept: lit `*` format slot = Master Menu. On-glass nav cue + banner. Refs #129.
+- **Lab OSB keys (linear):** `1234567890qwertyuiop` = OSB 1–20. `[` `]` = format prev/next. `-` `=` = brightness. MLU: lit `*` slot = Master Menu. Refs #129 #131.
 
 ### Fixed
 

@@ -4,15 +4,15 @@
 
 See **[`hardware-bezel.md`](hardware-bezel.md)** for production OSB/rocker types.
 
-| Side | Lab keys | Production |
-|------|----------|------------|
-| Top options | `1`–`5` | OSB 1–5 |
-| Right options | `6`–`9` `0` | OSB 6–10 |
-| Bottom L→R | `y` `u` `i` `o` `p` (or qwert) | OSB 15–11 OWN · \*A · B · C · DCLT |
-| Left bottom→top | `a` `s` `d` `f` `g` | OSB 16–20 DTC · · · SET · BUS |
-| BRT | `[` `]` | BRT rocker |
+| Lab keys (linear) | OSB |
+|-------------------|-----|
+| `1 2 3 4 5 6 7 8 9 0 q w e r t y u i o p` | **1 … 20** |
+| `[` `]` | Format prev / next (lab) |
+| `-` `=` | Brightness − / + |
 
-**Format (MLU):** other slot = select · lit **\*** slot = **Master Menu** · lab `m` = menu · lab `n`/arrows = cycle.
+Useful: `q`=DCLT · `w`/`e`/`r`=slots C/B/A · `t`=OWN · `y`=DTC · `o`=SET · `p`=BUS · lit `*r` often = Master Menu.
+
+**Format (MLU):** other slot = select · lit **\*** slot = **Master Menu** · `m` = menu · arrows/`[` `]` = cycle.
 
 ## Command
 

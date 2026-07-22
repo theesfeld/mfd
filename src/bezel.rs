@@ -152,31 +152,23 @@ impl BezelSource for NullBezel {
     }
 }
 
-/// POC: **numeric face map** — keys track OSB numbers / face geometry.
+/// POC keyboard → OSB 1–20 (**linear row**, not face-spatial).
 ///
 /// ```text
-///        1 2 3 4 5          top options
-///   g                    6
-///   f                    7     right: 6 7 8 9 0
-///   d    [ GLASS ]       8
-///   s                    9
-///   a                   0
-///      y  u  i  o  p       bottom L→R = OSB 15..11
-///     OWN A  B  C DCLT
+/// Keys:  1 2 3 4 5 6 7 8 9 0 q w e r t y u i o p
+/// OSB:   1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20
 /// ```
 ///
-/// | Face | Keys | OSB |
-/// |------|------|-----|
-/// | Top | `1`–`5` | 1–5 |
-/// | Right | `6`–`9` `0` | 6–10 |
-/// | Bottom L→R | `y` `u` `i` `o` `p` | **15 · 14 · 13 · 12 · 11** |
-/// | Left bottom→top | `a` `s` `d` `f` `g` | **16 · 17 · 18 · 19 · 20** |
+/// Face reminder (OSB numbers still clockwise on glass):
+/// top 1–5 · right 6–10 · bottom 11–15 right→left as DCLT…OWN · left 16–20.
 ///
-/// Legacy `qwert` still maps the same bottom strip (muscle memory).
+/// Rockers (lab):
+/// - `[` `]` — format **prev / next** (lab only; not production face)
+/// - `-` `=` — **brightness** − / +
+/// - `;` `'` — contrast − / +
+/// - `,` `.` — gain − / +
 ///
-/// Knobs: `[` `]` BRT · `;` `'` CON · `-` `=` SYM · `,` `.` GAIN
-///
-/// **Hard rule:** top/right are **never** format jumps (options / Master Menu picks only).
+/// **Hard rule:** OSB 1–10 are options / Master Menu picks — not permanent format jumps.
 #[derive(Default)]
 pub struct KeyboardBezel {
     pending: Vec<BezelEvent>,
@@ -187,51 +179,46 @@ impl KeyboardBezel {
         Self::default()
     }
 
-    /// Feed raw key bytes (from raw stdin).
+    /// Linear map: `1234567890qwertyuiop` → OSB 1..=20.
     pub fn push_key(&mut self, key: u8) {
-        match key {
-            // Top options = OSB number
-            b'1' => self.pending.push(BezelEvent::OsbDown(1)),
-            b'2' => self.pending.push(BezelEvent::OsbDown(2)),
-            b'3' => self.pending.push(BezelEvent::OsbDown(3)),
-            b'4' => self.pending.push(BezelEvent::OsbDown(4)),
-            b'5' => self.pending.push(BezelEvent::OsbDown(5)),
-            // Right options
-            b'6' => self.pending.push(BezelEvent::OsbDown(6)),
-            b'7' => self.pending.push(BezelEvent::OsbDown(7)),
-            b'8' => self.pending.push(BezelEvent::OsbDown(8)),
-            b'9' => self.pending.push(BezelEvent::OsbDown(9)),
-            b'0' => self.pending.push(BezelEvent::OsbDown(10)),
-            // Bottom L→R OSB 15..11 (numeric-face primary)
-            b'y' | b'Y' => self.pending.push(BezelEvent::OsbDown(15)), // OWN
-            b'u' | b'U' => self.pending.push(BezelEvent::OsbDown(14)), // slot A
-            b'i' | b'I' => self.pending.push(BezelEvent::OsbDown(13)), // slot B
-            b'o' | b'O' => self.pending.push(BezelEvent::OsbDown(12)), // slot C
-            b'p' | b'P' => self.pending.push(BezelEvent::OsbDown(11)), // DCLT
-            // Legacy bottom row (same OSBs)
-            b'q' | b'Q' => self.pending.push(BezelEvent::OsbDown(15)),
-            b'w' | b'W' => self.pending.push(BezelEvent::OsbDown(14)),
-            b'e' | b'E' => self.pending.push(BezelEvent::OsbDown(13)),
-            b'r' | b'R' => self.pending.push(BezelEvent::OsbDown(12)),
-            b't' | b'T' => self.pending.push(BezelEvent::OsbDown(11)),
-            // Left bottom→top OSB 16..20
-            b'a' | b'A' => self.pending.push(BezelEvent::OsbDown(16)), // DTC
-            b's' | b'S' => self.pending.push(BezelEvent::OsbDown(17)), // blank / menu MAP
-            b'd' | b'D' => self.pending.push(BezelEvent::OsbDown(18)), // blank / menu ATT
-            b'f' | b'F' => self.pending.push(BezelEvent::OsbDown(19)), // SET
-            b'g' | b'G' => self.pending.push(BezelEvent::OsbDown(20)), // BUS
-            _ => {}
+        let k = key.to_ascii_lowercase();
+        let osb = match k {
+            b'1' => 1,
+            b'2' => 2,
+            b'3' => 3,
+            b'4' => 4,
+            b'5' => 5,
+            b'6' => 6,
+            b'7' => 7,
+            b'8' => 8,
+            b'9' => 9,
+            b'0' => 10,
+            b'q' => 11, // DCLT (bottom-right on glass)
+            b'w' => 12, // format C
+            b'e' => 13, // format B
+            b'r' => 14, // format A
+            b't' => 15, // OWN
+            b'y' => 16, // DTC
+            b'u' => 17,
+            b'i' => 18,
+            b'o' => 19, // SET
+            b'p' => 20, // BUS
+            _ => 0,
+        };
+        if osb != 0 {
+            self.pending.push(BezelEvent::OsbDown(osb));
         }
     }
 
-    /// Feed key with access to current levels (for ± nudges).
+    /// Feed key with access to current levels (for ± rockers).
     pub fn push_key_state(&mut self, key: u8, st: &BezelState) {
         match key {
-            b'[' => self.pending.push(BezelEvent::Knob(
+            // Brightness rocker (production BRT) — on -/= so [ ] can be prev/next
+            b'-' => self.pending.push(BezelEvent::Knob(
                 BezelKnob::Brightness,
                 (st.brightness - 0.05).max(0.0),
             )),
-            b']' => self.pending.push(BezelEvent::Knob(
+            b'=' => self.pending.push(BezelEvent::Knob(
                 BezelKnob::Brightness,
                 (st.brightness + 0.05).min(1.0),
             )),
@@ -243,20 +230,15 @@ impl KeyboardBezel {
                 BezelKnob::Contrast,
                 (st.contrast + 0.05).min(1.0),
             )),
-            b'-' => self.pending.push(BezelEvent::Knob(
-                BezelKnob::Symbology,
-                (st.symbology - 0.05).max(0.0),
-            )),
-            b'=' => self.pending.push(BezelEvent::Knob(
-                BezelKnob::Symbology,
-                (st.symbology + 0.05).min(1.0),
-            )),
+            // Symbology: unused letter-adjacent; gain stays on comma/period
             b',' => self
                 .pending
                 .push(BezelEvent::Knob(BezelKnob::Gain, (st.gain - 0.05).max(0.0))),
             b'.' => self
                 .pending
                 .push(BezelEvent::Knob(BezelKnob::Gain, (st.gain + 0.05).min(1.0))),
+            // [ ] handled in cmfd as format prev/next (lab), not here
+            b'[' | b']' => {}
             _ => self.push_key(key),
         }
     }
