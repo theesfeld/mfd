@@ -6,8 +6,9 @@
 
 The CMFD **only displays** information. It **never** writes the vehicle bus.
 
-- Allowed: Mode 01/09 reads, UDS `0x22` (and `0x10` / `0x3E` only to support reads).
-- Forbidden: clear DTC, write DID, SecurityAccess (`0x27`), programming, actuators.
+- Allowed: Mode 01/09 reads, Mode **03 / 07 / 0A** DTC inventory (read), UDS `0x22` (and `0x10` / `0x3E` only to support reads).
+- Forbidden: **clear** DTC (Mode 04), write DID, SecurityAccess (`0x27`), programming, actuators.
+- FAULT page (`f` / OSB **DTC**): loads **all** codes as soon as OBD connects; refreshes on poll.
 - **No** `MFD_OBD_ALLOW_WRITE` or other write override. See Issue [#73](https://github.com/theesfeld/mfd/issues/73).
 
 ## Attitude / heading source order

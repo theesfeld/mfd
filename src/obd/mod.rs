@@ -39,5 +39,8 @@ pub mod uds;
 
 pub use error::{Error, Result};
 pub use feed::ObdFeed;
-pub use j1979::{decode_mode01, LiveValue, PRIORITY_PIDS};
+pub use j1979::{
+    decode_dtc_response, decode_mode01, format_dtc_bytes, merge_dtcs, Dtc, DtcKind, LiveValue,
+    PRIORITY_PIDS,
+};
 pub use session::{ConnectOpts, Session};

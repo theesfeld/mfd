@@ -1,7 +1,10 @@
 //! Background poller → [`VehicleSnapshot`](crate::auto::VehicleSnapshot).
+//!
+//! DTCs are loaded **immediately** on connect, then refreshed often.
+//! Read-only — never Mode 04 clear.
 
-use crate::auto::VehicleSnapshot;
-use crate::obd::j1979::PRIORITY_PIDS;
+use crate::auto::{DtcEntry, DtcKind, VehicleSnapshot};
+use crate::obd::j1979::{self, PRIORITY_PIDS};
 use crate::obd::session::Session;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +19,8 @@ struct Telemetry {
     error: Option<String>,
     vin: Option<String>,
     ticks: u64,
+    dtcs: Vec<DtcEntry>,
+    dtc_loaded: bool,
 }
 
 /// Background OBD poller (native stack).
@@ -73,7 +78,12 @@ impl ObdFeed {
                 if let Some(e) = &t.error {
                     format!("OBD ERR {e}")
                 } else {
-                    format!("{} · t{}", t.status, t.ticks)
+                    let d = if t.dtc_loaded {
+                        format!(" DTC{}", t.dtcs.len())
+                    } else {
+                        String::new()
+                    };
+                    format!("{} · t{}{d}", t.status, t.ticks)
                 }
             })
             .unwrap_or_else(|_| "OBD lock".into())
@@ -89,7 +99,45 @@ impl Drop for ObdFeed {
     }
 }
 
+fn map_kind(k: j1979::DtcKind) -> DtcKind {
+    match k {
+        j1979::DtcKind::Stored => DtcKind::Stored,
+        j1979::DtcKind::Pending => DtcKind::Pending,
+        j1979::DtcKind::Permanent => DtcKind::Permanent,
+    }
+}
+
+fn load_dtcs(session: &mut Session, tele: &Arc<Mutex<Telemetry>>) {
+    match session.read_all_dtcs() {
+        Ok(list) => {
+            if let Ok(mut t) = tele.lock() {
+                t.dtcs = list
+                    .into_iter()
+                    .map(|d| DtcEntry {
+                        code: d.code,
+                        kind: map_kind(d.kind),
+                    })
+                    .collect();
+                t.dtc_loaded = true;
+                t.error = None;
+            }
+        }
+        Err(e) => {
+            if let Ok(mut t) = tele.lock() {
+                let msg = e.to_string();
+                if !msg.contains("NO DATA") {
+                    t.error = Some(format!("DTC {msg}"));
+                }
+                t.dtc_loaded = true; // empty / fail still "attempted"
+            }
+        }
+    }
+}
+
 fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemetry>>) {
+    // Fault inventory first — page must show codes immediately.
+    load_dtcs(&mut session, &tele);
+
     if let Ok(vin) = session.read_vin_mode09() {
         if let Ok(mut t) = tele.lock() {
             t.vin = Some(vin);
@@ -98,8 +146,11 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
     let mut i = 0usize;
     let mut keep = 0u32;
     while !stop.load(Ordering::Relaxed) {
-        // Keep-alive every ~40 polls
         keep += 1;
+        // Refresh DTCs every ~50 PID polls (~1 s at 20 ms)
+        if keep % 50 == 1 {
+            load_dtcs(&mut session, &tele);
+        }
         if keep % 40 == 0 {
             let _ = session.tester_present();
         }
@@ -116,7 +167,6 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
             }
             Err(e) => {
                 if let Ok(mut t) = tele.lock() {
-                    // Don't spam status for NO DATA on optional PIDs
                     let msg = e.to_string();
                     if !msg.contains("NO DATA") {
                         t.error = Some(msg);
@@ -161,5 +211,9 @@ fn apply_telemetry(t: &Telemetry, v: &mut VehicleSnapshot) {
     }
     if let Some(maf) = t.values.get("maf") {
         v.maf = ((*maf as f32) / 100.0).clamp(0.0, 1.0);
+    }
+    if t.dtc_loaded {
+        v.dtcs = t.dtcs.clone();
+        v.dtc_count = t.dtcs.len() as u32;
     }
 }

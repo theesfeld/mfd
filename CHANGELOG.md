@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **FAULT CODES** page (`f` / OSB DTC): loads Mode 03/07/0A codes immediately (read-only; no clear). Refs #75.
+
 ### Changed
 
 - **Display-only CMFD (safety):** never write vehicle bus; UDS allow-list `0x10`/`0x22`/`0x3E` only; remove write override. Refs #73.

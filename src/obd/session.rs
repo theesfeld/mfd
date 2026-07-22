@@ -113,6 +113,55 @@ impl Session {
         j1979::decode_mode01(&bytes)
     }
 
+    /// Mode 03 stored DTCs (read-only).
+    pub fn read_dtc_stored(&mut self) -> Result<Vec<j1979::Dtc>> {
+        self.read_dtc_mode("03", j1979::DtcKind::Stored)
+    }
+
+    /// Mode 07 pending DTCs (read-only).
+    pub fn read_dtc_pending(&mut self) -> Result<Vec<j1979::Dtc>> {
+        self.read_dtc_mode("07", j1979::DtcKind::Pending)
+    }
+
+    /// Mode 0A permanent DTCs (read-only).
+    pub fn read_dtc_permanent(&mut self) -> Result<Vec<j1979::Dtc>> {
+        self.read_dtc_mode("0A", j1979::DtcKind::Permanent)
+    }
+
+    /// Load all DTC classes and merge (immediate fault inventory).
+    pub fn read_all_dtcs(&mut self) -> Result<Vec<j1979::Dtc>> {
+        let mut lists = Vec::new();
+        match self.read_dtc_stored() {
+            Ok(v) => lists.push(v),
+            Err(Error::NoData) => lists.push(Vec::new()),
+            Err(e) => return Err(e),
+        }
+        match self.read_dtc_pending() {
+            Ok(v) => lists.push(v),
+            Err(Error::NoData) => lists.push(Vec::new()),
+            Err(e) => {
+                // Mode 07 may be unsupported — keep stored
+                let _ = e;
+                lists.push(Vec::new());
+            }
+        }
+        match self.read_dtc_permanent() {
+            Ok(v) => lists.push(v),
+            Err(Error::NoData) => lists.push(Vec::new()),
+            Err(_) => lists.push(Vec::new()),
+        }
+        Ok(j1979::merge_dtcs(&lists))
+    }
+
+    fn read_dtc_mode(&mut self, mode: &str, kind: j1979::DtcKind) -> Result<Vec<j1979::Dtc>> {
+        let raw = self.elm.cmd(mode)?;
+        if raw.to_ascii_uppercase().contains("NO DATA") {
+            return Ok(Vec::new());
+        }
+        let bytes = crate::obd::elm::parse_elm_hex_payload(&raw)?;
+        j1979::decode_dtc_response(&bytes, kind)
+    }
+
     pub fn read_vin_mode09(&mut self) -> Result<String> {
         // Mode 09 PID 02 — VIN (often multi-frame; ELM may return concatenated)
         let raw = self.elm.cmd("0902")?;

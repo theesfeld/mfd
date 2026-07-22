@@ -55,6 +55,7 @@ Default demo: **AUTO vehicle MFD** (CLUSTER), **30 Hz**.
 | `0` | **RANGE** | Collision / park arcs |
 | `v` | **ATT** | Horizon sphere + heading ° / N–NW |
 | `x` | **MAP** | Schematic topo (demo scroll) |
+| `f` | **DTC** | All fault codes (read only · Mode 03/07/0A) |
 | `o` / `s` | OBD / SETUP | PIDs · config |
 | `n` / `p` | Next / previous page | |
 | `[` `]` | **BRT** −/+ (real CMFD rocker) | |

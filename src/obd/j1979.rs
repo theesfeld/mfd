@@ -148,6 +148,138 @@ pub fn mode01_command(pid: u8) -> String {
     format!("01{pid:02X}")
 }
 
+// ─── Diagnostic trouble codes (read-only; never Mode 04 clear) ───────────────
+
+/// DTC class from SAE J2012 encoding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DtcKind {
+    /// Stored confirmed (Mode 03).
+    Stored,
+    /// Pending (Mode 07).
+    Pending,
+    /// Permanent (Mode 0A).
+    Permanent,
+}
+
+impl DtcKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            DtcKind::Stored => "STORED",
+            DtcKind::Pending => "PEND",
+            DtcKind::Permanent => "PERM",
+        }
+    }
+}
+
+/// One fault code for glass.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Dtc {
+    /// e.g. `P0420`
+    pub code: String,
+    pub kind: DtcKind,
+}
+
+/// Format two DTC bytes as SAE string (`P0420`, `C1234`, …).
+pub fn format_dtc_bytes(b0: u8, b1: u8) -> String {
+    let sys = (b0 >> 6) & 0x03;
+    let d1 = (b0 >> 4) & 0x03;
+    let d2 = b0 & 0x0F;
+    let d3 = (b1 >> 4) & 0x0F;
+    let d4 = b1 & 0x0F;
+    let letter = match sys {
+        0 => 'P',
+        1 => 'C',
+        2 => 'B',
+        _ => 'U',
+    };
+    format!("{letter}{d1:X}{d2:X}{d3:X}{d4:X}")
+}
+
+/// Decode Mode 03/07/0A payload (`43…` / `47…` / `4A…`) into codes.
+///
+/// Accepts ELM multi-line concatenation. Skips null `00 00` pairs.
+pub fn decode_dtc_response(payload: &[u8], kind: DtcKind) -> Result<Vec<Dtc>> {
+    if payload.is_empty() {
+        return Ok(Vec::new());
+    }
+    let expect = match kind {
+        DtcKind::Stored => 0x43u8,
+        DtcKind::Pending => 0x47,
+        DtcKind::Permanent => 0x4A,
+    };
+    // Find service response byte (may be multi-frame with count prefixes)
+    let mut i = 0usize;
+    while i < payload.len() {
+        if payload[i] == expect {
+            i += 1;
+            break;
+        }
+        // Some ECUs return 43 NN then pairs; also handle leading count after SID
+        i += 1;
+    }
+    if i == 0 && payload[0] != expect {
+        // No SID match — try raw pairs if even length and looks empty/no data
+        if payload.len() >= 2 && payload.iter().all(|&b| b == 0) {
+            return Ok(Vec::new());
+        }
+        return Err(Error::Decode(format!(
+            "not DTC response for {:?}: {payload:02X?}",
+            kind
+        )));
+    }
+    // Optional count byte (some ISO-TP: 43 <n> <dtcs…>)
+    if i < payload.len() && payload[i] <= 0x10 && (payload.len() - i - 1) >= payload[i] as usize * 2
+    {
+        // Heuristic: small first byte as count when remaining fits
+        let n = payload[i] as usize;
+        if n * 2 < payload.len() - i {
+            i += 1;
+        }
+    }
+    let mut out = Vec::new();
+    while i + 1 < payload.len() {
+        let b0 = payload[i];
+        let b1 = payload[i + 1];
+        i += 2;
+        if b0 == 0 && b1 == 0 {
+            continue;
+        }
+        out.push(Dtc {
+            code: format_dtc_bytes(b0, b1),
+            kind,
+        });
+    }
+    Ok(out)
+}
+
+/// Merge Mode 03+07+0A lists; de-dupe by code keeping stronger kind (PERM > STORED > PEND).
+pub fn merge_dtcs(lists: &[Vec<Dtc>]) -> Vec<Dtc> {
+    use std::collections::HashMap;
+    let rank = |k: DtcKind| match k {
+        DtcKind::Permanent => 3,
+        DtcKind::Stored => 2,
+        DtcKind::Pending => 1,
+    };
+    let mut map: HashMap<String, DtcKind> = HashMap::new();
+    for list in lists {
+        for d in list {
+            map.entry(d.code.clone())
+                .and_modify(|k| {
+                    if rank(d.kind) > rank(*k) {
+                        *k = d.kind;
+                    }
+                })
+                .or_insert(d.kind);
+        }
+    }
+    let mut v: Vec<Dtc> = map
+        .into_iter()
+        .map(|(code, kind)| Dtc { code, kind })
+        .collect();
+    v.sort_by(|a, b| a.code.cmp(&b.code));
+    v
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +296,26 @@ mod tests {
     fn speed_zero() {
         let v = decode_mode01(&[0x41, 0x0D, 0x00]).unwrap();
         assert_eq!(v.value, 0.0);
+    }
+
+    #[test]
+    fn format_p0420() {
+        // P0420 = 0x04 0x20
+        assert_eq!(format_dtc_bytes(0x04, 0x20), "P0420");
+    }
+
+    #[test]
+    fn decode_mode03_two_codes() {
+        // 43 04 20 01 00 → P0420, P0100
+        let d = decode_dtc_response(&[0x43, 0x04, 0x20, 0x01, 0x00], DtcKind::Stored).unwrap();
+        assert_eq!(d.len(), 2);
+        assert_eq!(d[0].code, "P0420");
+        assert_eq!(d[1].code, "P0100");
+    }
+
+    #[test]
+    fn decode_empty_pairs() {
+        let d = decode_dtc_response(&[0x43, 0x00, 0x00], DtcKind::Stored).unwrap();
+        assert!(d.is_empty());
     }
 }

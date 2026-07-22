@@ -31,6 +31,31 @@ use crate::Surface;
 
 // ─── Data model ──────────────────────────────────────────────────────────────
 
+/// DTC class for fault glass (read-only inventory).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DtcKind {
+    Stored,
+    Pending,
+    Permanent,
+}
+
+impl DtcKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            DtcKind::Stored => "STORED",
+            DtcKind::Pending => "PEND",
+            DtcKind::Permanent => "PERM",
+        }
+    }
+}
+
+/// One trouble code line for the FAULT page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DtcEntry {
+    pub code: String,
+    pub kind: DtcKind,
+}
+
 /// Speed display unit (OSB cycles on CLUSTER / SETUP).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum SpeedUnit {
@@ -178,6 +203,8 @@ pub struct VehicleSnapshot {
     pub hvac_ac: bool,
     pub hvac_defrost: bool,
     pub dtc_count: u32,
+    /// Full fault list for FAULT CODES page (Mode 03/07/0A when live).
+    pub dtcs: Vec<DtcEntry>,
     pub speed_unit: SpeedUnit,
     /// Pitch degrees (nose up +).
     pub pitch_deg: f32,
@@ -250,6 +277,7 @@ impl Default for VehicleSnapshot {
             hvac_ac: true,
             hvac_defrost: false,
             dtc_count: 0,
+            dtcs: Vec::new(),
             speed_unit: SpeedUnit::Mph,
             pitch_deg: 0.0,
             roll_deg: 0.0,
@@ -303,6 +331,26 @@ pub fn demo_vehicle(t: f32) -> VehicleSnapshot {
     v.pitch_deg = 18.0 * (t * 0.45).sin();
     v.roll_deg = 32.0 * (t * 0.35).cos();
     v.heading_deg = (t * 18.0) % 360.0;
+    // Demo fault inventory (shows until live OBD replaces the list).
+    v.dtcs = vec![
+        DtcEntry {
+            code: "P0420".into(),
+            kind: DtcKind::Stored,
+        },
+        DtcEntry {
+            code: "P0171".into(),
+            kind: DtcKind::Stored,
+        },
+        DtcEntry {
+            code: "C1234".into(),
+            kind: DtcKind::Pending,
+        },
+    ];
+    // Alternate empty bank briefly so "NONE" path is visible.
+    if (t as i32 / 8) % 5 == 4 {
+        v.dtcs.clear();
+    }
+    v.dtc_count = v.dtcs.len() as u32;
     v
 }
 
@@ -355,6 +403,8 @@ pub enum AutoPage {
     Attitude,
     /// Schematic line/topo map (not full DEM).
     Map,
+    /// Fault / trouble codes (Mode 03/07/0A — read only).
+    Faults,
     Obd,
     Setup,
 }
@@ -373,6 +423,7 @@ impl AutoPage {
         AutoPage::Collision,
         AutoPage::Attitude,
         AutoPage::Map,
+        AutoPage::Faults,
         AutoPage::Obd,
         AutoPage::Setup,
     ];
@@ -391,6 +442,7 @@ impl AutoPage {
             AutoPage::Collision => "RNG",
             AutoPage::Attitude => "ATT",
             AutoPage::Map => "MAP",
+            AutoPage::Faults => "DTC",
             AutoPage::Obd => "OBD",
             AutoPage::Setup => "SET",
         }
@@ -410,6 +462,7 @@ impl AutoPage {
             AutoPage::Collision => "RANGE",
             AutoPage::Attitude => "ATTITUDE",
             AutoPage::Map => "MAP",
+            AutoPage::Faults => "FAULT CODES",
             AutoPage::Obd => "OBD",
             AutoPage::Setup => "SETUP",
         }
@@ -446,6 +499,7 @@ impl AutoPage {
             19 => Some(AutoPage::Setup),
             18 => Some(AutoPage::Attitude),
             17 => Some(AutoPage::Map),
+            16 => Some(AutoPage::Faults),
             _ => None,
         }
     }
@@ -474,12 +528,13 @@ fn legends(page: AutoPage, v: &VehicleSnapshot) -> (Osb5, Osb5, Osb5, Osb5) {
     };
     // left[0]=OSB20 … left[4]=OSB16
     let left: Osb5 = match page {
-        AutoPage::Drive => ["OBD", "SET", "4L", "4H", "2H"],
-        AutoPage::Tpm => ["OBD", "SET", "BAR", "kPa", "PSI"],
-        AutoPage::Clim => ["OBD", "SET", "DEF", "FAN+", "AC"],
-        AutoPage::Attitude => ["OBD", "SET", "ATT", "MAP", "CLST"],
-        AutoPage::Map => ["OBD", "SET", "ATT", "MAP", "N-UP"],
-        _ => ["OBD", "SET", "ATT", "MAP", "2H"],
+        AutoPage::Drive => ["OBD", "SET", "ATT", "MAP", "DTC"],
+        AutoPage::Tpm => ["OBD", "SET", "BAR", "kPa", "DTC"],
+        AutoPage::Clim => ["OBD", "SET", "DEF", "FAN+", "DTC"],
+        AutoPage::Attitude => ["OBD", "SET", "ATT", "MAP", "DTC"],
+        AutoPage::Map => ["OBD", "SET", "ATT", "MAP", "DTC"],
+        AutoPage::Faults => ["OBD", "SET", "ATT", "MAP", "DTC"],
+        _ => ["OBD", "SET", "ATT", "MAP", "DTC"],
     };
     (top, right, bottom, left)
 }
@@ -1080,6 +1135,66 @@ pub fn draw_auto_with_video(
                 fh * 0.75,
             );
         }
+        AutoPage::Faults => {
+            // Immediate full list: stored / pending / permanent (read-only).
+            label(
+                page.surface,
+                c.x as f32 + 4.0,
+                c.y as f32 + 2.0,
+                &format!("COUNT  {}   ·  READ ONLY", v.dtc_count),
+                if v.dtc_count > 0 {
+                    pal.warning
+                } else {
+                    pal.primary
+                },
+                fh * 0.75,
+            );
+            if v.dtcs.is_empty() {
+                value_readout(
+                    page.surface,
+                    c.center().0 as f32,
+                    c.y as f32 + c.h as f32 * 0.45,
+                    "FAULTS",
+                    "NONE",
+                    "",
+                    pal.primary,
+                    fh,
+                    fh * 2.0,
+                );
+                label(
+                    page.surface,
+                    c.x as f32 + 4.0,
+                    c.bottom() as f32 - fh * 1.5,
+                    "NO CODES  ·  MODE 03/07/0A",
+                    pal.dim,
+                    fh * 0.7,
+                );
+            } else {
+                let lines: Vec<String> = v
+                    .dtcs
+                    .iter()
+                    .map(|d| format!("{}  {}", d.code, d.kind.label()))
+                    .collect();
+                let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+                list_menu(
+                    page.surface,
+                    Rect::new(c.x, c.y + (fh as i32) + 6, c.w, c.h - (fh as i32) - 20),
+                    &refs,
+                    None,
+                    fh * 0.95,
+                    pal.warning,
+                    pal.readout,
+                );
+                label(
+                    page.surface,
+                    c.x as f32 + 4.0,
+                    c.bottom() as f32 - fh,
+                    "NO CLEAR  ·  DISPLAY ONLY",
+                    pal.dim,
+                    fh * 0.65,
+                );
+            }
+        }
         AutoPage::Obd => {
             let lines = [
                 format!("RPM   {:.0}", v.rpm),
@@ -1093,7 +1208,7 @@ pub fn draw_auto_with_video(
                 format!("ECT   {:.0}%", v.coolant * 100.0),
                 format!("TFT   {:.0}%", v.trans_temp * 100.0),
                 format!("IAT   {:.0}%", v.iat * 100.0),
-                format!("DTC   {}", v.dtc_count),
+                format!("DTC   {}  (page DTC)", v.dtc_count),
             ];
             let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
             list_menu(

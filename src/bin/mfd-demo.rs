@@ -104,6 +104,7 @@ fn main() -> io::Result<()> {
         "RNG" | "RANGE" | "COLL" => AutoPage::Collision,
         "ATT" | "ATTITUDE" => AutoPage::Attitude,
         "MAP" | "TOPO" => AutoPage::Map,
+        "DTC" | "FAULT" | "FAULTS" | "CODES" => AutoPage::Faults,
         "OBD" => AutoPage::Obd,
         "SET" | "SETUP" => AutoPage::Setup,
         _ => AutoPage::Cluster,
@@ -277,6 +278,10 @@ fn main() -> io::Result<()> {
                 b'x' | b'X' => {
                     domain = Domain::Auto;
                     auto_page = AutoPage::Map;
+                }
+                b'f' | b'F' => {
+                    domain = Domain::Auto;
+                    auto_page = AutoPage::Faults;
                 }
                 // [ ] ; ' - = , .  → real bezel knobs (BRT CON SYM GAIN)
                 _ => bezel_src.push_key_state(k, &bezel),
@@ -498,6 +503,7 @@ fn print_banner(ver: &str) {
     eprintln!("    0 RNG    collision / park ranges");
     eprintln!("    v ATT    sphere horizon + compass on ball + HDG°/N-NW");
     eprintln!("    x MAP    schematic topo with demo scroll (heading-up)");
+    eprintln!("    f DTC    fault codes (Mode 03/07/0A · read only · all at once)");
     eprintln!("    o OBD    PID list");
     eprintln!("    s SET    setup / units");
     eprintln!("    n / p    next / previous auto page");
@@ -506,7 +512,7 @@ fn print_banner(ver: &str) {
     eprintln!("  OSB (auto)");
     eprintln!("    top     CLST FUEL TEMP DRV LITE");
     eprintln!("    right   TPM  BODY CLIM FLIR RNG");
-    eprintln!("    left    OBD  SET  ATT  MAP  …");
+    eprintln!("    left    OBD  SET  ATT  MAP  DTC");
     eprintln!();
     eprintln!("  BEZEL (real CMFD rockers)");
     eprintln!("    [ ]     BRT brightness −/+   (yes — on real MFD)");
