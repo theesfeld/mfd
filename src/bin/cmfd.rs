@@ -409,6 +409,9 @@ fn main() -> io::Result<()> {
             }
         }
 
+        // Rockers: SYM (structure intensity) · CON (mid-tones) · BRT (overall).
+        panel.apply_symbology(bezel.symbology.clamp(0.15, 1.0));
+        panel.apply_contrast(bezel.contrast.clamp(0.0, 1.0));
         panel.apply_brightness(bezel.brightness.clamp(0.05, 1.0));
         present_at_state_scratch(&panel, backend, vp, None, Some(&mut scratch))?;
         if let Some(p) = pacer.as_mut() {
@@ -552,7 +555,7 @@ fn print_banner(ver: &str) {
     eprintln!("    [ ]                →  prev / next format (lab rocker)");
     eprintln!("    m                  →  open Master Menu (lab)");
     eprintln!();
-    eprintln!("  ROCKERS  - = BRT · ; ' CON · , . GAIN · Esc quit");
+    eprintln!("  ROCKERS  - = BRT · ; ' CON · \\ | SYM · , . GAIN · Esc quit");
     eprintln!("  Drive: ./cmfd.sh  ·  MFD_OBD_BT=00:04:3E:96:B8:F1");
     eprintln!();
 }

@@ -4,6 +4,7 @@
 
 ### Changed
 
+- **CMFD design P1/P2 (Lockheed review):** green SOI box; empty Master Menu glass; round_gauge uses palette structure + white needle; SYM/CON rockers affect glass; ATT sky blue / ground brown; short format ID header; DCLT label fixed. Refs #135.
 - **CMFD design P0 (Lockheed review):** support-page return (DTC→ENG via active slot); lab `OsbUp` so SOI does not stick; lab key map off glass unless `MFD_LAB_CHROME=1`; RNG no synthetic; LITE OSBs do not invent lamps. Refs #133.
 - **Lab OSB keys (linear):** `1234567890qwertyuiop` = OSB 1–20. `[` `]` = format prev/next. `-` `=` = brightness. MLU: lit `*` slot = Master Menu. Refs #129 #131.
 

@@ -31,7 +31,8 @@ pub use format_select::{AutoFormatSelect, FormatSelectAction, FormatSlot};
 
 use crate::bezel::BezelState;
 use crate::color::WHITE;
-use crate::color::{rgb, CYAN};
+use crate::color::rgb;
+use crate::Color;
 use crate::geom::Rect;
 use crate::page::Page;
 use crate::palette::Palette;
@@ -619,16 +620,10 @@ fn option_legends(
 
 /// Bottom L→R = OSB 15..11: OWN · slotA · slotB · slotC · DCLT
 ///
-/// MLU: **active** format slot opens Master Menu when pressed. Mark it `*NAME`
-/// so the operator sees which key is MENU (not a dead re-select).
+/// SOI is a green box on the active slot (not a `*` prefix). DCLT keeps one mnemonic.
 fn format_select_bottom(fmt: &AutoFormatSelect) -> Osb5 {
-    let [a, b, c] = fmt.slot_labels_menu_marked();
-    let dclt = match fmt.dclt {
-        0 => "DCLT",
-        1 => "DCL1",
-        _ => "DCL2",
-    };
-    ["OWN", a, b, c, dclt]
+    let [a, b, c] = fmt.slot_labels();
+    ["OWN", a, b, c, "DCLT"]
 }
 
 /// Dense numeric matrix (preferred glass style).
@@ -709,6 +704,11 @@ fn chrome(
     let flash_osb = flash_page.and_then(|p| fmt.and_then(|f| f.slot_osb_for_page(p)));
     let flash_lit = warn::flash_warn_on(t);
 
+    // SYM rocker: dim softkey ink (structure intensity).
+    let sym = bezel.symbology.clamp(0.2, 1.0);
+    let soft_dim = scale_color_rgb(pal.dim, sym);
+    let soft_soi = scale_color_rgb(pal.primary, sym.max(0.55));
+
     osb_chrome_ex(
         page.surface,
         b,
@@ -717,7 +717,8 @@ fn chrome(
         &bottom,
         &left,
         page.font_px * 0.7,
-        pal.dim,
+        soft_dim,
+        soft_soi,
         active,
         flash_osb,
         flash_lit,
@@ -725,16 +726,15 @@ fn chrome(
     );
 
     let c = content_after_osb(b, page.font_px * 0.7);
-    let title = if menu { "MASTER MENU" } else { which.title() };
-    // Bright title + short mnemonic so page ID is obvious even if slot blank.
+    // Sparse format ID (jet-style); full title only when not menu.
     let head = if menu {
-        title.to_string()
+        "MASTER MENU".to_string()
     } else {
-        format!("{}  ·  {}", which.name(), title)
+        which.name().to_string()
     };
     page.label_centered(
         c.center().0 as f32,
-        c.y as f32 + page.font_px * 0.55,
+        c.y as f32 + page.font_px * 0.45,
         &head,
         WHITE,
     );
@@ -747,24 +747,33 @@ fn chrome(
         let nav = if menu {
             "PICK FORMAT OSB 1-20  ·  SLOT KEY CLOSES MENU"
         } else {
-            "LIT *SLOT = MENU  ·  [ ] PREV/NEXT  ·  KEYS 1234567890QWERTYUIOP = OSB 1-20"
+            "SOI BOX = GLASS OWNER  ·  [ ] PREV/NEXT  ·  1234567890QWERTYUIOP = OSB 1-20"
         };
         page.label_centered(
             c.center().0 as f32,
-            c.y as f32 + page.font_px * 1.35,
+            c.y as f32 + page.font_px * 1.2,
             nav,
             pal.dim,
         );
     }
-    if !v.vin.is_empty() && !menu {
+    // VIN only on OWN (identity page) — not every format header.
+    if !v.vin.is_empty() && !menu && matches!(which, AutoPage::Own) {
         let os = format!("OS  {}", short_vin(&v.vin));
         page.label_centered(
             c.center().0 as f32,
-            c.y as f32 + page.font_px * 1.4,
+            c.y as f32 + page.font_px * 1.25,
             &os,
             pal.readout,
         );
     }
+}
+
+fn scale_color_rgb(c: Color, f: f32) -> Color {
+    let a = (c >> 24) & 0xFF;
+    let r = ((((c >> 16) & 0xFF) as f32) * f).clamp(0.0, 255.0) as u32;
+    let g = ((((c >> 8) & 0xFF) as f32) * f).clamp(0.0, 255.0) as u32;
+    let b = (((c & 0xFF) as f32) * f).clamp(0.0, 255.0) as u32;
+    (a << 24) | (r << 16) | (g << 8) | b
 }
 
 /// Last 8 of VIN for tight chrome; full string if shorter.
@@ -780,8 +789,8 @@ pub fn short_vin(vin: &str) -> &str {
 fn content(page: &Page) -> Rect {
     let b = page.bounds.inset(2);
     let c = content_after_osb(b, page.font_px * 0.65);
-    // Extra row under title for ownship VIN line.
-    let title_band = (page.font_px as i32) * 2 + 6;
+    // Short format ID band (more glass for gauges / ATT).
+    let title_band = (page.font_px as i32) + 8;
     Rect::new(
         c.x,
         c.y + title_band,
@@ -894,16 +903,9 @@ pub fn draw_auto_with_video(
         }
     }
 
-    // Master Menu glass: format catalog (GO only)
+    // Master Menu: empty glass — formats live on OSB legends only (MLU Fig 1-15).
     if fmt.map(|f| f.menu_open).unwrap_or(false) {
-        let allow = allowed_slice.unwrap_or(AutoPage::ALL);
-        let mut lines: Vec<String> = allow.iter().map(|p| format!("· {}", p.title())).collect();
-        if lines.is_empty() {
-            lines.push("NO FORMATS".into());
-        }
-        lines.insert(0, "SELECT FORMAT".into());
-        lines.push("PRESS ACTIVE SLOT TO CANCEL".into());
-        numeric_matrix(page.surface, c.inset(4), &lines, fh * 0.75, pal.readout, 1);
+        let _ = (allowed_slice, fh, c);
         return;
     }
 
@@ -1450,14 +1452,15 @@ pub fn draw_auto_with_video(
             } else {
                 (c.w as f32 * 0.62) as i32
             };
+            // Sky blue / ground brown (cyan reserved for ownship-class marks).
             attitude_ball(
                 page.surface,
                 Rect::new(c.x, c.y, ball_w, c.h - 8),
                 v.pitch_deg,
                 v.roll_deg,
                 v.heading_deg,
-                CYAN,
-                rgb(120, 90, 40),
+                rgb(35, 90, 175),
+                rgb(110, 75, 35),
                 pal.readout,
                 pal.dim,
             );

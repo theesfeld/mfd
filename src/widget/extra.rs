@@ -205,11 +205,14 @@ pub fn osb_chrome(
     active: Option<u8>,
 ) {
     osb_chrome_ex(
-        s, bounds, top, right, bottom, left, font_px, color, active, None, false, WHITE,
+        s, bounds, top, right, bottom, left, font_px, color, color, active, None, false, WHITE,
     );
 }
 
 /// Extended chrome: active SOI + optional warning flash on a second OSB.
+///
+/// SOI uses a **green box** (MLU Fig 1-14 class). `color` = inactive softkeys;
+/// `active_color` = SOI ink (primary green).
 #[allow(clippy::too_many_arguments)]
 pub fn osb_chrome_ex(
     s: &mut Surface,
@@ -220,6 +223,7 @@ pub fn osb_chrome_ex(
     left: &[&str; 5],
     font_px: f32,
     color: Color,
+    active_color: Color,
     active: Option<u8>,
     flash: Option<u8>,
     flash_on: bool,
@@ -243,7 +247,7 @@ pub fn osb_chrome_ex(
         if flash == Some(osb) && flash_on {
             flash_color
         } else if active == Some(osb) {
-            WHITE
+            active_color
         } else {
             color
         }
@@ -254,16 +258,26 @@ pub fn osb_chrome_ex(
             if lab.is_empty() {
                 return;
             }
-            draw_text_centered(s, cx, cy, lab, col, fsz);
-            if active == Some(osb) {
-                // Underline box — pilot knows SOI without reading content.
-                let tw = text_width(lab, fsz);
-                let y = (cy + text_height(fsz) * 0.42) as i32;
-                let x0 = (cx - tw * 0.5) as i32 - 2;
-                let x1 = (cx + tw * 0.5) as i32 + 2;
-                s.line_aa(x0, y, x1, y, WHITE);
-                s.line_aa(x0, y + 1, x1, y + 1, WHITE);
+            let is_soi = active == Some(osb);
+            // Strip lab "*" if present (product SOI is the box).
+            let lab = lab.strip_prefix('*').unwrap_or(lab);
+            if lab.is_empty() {
+                return;
             }
+            let tw = text_width(lab, fsz);
+            let th = text_height(fsz);
+            if is_soi {
+                // MLU-class highlight box around mnemonic.
+                let x0 = (cx - tw * 0.5) as i32 - 4;
+                let x1 = (cx + tw * 0.5) as i32 + 4;
+                let y0 = (cy - th * 0.35) as i32 - 2;
+                let y1 = (cy + th * 0.55) as i32 + 2;
+                s.line_aa(x0, y0, x1, y0, col);
+                s.line_aa(x1, y0, x1, y1, col);
+                s.line_aa(x1, y1, x0, y1, col);
+                s.line_aa(x0, y1, x0, y0, col);
+            }
+            draw_text_centered(s, cx, cy, lab, col, fsz);
         };
 
     for i in 0..5usize {

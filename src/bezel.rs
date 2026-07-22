@@ -232,7 +232,17 @@ impl KeyboardBezel {
                 BezelKnob::Contrast,
                 (st.contrast + 0.05).min(1.0),
             )),
-            // Symbology: unused letter-adjacent; gain stays on comma/period
+            // SYM rocker (lab): use shifted punctuation pair free of BRT
+            // (BRT is -/=). Map unused keys: we use '9'/'0' are OSB — keep ,
+            // . for gain. SYM via PageUp not available → use backslash/pipe.
+            b'\\' => self.pending.push(BezelEvent::Knob(
+                BezelKnob::Symbology,
+                (st.symbology - 0.05).max(0.0),
+            )),
+            b'|' => self.pending.push(BezelEvent::Knob(
+                BezelKnob::Symbology,
+                (st.symbology + 0.05).min(1.0),
+            )),
             b',' => self
                 .pending
                 .push(BezelEvent::Knob(BezelKnob::Gain, (st.gain - 0.05).max(0.0))),

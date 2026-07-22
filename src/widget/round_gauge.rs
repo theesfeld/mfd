@@ -1,6 +1,6 @@
 //! Round / arc **gauge** (tach, RPM, oil, engine, …).
 
-use crate::color::{GREEN, GREEN_DIM, RED, WHITE};
+use crate::color::{GREEN, RED, WHITE};
 use crate::font::draw_text_centered;
 use crate::geom::Rect;
 use crate::{Color, Surface};
@@ -36,13 +36,25 @@ impl Default for RoundGaugeOpts {
 }
 
 /// Draw a round gauge filling `rect` (uses min dimension as diameter).
+///
+/// Structure / ticks use `opts.color` (Table 1-1 green class). Needle is white.
+/// Redline band is red.
 pub fn round_gauge(s: &mut Surface, rect: Rect, opts: RoundGaugeOpts) {
     let (cx, cy) = rect.center();
     let r = (rect.w.min(rect.h) / 2 - 4).max(16);
     let v = opts.value.clamp(0.0, 1.0);
+    let structure = opts.color;
+    // Dim structure for outer ring (scale toward black).
+    let dim_ring = {
+        let a = (structure >> 24) & 0xFF;
+        let r8 = ((structure >> 16) & 0xFF) / 2;
+        let g8 = ((structure >> 8) & 0xFF) / 2;
+        let b8 = (structure & 0xFF) / 2;
+        (a << 24) | (r8 << 16) | (g8 << 8) | b8
+    };
 
-    s.circle(cx, cy, r, GREEN_DIM);
-    s.circle(cx, cy, r - 1, GREEN_DIM);
+    s.circle(cx, cy, r, dim_ring);
+    s.circle(cx, cy, r - 1, dim_ring);
 
     // Ticks
     for k in 0..=10 {
@@ -54,7 +66,7 @@ pub fn round_gauge(s: &mut Surface, rect: Rect, opts: RoundGaugeOpts) {
         let col = if opts.redline.map(|rl| t >= rl).unwrap_or(false) {
             RED
         } else {
-            GREEN
+            structure
         };
         s.line_aa(
             cx + (outer * c) as i32,
@@ -79,7 +91,7 @@ pub fn round_gauge(s: &mut Surface, rect: Rect, opts: RoundGaugeOpts) {
         );
     }
 
-    // Needle
+    // Needle — white readout class
     let a = opts.ang0 + v * opts.sweep;
     let (c, sn) = (a.cos(), a.sin());
     let tip = r as f32 * 0.86;
@@ -99,7 +111,7 @@ pub fn round_gauge(s: &mut Surface, rect: Rect, opts: RoundGaugeOpts) {
             cx as f32,
             cy as f32 + r as f32 * 0.35,
             opts.label,
-            GREEN_DIM,
+            dim_ring,
             opts.font_px,
         );
     }

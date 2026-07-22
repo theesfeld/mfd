@@ -225,6 +225,52 @@ impl Surface {
             }
         }
     }
+
+    /// Expand or compress mid-tones around 0.5 (CON rocker). `level` 0..1, 0.5 = neutral.
+    pub fn apply_contrast(&mut self, level: f32) {
+        let l = level.clamp(0.0, 1.0);
+        // Map 0..1 → contrast factor 0.5..2.0 centered at 1.0 when level=0.5
+        let c = 0.5 + l * 1.5;
+        if (c - 1.0).abs() < 0.02 {
+            return;
+        }
+        let stride = self.stride as usize;
+        for y in 0..self.height as usize {
+            let row = y * stride;
+            for x in 0..self.width as usize {
+                let o = row + x * 4;
+                for ch in 0..3 {
+                    let v = self.pixels[o + ch] as f32 / 255.0;
+                    let out = ((v - 0.5) * c + 0.5).clamp(0.0, 1.0);
+                    self.pixels[o + ch] = (out * 255.0) as u8;
+                }
+            }
+        }
+    }
+
+    /// Dim non-near-black pixels toward black (SYM symbology intensity). `level` 0..1.
+    pub fn apply_symbology(&mut self, level: f32) {
+        let f = level.clamp(0.15, 1.0);
+        if (f - 1.0).abs() < 0.02 {
+            return;
+        }
+        let stride = self.stride as usize;
+        for y in 0..self.height as usize {
+            let row = y * stride;
+            for x in 0..self.width as usize {
+                let o = row + x * 4;
+                // Skip near-black glass
+                let sum =
+                    self.pixels[o] as u16 + self.pixels[o + 1] as u16 + self.pixels[o + 2] as u16;
+                if sum < 24 {
+                    continue;
+                }
+                self.pixels[o] = ((self.pixels[o] as f32) * f).min(255.0) as u8;
+                self.pixels[o + 1] = ((self.pixels[o + 1] as f32) * f).min(255.0) as u8;
+                self.pixels[o + 2] = ((self.pixels[o + 2] as f32) * f).min(255.0) as u8;
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
