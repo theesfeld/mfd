@@ -5,6 +5,7 @@ mod extra;
 mod label;
 mod round_gauge;
 mod softkeys;
+mod status;
 mod tape;
 
 pub use bezel::bezel_frame;
@@ -16,4 +17,5 @@ pub use extra::{
 pub use label::{label, label_centered};
 pub use round_gauge::{round_gauge, RoundGaugeOpts};
 pub use softkeys::{softkey_row, SoftkeyLayout};
+pub use status::{status_grid, tire_grid, value_readout, StatusItem, TireReading};
 pub use tape::{tape_gauge, TapeOpts, TapeOrientation};

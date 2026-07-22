@@ -184,3 +184,23 @@ Centered string (baked font).
 | BLANK | dim readout only |
 
 **Demo default starts on WIDG (Gallery).** Press `g` or left OSB **WIDG** to return. Tab switches jet/auto.
+
+---
+
+## Automotive status widgets
+
+### `status_grid`
+
+Discrete ON/OFF cells (lights, doors, belts, drive modes). ON uses primary/caution color; OFF uses dim or warning.
+
+### `tire_grid`
+
+Four-corner TPM layout (FL/FR/RL/RR) with pressure + temperature and alert color.
+
+### `value_readout`
+
+Title + large value + unit (speed, cabin temp).
+
+### FLIR glass (`video` module)
+
+Greyscale blit into `video_frame` (green-hot). Source: `MFD_FLIR_PATH` PGM or synthetic. Same overlay language as jet TGP (crosshair, track gate).
