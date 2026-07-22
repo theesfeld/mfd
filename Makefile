@@ -20,7 +20,7 @@ AR      ?= ar
 CC      ?= cc
 
 ASFLAGS ?= --64
-ASM_SRC := asm/x86_64/vge.s asm/x86_64/vge_extra.s
+ASM_SRC := asm/x86_64/vge.s asm/x86_64/vge_extra.s asm/x86_64/vge_aa.s
 ASM_OBJ := $(patsubst asm/x86_64/%.s,build/%.o,$(ASM_SRC))
 
 .PHONY: all clean test install static shared
@@ -51,6 +51,8 @@ build/smoke_asm.o: examples/asm/smoke.s | build
 
 build/smoke_asm: build/smoke_asm.o $(ASM_OBJ)
 	$(LD) -o $@ build/smoke_asm.o $(ASM_OBJ)
+
+# include AA object in default ASM_OBJ via ASM_SRC
 	@echo "OK  $@"
 
 test: build/smoke_asm

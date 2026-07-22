@@ -49,9 +49,20 @@ void vge_plot(VgeSurface *s, int32_t x, int32_t y, vge_color color);
 
 /* --- Integer screen-space vectors (hot path) --- */
 
-/** Bresenham line: light every pixel from (x0,y0) to (x1,y1). */
+/** Bresenham line: light every pixel from (x0,y0) to (x1,y1). Fast, aliased. */
 void vge_line(VgeSurface *s, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
               vge_color color);
+
+/**
+ * Xiaolin Wu antialiased line (crisp hairlines). Coverage blends into
+ * 0xAARRGGBB. Prefer this for width-1 strokes.
+ */
+void vge_line_aa(VgeSurface *s, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
+                 vge_color color);
+
+/** Blend one pixel with coverage 0..255 (used by AA). */
+void vge_plot_blend(VgeSurface *s, int32_t x, int32_t y, vge_color color,
+                    uint32_t coverage);
 
 /** Thick line (integer thickness, multi-pass). */
 void vge_line_thick(VgeSurface *s, int32_t x0, int32_t y0, int32_t x1, int32_t y1,

@@ -213,7 +213,8 @@ impl DisplayList {
 fn draw_seg(surface: &mut Surface, x0: i32, y0: i32, x1: i32, y1: i32, color: Color, width: i32) {
     let w = width.max(1);
     if w == 1 {
-        surface.line(x0, y0, x1, y1, color);
+        // Crisp hairline: Xiaolin Wu (asm).
+        surface.line_aa(x0, y0, x1, y1, color);
     } else {
         surface.line_thick(x0, y0, x1, y1, color, w);
     }
@@ -231,8 +232,11 @@ mod tests {
         list.line(0, 0, 10, 0);
         let mut s = Surface::new(32, 32);
         list.refresh(&mut s);
-        assert_eq!(s.get(0, 0), Some(GREEN));
-        assert_eq!(s.get(10, 0), Some(GREEN));
+        let p0 = s.get(0, 0).unwrap();
+        let p1 = s.get(10, 0).unwrap();
+        assert_eq!(p0 & 0x00FF_FFFF, GREEN & 0x00FF_FFFF);
+        assert_eq!(p1 & 0x00FF_FFFF, GREEN & 0x00FF_FFFF);
+        assert!(alpha(p0) >= 200);
         // Background stays transparent.
         assert_eq!(s.get(0, 1).map(alpha).unwrap_or(0), 0);
         assert_eq!(s.get(5, 5), Some(TRANSPARENT));

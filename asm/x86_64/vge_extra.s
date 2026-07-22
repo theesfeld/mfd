@@ -639,7 +639,7 @@ vge_line_xf:
         cvtss2si r8d, xmm3
         mov     rdi, r12
         mov     r9d, r14d
-        call    vge_line
+        call    vge_line_aa
         jmp     .Lxf_done
 .Lxf_m:
         /* apply m to (x0,y0) and (x1,y1) */
@@ -669,7 +669,7 @@ vge_line_xf:
         cvtss2si r8d, xmm0
         mov     rdi, r12
         mov     r9d, r14d
-        call    vge_line
+        call    vge_line_aa
 .Lxf_done:
         add     rsp, 40
         pop     r14

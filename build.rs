@@ -15,6 +15,7 @@ fn main() {
 
     println!("cargo:rerun-if-changed=asm/x86_64/vge.s");
     println!("cargo:rerun-if-changed=asm/x86_64/vge_extra.s");
+    println!("cargo:rerun-if-changed=asm/x86_64/vge_aa.s");
     println!("cargo:rerun-if-changed=include/vge.h");
     println!("cargo:rerun-if-changed=Makefile");
     println!("cargo:rerun-if-changed=build/libvge.a");
@@ -34,7 +35,11 @@ fn main() {
     }
 
     // Assemble the same pure-asm sources the Makefile uses.
-    let srcs = ["asm/x86_64/vge.s", "asm/x86_64/vge_extra.s"];
+    let srcs = [
+        "asm/x86_64/vge.s",
+        "asm/x86_64/vge_extra.s",
+        "asm/x86_64/vge_aa.s",
+    ];
     let mut objs = Vec::new();
     for src in srcs {
         let name = PathBuf::from(src)

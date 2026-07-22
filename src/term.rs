@@ -177,7 +177,8 @@ pub fn surface_size_for_viewport(backend: TermBackend, vp: Viewport) -> (u32, u3
     let (w, h) = match backend {
         // Low device px/cell: terminal scales the image to the cell box.
         // Less base64 ⇒ smoother present (less queue pressure on the emulator).
-        TermBackend::Kitty => (cols * 3, rows * 6),
+        // Higher density = crisper vectors; still capped by VGE_MAX_*.
+        TermBackend::Kitty => (cols * 5, rows * 10),
         TermBackend::HalfBlock => (cols, rows * 2),
         TermBackend::Ascii => (cols, rows),
     };

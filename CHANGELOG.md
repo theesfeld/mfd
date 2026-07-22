@@ -19,9 +19,15 @@
 - Default display lock **120 Hz** phase-locked; `VGE_HZ=0` for uncapped throughput tests
 - Terminal demo default phosphor on (`VGE_PHOSPHOR=0` to disable)
 
+### Added
+
+- **Xiaolin Wu AA lines** in pure asm (`vge_line_aa` / `vge_plot_blend`) — crisp hairlines
+- Default hairline strokes and `Surface::line` use AA; `line_fast` keeps Bresenham
+
 ### Changed
 
 - **Core is pure assembly `libvge`** (`make` → `.a`/`.so`); Rust is optional FFI only
+- Kitty present density raised for sharper on-screen vectors
 
 ### Added
 
