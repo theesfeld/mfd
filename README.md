@@ -108,15 +108,16 @@ Link the static/shared library from `cargo build --release` (`libvge.a` / `libvg
 use vge::{DisplayList, Surface, GREEN, CYAN};
 
 let mut list = DisplayList::new();
+list.set_width(1); // hairline; any integer ≥ 1
 list.set_color(GREEN);
 list.line(10, 10, 630, 350);
 list.set_color(CYAN);
 list.circle(320, 180, 80);
 
 let mut scanout = Surface::new(640, 360);
-// decay 200/256 ≈ phosphor trail; 0 = hard clear each retrace
-list.refresh(&mut scanout, 200);
-// then present_at(&scanout, backend, viewport) or fb.present_from(&scanout)
+// Transparent clear + crisp strokes only (no black fill, no trail)
+list.refresh(&mut scanout);
+// present_at_state: paints opaque pixels only over the terminal
 ```
 
 Immediate beam (no list) still works:
@@ -170,7 +171,7 @@ cargo run --release --bin vge-demo -- --full
 | `VGE_HZ=120` | Default: phase-lock 120 Hz (smooth) |
 | `VGE_HZ=60` | Phase-lock 60 Hz |
 | `VGE_HZ=0` | Uncapped (throughput test; can stutter) |
-| `VGE_PHOSPHOR=0` | Disable trail fade (default on in terminal demo) |
+| `VGE_WIDTH=N` | Stroke width in pixels (default 1; no artificial max) |
 | `VGE_TERM=kitty\|half\|ascii` | Force present backend |
 | `VGE_MAX_W` / `VGE_MAX_H` | Cap pixel buffer (default 960×540) |
 | `VGE_EFFECTS=…` | `glow`, `bloom`, `radar`, `scan` |
@@ -190,7 +191,8 @@ Quit: `q`, Esc, or Ctrl+C.
 | `set_color` / `move_to` / `line_to` | Beam state + strokes |
 | `line` / `line_thick` / `circle` / `polyline` | Draw commands |
 | `stroke(surface)` | Execute beam (no clear) |
-| `refresh(surface, decay_256)` | Phosphor + full retrace |
+| `set_width(px)` | Stroke width in pixels (≥ 1) |
+| `refresh(surface)` | Transparent clear + full retrace (overlay-ready) |
 
 ### Geometry scanout (C + Rust)
 

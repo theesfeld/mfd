@@ -222,13 +222,37 @@ pub fn present(surface: &Surface, backend: TermBackend) -> io::Result<()> {
     present_at(surface, backend, Viewport::full_terminal())
 }
 
-/// Present inside a cell rectangle. Text outside the viewport is untouched
-/// (overlay). This is how vectors sit **on top of** a normal TUI.
+/// Tracks cells painted last frame so moved strokes erase cleanly without
+/// wiping the whole terminal (true overlay).
+#[derive(Debug, Default)]
+pub struct OverlayState {
+    /// Packed cell keys: (row << 16) | col within the viewport grid.
+    prev: Vec<u32>,
+}
+
+impl OverlayState {
+    pub fn new() -> Self {
+        Self { prev: Vec::new() }
+    }
+}
+
+/// Present inside a cell rectangle. Transparent pixels leave host cells alone.
+/// Pass `state` for half-block/ascii so prior stroke cells are erased when the beam moves.
 pub fn present_at(surface: &Surface, backend: TermBackend, vp: Viewport) -> io::Result<()> {
+    present_at_state(surface, backend, vp, None)
+}
+
+/// Like [`present_at`] with erase-tracking for crisp moving strokes over TTY text.
+pub fn present_at_state(
+    surface: &Surface,
+    backend: TermBackend,
+    vp: Viewport,
+    state: Option<&mut OverlayState>,
+) -> io::Result<()> {
     match backend {
         TermBackend::Kitty => present_kitty_at(surface, vp),
-        TermBackend::HalfBlock => present_halfblock_at(surface, vp),
-        TermBackend::Ascii => present_ascii_at(surface, vp),
+        TermBackend::HalfBlock => present_halfblock_at(surface, vp, state),
+        TermBackend::Ascii => present_ascii_at(surface, vp, state),
     }
 }
 
@@ -237,16 +261,18 @@ fn present_kitty_at(surface: &Surface, vp: Viewport) -> io::Result<()> {
     let rows = vp.rows.max(1);
     let w = surface.width();
     let h = surface.height();
-    let rgb = surface.export_rgb24();
+    // RGBA so alpha=0 pixels leave the terminal background visible.
+    let rgba = surface.export_rgba32();
     let id = KITTY_ID.load(Ordering::Relaxed);
 
     // Build one buffer: cursor → graphics payload.
-    let mut out = Vec::with_capacity(rgb.len() * 2 + 128);
+    let mut out = Vec::with_capacity(rgba.len() * 2 + 128);
     // CUP is 1-based
     push_cup(&mut out, vp.row + 1, vp.col + 1);
 
-    let header = format!("a=T,f=24,t=d,s={w},v={h},c={cols},r={rows},i={id},q=2");
-    let b64 = b64_encode(&rgb);
+    // f=32 = RGBA; transparent pixels composite over terminal text.
+    let header = format!("a=T,f=32,t=d,s={w},v={h},c={cols},r={rows},i={id},q=2");
+    let b64 = b64_encode(&rgba);
     let chunk = 4096usize;
     let bytes = b64.as_bytes();
     let mut offset = 0;
@@ -277,19 +303,23 @@ fn present_kitty_at(surface: &Surface, vp: Viewport) -> io::Result<()> {
     stdout.flush()
 }
 
-/// Fast half-block: one buffer, raw pixel walk, single write.
-fn present_halfblock_at(surface: &Surface, vp: Viewport) -> io::Result<()> {
+/// Half-block overlay: paint only opaque cells; erase previous stroke cells
+/// that are now transparent (so motion stays crisp over TTY text).
+fn present_halfblock_at(
+    surface: &Surface,
+    vp: Viewport,
+    state: Option<&mut OverlayState>,
+) -> io::Result<()> {
     let w = surface.width() as usize;
     let h = surface.height() as usize;
     let stride = surface.stride() as usize;
     let px = surface.pixels();
     let rows = h.div_ceil(2);
 
-    // ~40 bytes per cell worst case
-    let mut buf = Vec::with_capacity(rows * w * 40 + 32);
+    let mut now: Vec<u32> = Vec::with_capacity(w * 4);
+    let mut buf = Vec::with_capacity(rows * w * 48 + 64);
 
     for row in 0..rows {
-        push_cup(&mut buf, vp.row + 1 + row as u16, vp.col + 1);
         let y0 = row * 2;
         let y1 = y0 + 1;
         for x in 0..w {
@@ -299,24 +329,62 @@ fn present_halfblock_at(surface: &Surface, vp: Viewport) -> io::Result<()> {
             } else {
                 0
             };
+            if alpha_byte(top) == 0 && alpha_byte(bot) == 0 {
+                continue;
+            }
+            let key = ((row as u32) << 16) | (x as u32);
+            now.push(key);
+            push_cup(&mut buf, vp.row + 1 + row as u16, vp.col + 1 + x as u16);
             let (tr, tg, tb) = unpack_rgb(top);
             let (br, bg, bb) = unpack_rgb(bot);
-            // \x1b[38;2;R;G;Bm\x1b[48;2;R;G;Bm▀
-            buf.extend_from_slice(b"\x1b[38;2;");
-            push_u8(&mut buf, tr);
-            buf.push(b';');
-            push_u8(&mut buf, tg);
-            buf.push(b';');
-            push_u8(&mut buf, tb);
-            buf.extend_from_slice(b"m\x1b[48;2;");
-            push_u8(&mut buf, br);
-            buf.push(b';');
-            push_u8(&mut buf, bg);
-            buf.push(b';');
-            push_u8(&mut buf, bb);
-            buf.extend_from_slice(b"m\xE2\x96\x80"); // ▀ UTF-8
+            let ta = alpha_byte(top);
+            let ba = alpha_byte(bot);
+            if ta == 0 {
+                buf.extend_from_slice(b"\x1b[38;2;");
+                push_u8(&mut buf, br);
+                buf.push(b';');
+                push_u8(&mut buf, bg);
+                buf.push(b';');
+                push_u8(&mut buf, bb);
+                buf.extend_from_slice(b"m\xE2\x96\x84\x1b[0m"); // ▄
+            } else if ba == 0 {
+                buf.extend_from_slice(b"\x1b[38;2;");
+                push_u8(&mut buf, tr);
+                buf.push(b';');
+                push_u8(&mut buf, tg);
+                buf.push(b';');
+                push_u8(&mut buf, tb);
+                buf.extend_from_slice(b"m\xE2\x96\x80\x1b[0m"); // ▀
+            } else {
+                buf.extend_from_slice(b"\x1b[38;2;");
+                push_u8(&mut buf, tr);
+                buf.push(b';');
+                push_u8(&mut buf, tg);
+                buf.push(b';');
+                push_u8(&mut buf, tb);
+                buf.extend_from_slice(b"m\x1b[48;2;");
+                push_u8(&mut buf, br);
+                buf.push(b';');
+                push_u8(&mut buf, bg);
+                buf.push(b';');
+                push_u8(&mut buf, bb);
+                buf.extend_from_slice(b"m\xE2\x96\x80\x1b[0m");
+            }
         }
-        buf.extend_from_slice(b"\x1b[0m");
+    }
+
+    // Erase cells that had strokes last frame but are clear now.
+    if let Some(st) = state {
+        now.sort_unstable();
+        for &key in &st.prev {
+            if now.binary_search(&key).is_err() {
+                let row = (key >> 16) as u16;
+                let col = (key & 0xFFFF) as u16;
+                push_cup(&mut buf, vp.row + 1 + row, vp.col + 1 + col);
+                buf.push(b' ');
+            }
+        }
+        st.prev = now;
     }
 
     let mut stdout = io::stdout().lock();
@@ -324,36 +392,58 @@ fn present_halfblock_at(surface: &Surface, vp: Viewport) -> io::Result<()> {
     stdout.flush()
 }
 
-fn present_ascii_at(surface: &Surface, vp: Viewport) -> io::Result<()> {
+#[inline]
+fn alpha_byte(c: u32) -> u8 {
+    ((c >> 24) & 0xFF) as u8
+}
+
+fn present_ascii_at(
+    surface: &Surface,
+    vp: Viewport,
+    state: Option<&mut OverlayState>,
+) -> io::Result<()> {
     const RAMP: &[u8] = b" .:-=+*#%@";
     let w = surface.width() as usize;
     let h = surface.height() as usize;
     let stride = surface.stride() as usize;
     let px = surface.pixels();
+    let mut now: Vec<u32> = Vec::new();
     let mut buf = Vec::with_capacity(h * w * 24 + 32);
 
     for y in 0..h {
-        push_cup(&mut buf, vp.row + 1 + y as u16, vp.col + 1);
         for x in 0..w {
             let c = load_px(px, stride, x, y, w, h);
+            if alpha_byte(c) == 0 {
+                continue;
+            }
+            now.push(((y as u32) << 16) | (x as u32));
+            push_cup(&mut buf, vp.row + 1 + y as u16, vp.col + 1 + x as u16);
             let (r, g, b) = unpack_rgb(c);
             let lum = (r as u32 * 3 + g as u32 * 6 + b as u32) / 10;
             let idx = (lum * (RAMP.len() as u32 - 1) / 255) as usize;
-            let ch = RAMP[idx];
-            if r | g | b == 0 {
-                buf.push(ch);
-            } else {
-                buf.extend_from_slice(b"\x1b[38;2;");
-                push_u8(&mut buf, r);
-                buf.push(b';');
-                push_u8(&mut buf, g);
-                buf.push(b';');
-                push_u8(&mut buf, b);
-                buf.push(b'm');
-                buf.push(ch);
-                buf.extend_from_slice(b"\x1b[0m");
+            let ch = RAMP[idx.max(1)];
+            buf.extend_from_slice(b"\x1b[38;2;");
+            push_u8(&mut buf, r);
+            buf.push(b';');
+            push_u8(&mut buf, g);
+            buf.push(b';');
+            push_u8(&mut buf, b);
+            buf.push(b'm');
+            buf.push(ch);
+            buf.extend_from_slice(b"\x1b[0m");
+        }
+    }
+    if let Some(st) = state {
+        now.sort_unstable();
+        for &key in &st.prev {
+            if now.binary_search(&key).is_err() {
+                let row = (key >> 16) as u16;
+                let col = (key & 0xFFFF) as u16;
+                push_cup(&mut buf, vp.row + 1 + row, vp.col + 1 + col);
+                buf.push(b' ');
             }
         }
+        st.prev = now;
     }
     let mut stdout = io::stdout().lock();
     stdout.write_all(&buf)?;

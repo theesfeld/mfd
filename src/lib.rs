@@ -23,14 +23,30 @@ use std::f32::consts::PI;
 
 pub const VERSION: &str = "0.1.0-dev.1";
 
-/// Packed color `0x00RRGGBB`.
+/// Packed color `0xAARRGGBB` (alpha in the high byte).
+///
+/// Opaque strokes use `AA = 0xFF`. Fully transparent is `0` (no beam).
+/// The terminal present path **skips** transparent pixels so the host
+/// background (your TTY text) shows through.
 pub type Color = u32;
 
 #[inline]
 pub const fn rgb(r: u8, g: u8, b: u8) -> Color {
-    ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+    0xFF00_0000 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
 }
 
+#[inline]
+pub const fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color {
+    ((a as u32) << 24) | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+}
+
+#[inline]
+pub const fn alpha(c: Color) -> u8 {
+    ((c >> 24) & 0xFF) as u8
+}
+
+/// Fully transparent — no pixel drawn; terminal content shows through.
+pub const TRANSPARENT: Color = 0;
 pub const BLACK: Color = rgb(0, 0, 0);
 pub const GREEN: Color = rgb(0, 255, 70);
 pub const GREEN_DIM: Color = rgb(0, 120, 45);
@@ -234,7 +250,7 @@ impl Surface {
         unsafe { vge_polyline(&mut s, flat.as_ptr(), points.len() as i32, color) };
     }
 
-    /// Tight RGB888 export (for Kitty/Sixel/display). Length = w*h*3.
+    /// Tight RGB888 export. Length = w*h*3.
     pub fn export_rgb24(&self) -> Vec<u8> {
         let n = (self.width as usize)
             .saturating_mul(self.height as usize)
@@ -249,6 +265,31 @@ impl Surface {
         };
         unsafe { vge_export_rgb24(&s, out.as_mut_ptr()) };
         out
+    }
+
+    /// RGBA8888 for Kitty (`f=32`). Length = w*h*4. Byte order R,G,B,A.
+    pub fn export_rgba32(&self) -> Vec<u8> {
+        let n = (self.width as usize)
+            .saturating_mul(self.height as usize)
+            .saturating_mul(4);
+        let mut out = vec![0u8; n];
+        let mut i = 0usize;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let c = self.get(x as i32, y as i32).unwrap_or(0);
+                out[i] = ((c >> 16) & 0xFF) as u8;
+                out[i + 1] = ((c >> 8) & 0xFF) as u8;
+                out[i + 2] = (c & 0xFF) as u8;
+                out[i + 3] = ((c >> 24) & 0xFF) as u8;
+                i += 4;
+            }
+        }
+        out
+    }
+
+    /// Clear to fully transparent (overlay-ready).
+    pub fn clear_transparent(&mut self) {
+        self.pixels.fill(0);
     }
 
     /// Read packed XRGB at (x,y). Returns None if out of bounds.

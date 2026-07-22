@@ -9,6 +9,9 @@
 - `poll_quit` ignores non-tty stdin (cargo pipes)
 - **Present path FPS**: buffered half-block/ascii (no per-cell `write!`); Kitty density capped; report draw_us vs present_us
 - **Choppy high-FPS**: absolute deadline frame lock, wall-clock animation, default 120 Hz (uncapped floods terminals)
+- Remove phosphor trail default (crisp strokes only)
+- Transparent overlay: RGBA scanout; present skips alpha=0 so terminal background shows
+- `DisplayList::set_width` for 1px…N stroke width
 
 ### Changed
 
