@@ -3,6 +3,9 @@
 //! Optional live OBD: feature `obd` + native [`crate::obd`] stack
 //! (`MFD_OBD_BT` / `MFD_OBD_PORT` / `MFD_OBD_REPLAY`).
 //!
+//! Vehicle under test: see [`vehicle_profile`] and `docs/vehicle.md`
+//! (2019 SuperCrew 2.7 EcoBoost 4×4 · Sync 3 · display only).
+//!
 //! # Widget mapping (MFD equivalents)
 //! | Vehicle data | MFD widget |
 //! |--------------|------------|
@@ -14,6 +17,8 @@
 //! | TPM | tire_grid |
 //! | Forward camera / FLIR | greyscale blit + TGP overlays |
 //! | Collision / park range | range_display |
+
+pub mod vehicle_profile;
 
 use crate::bezel::BezelState;
 use crate::color::{rgb, CYAN};
@@ -1257,34 +1262,36 @@ pub fn draw_auto_with_video(
             );
         }
         AutoPage::Setup => {
+            // Ownship + truck profile + As-Built feature labels (help only).
             let vin_s = if v.vin.is_empty() {
                 "VIN  (none)".to_string()
             } else {
                 format!("VIN  {}", v.vin)
             };
-            let lines = [
-                vin_s.as_str(),
-                "OWN SHIP  = VIN",
-                "SPD UNIT  → bottom OSB",
-                "FLIR  MFD_FLIR_PATH / MFD_CAMERA",
-                "OBD  MFD_OBD_BT / PORT / REPLAY",
-                "DISPLAY ONLY  no vehicle write",
-                "JET  Tab domain",
-            ];
+            let mut lines = vehicle_profile::setup_help_lines(14);
+            lines.insert(0, vin_s);
+            lines.insert(1, "OWN SHIP  = VIN".into());
+            lines.insert(2, format!("SPD {}", v.speed_unit.name()));
+            let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
             list_menu(
                 page.surface,
-                Rect::new(c.x, c.y, c.w, c.h / 2),
-                &lines,
+                Rect::new(c.x, c.y, c.w, (c.h as f32 * 0.72) as i32),
+                &refs,
                 Some(0),
-                fh * 0.75,
+                fh * 0.68,
                 pal.primary,
                 pal.readout,
             );
             caution_box(
                 page.surface,
-                Rect::new(c.x + 12, c.y + c.h / 2 + 4, c.w - 24, c.h / 3),
-                &format!("UNIT {}  ·  OS {}", v.speed_unit.name(), short_vin(&v.vin)),
-                fh * 0.9,
+                Rect::new(
+                    c.x + 8,
+                    c.y + (c.h as f32 * 0.74) as i32,
+                    c.w - 16,
+                    (c.h as f32 * 0.24) as i32,
+                ),
+                &format!("{} · OS {}", vehicle_profile::YEAR, short_vin(&v.vin)),
+                fh * 0.75,
                 pal.nav,
             );
         }
