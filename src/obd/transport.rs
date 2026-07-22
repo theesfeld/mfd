@@ -184,19 +184,13 @@ mod bt {
         KEYS.iter().any(|k| u.contains(k))
     }
 
-    /// Power controller on (best effort).
-    pub fn bluez_power_on() {
-        let _ = Command::new("bluetoothctl").args(["power", "on"]).output();
+    fn btctl(args: &[&str]) -> Option<std::process::Output> {
+        Command::new("bluetoothctl").args(args).output().ok()
     }
 
-    /// Ask BlueZ to connect classic profile (helps some dongles before RFCOMM).
-    pub fn bluez_connect(mac: &str) {
-        let Some(mac) = normalize_mac(mac) else {
-            return;
-        };
-        let _ = Command::new("bluetoothctl")
-            .args(["connect", &mac])
-            .output();
+    /// Power controller on (best effort).
+    pub fn bluez_power_on() {
+        let _ = btctl(&["power", "on"]);
     }
 
     /// Trust device (best effort; reduces re-pair prompts).
@@ -204,7 +198,83 @@ mod bt {
         let Some(mac) = normalize_mac(mac) else {
             return;
         };
-        let _ = Command::new("bluetoothctl").args(["trust", &mac]).output();
+        let _ = btctl(&["trust", &mac]);
+    }
+
+    /// Ask BlueZ to connect classic profile once (non-blocking best effort).
+    pub fn bluez_connect(mac: &str) {
+        let Some(mac) = normalize_mac(mac) else {
+            return;
+        };
+        let _ = btctl(&["connect", &mac]);
+    }
+
+    /// True if BlueZ reports `Connected: yes` for this MAC.
+    pub fn bluez_is_connected(mac: &str) -> bool {
+        let Some(mac) = normalize_mac(mac) else {
+            return false;
+        };
+        let Some(out) = btctl(&["info", &mac]) else {
+            return false;
+        };
+        let text = String::from_utf8_lossy(&out.stdout);
+        text.lines().any(|l| {
+            let t = l.trim();
+            t.eq_ignore_ascii_case("Connected: yes")
+                || t.to_ascii_lowercase().starts_with("connected: yes")
+        })
+    }
+
+    /// True if device is known/paired in BlueZ.
+    pub fn bluez_is_known(mac: &str) -> bool {
+        let Some(mac) = normalize_mac(mac) else {
+            return false;
+        };
+        list_bluez_devices().iter().any(|(m, _)| m == &mac)
+    }
+
+    /// Brief inquiry so a waking dongle can be found (best effort).
+    pub fn bluez_scan_brief(seconds: u64) {
+        bluez_power_on();
+        let _ = btctl(&["scan", "on"]);
+        std::thread::sleep(Duration::from_secs(seconds.min(12)));
+        let _ = btctl(&["scan", "off"]);
+    }
+
+    /// **Full link prepare owned by cmfd** — power, trust, connect, wait.
+    ///
+    /// Operator does **not** run `bluetoothctl connect`. Call this before RFCOMM.
+    /// Returns `true` if BlueZ reports Connected (RFCOMM may still fail separately).
+    pub fn bluez_prepare_link(mac: &str, wait: Duration) -> bool {
+        let Some(mac) = normalize_mac(mac) else {
+            return false;
+        };
+        bluez_power_on();
+        let _ = btctl(&["agent", "on"]);
+        let _ = btctl(&["default-agent"]);
+        bluez_trust(&mac);
+
+        if bluez_is_connected(&mac) {
+            return true;
+        }
+
+        // Drop stale half-open state, then connect.
+        let _ = btctl(&["disconnect", &mac]);
+        std::thread::sleep(Duration::from_millis(200));
+        let _ = btctl(&["connect", &mac]);
+
+        let start = Instant::now();
+        while start.elapsed() < wait {
+            if bluez_is_connected(&mac) {
+                return true;
+            }
+            // Re-issue connect periodically (BlueZ often needs a second try after power-up).
+            if start.elapsed().as_millis() % 1500 < 250 {
+                let _ = btctl(&["connect", &mac]);
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        bluez_is_connected(&mac)
     }
 
     /// Paired/known devices from `bluetoothctl devices` as `(mac, name)`.
@@ -321,11 +391,10 @@ mod bt {
         }
 
         fn open(&mut self) -> Result<()> {
-            // BlueZ assist: ensure adapter is powered and classic link is up.
-            bluez_power_on();
-            bluez_trust(&self.mac);
-            bluez_connect(&self.mac);
-            std::thread::sleep(Duration::from_millis(300));
+            // Ensure ACL is up; supervisor already prepares long — short top-up here.
+            if !bluez_is_connected(&self.mac) {
+                let _ = bluez_prepare_link(&self.mac, Duration::from_secs(3));
+            }
 
             let fd = unsafe { libc::socket(AF_BLUETOOTH, libc::SOCK_STREAM, BTPROTO_RFCOMM) };
             if fd < 0 {
@@ -470,8 +539,9 @@ mod bt {
 
 #[cfg(target_os = "linux")]
 pub use bt::{
-    bluez_connect, bluez_power_on, bluez_trust, discover_obd_macs, list_bluez_devices,
-    name_looks_like_obd, normalize_mac, rfcomm_channel_candidates, BtSppTransport,
+    bluez_connect, bluez_is_connected, bluez_is_known, bluez_power_on, bluez_prepare_link,
+    bluez_scan_brief, bluez_trust, discover_obd_macs, list_bluez_devices, name_looks_like_obd,
+    normalize_mac, rfcomm_channel_candidates, BtSppTransport,
 };
 
 #[cfg(not(target_os = "linux"))]

@@ -27,8 +27,8 @@
 //! | `MFD_OBD_CAPTURE=dir` | Live capture dir (same process as glass) |
 //! | `MFD_OBD_CRUSH=1` | Discover all Mode 01 PIDs + multi-module UDS |
 //!
-//! Bluetooth: BlueZ assist (`bluetoothctl power/connect`), OBD-name discovery among
-//! paired devices, channel scan, and reconnect after link loss. Pair the dongle once.
+//! Bluetooth: **cmfd owns the link** (BlueZ power/connect/wait, scan, RFCOMM, reconnect).
+//! Operator does not run `bluetoothctl connect` for normal drives.
 
 #![cfg(feature = "obd")]
 

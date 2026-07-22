@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **cmfd owns Bluetooth connect:** BlueZ power/trust/connect/wait + scan + RFCOMM inside the feed; no operator `bluetoothctl connect` for normal use. Shell only notes the target MAC. Refs #123.
+
 ### Removed
 
 - **SIM / demo vehicle path:** product glass never invents RPM, speed, DTCs, or lights. Empty snapshot until OBD is LIVE. Default BT MAC when env unset. Warnings only when `bus_state == LIVE`. Refs #121.

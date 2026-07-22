@@ -56,28 +56,21 @@ Headless long capture example:
 
 One ELM Bluetooth SPP client at a time. Drive mode runs **capture inside `cmfd`** (`MFD_OBD_CAPTURE` + `MFD_OBD_CRUSH`). Do not start a second `mfd-obd-capture` process against the same adapter while the glass is live.
 
-### Bluetooth must stay up
+### Bluetooth — owned by cmfd
 
-Without OBD the product has **no vehicle data** (no SIM, no demo animation). `cmfd` keeps searching when BT is configured (default truck MAC):
+Without OBD the product has **no vehicle data** (no SIM). You do **not** run `bluetoothctl connect`. `cmfd` owns the full link:
 
-1. BlueZ power on + `connect` (shell assist + in-process)
-2. Prefer `MFD_OBD_BT` MAC; also try paired devices named like OBD / ELM / OBDLink / STN
-3. Try RFCOMM channels (configured + 1…12)
-4. On failure: keep searching with backoff; glass shows **SEARCH** / **RECONN**
-5. On link drop during the drive: automatic reconnect
+1. Power BlueZ controller  
+2. Trust preferred MAC; BlueZ connect + wait until Connected  
+3. Periodic scan if the dongle is not yet known  
+4. RFCOMM channel try (preferred + 1…12)  
+5. ELM init + probe + poll  
+6. On drop: automatic reconnect  
 
-**First-time pairing** (dongle in pairing mode if required):
+**Operator only:** power the dongle (OBD port, truck RUN if the port is switched).  
+**First-time pair (once per machine):** put dongle in pairing mode and run `./cmfd.sh` — cmfd scans. If the host has never seen the MAC, pair once with your OS Bluetooth UI or `bluetoothctl pair` (one-time); day-to-day connect is cmfd-only.
 
-```sh
-bluetoothctl
-  power on
-  scan on
-  pair 00:04:3E:96:B8:F1
-  trust 00:04:3E:96:B8:F1
-  connect 00:04:3E:96:B8:F1
-```
-
-Then `./cmfd.sh`. Default MAC is this truck’s OBDLink MX+.
+Default MAC is this truck’s OBDLink MX+ (`00:04:3E:96:B8:F1`).
 
 ## Env (defaults for this truck)
 
