@@ -1,8 +1,16 @@
 # Vehicle CMFD design (Lockheed-class)
 
 **Status:** product law for `cmfd`  
-**Issue:** [#103](https://github.com/theesfeld/mfd/issues/103)  
-**Source:** internal design review (MLU-class CMFD principles + F-150 display-only product)
+**Issues:** [#103](https://github.com/theesfeld/mfd/issues/103) · [#105](https://github.com/theesfeld/mfd/issues/105)  
+**Source:** Lockheed-style design review + operator hard requirements
+
+## Operator hard requirements
+
+| # | Requirement | Implementation |
+|---|-------------|----------------|
+| 1 | **Dedicated fault code page** | Format **DTC** — always when link ready; empty = honest `NONE`; display-only (no clear) |
+| 2 | **Dedicated ATT page** | Format **ATT** — horizon ball + compass/heading; always when link ready |
+| 3 | **Tach + speedo gauges** | **ENG** = large RPM tach; **DRV** = large speedo + tach pair |
 
 ## Principles
 
@@ -15,56 +23,70 @@
 7. **Fail-soft** — omit or “—”; never invent bus data; display-only.  
 8. **Labels are page-owned** — options change with format.
 
-## Taxonomy (fixed categories)
+## Format decision table
 
-Formats are fixed **systems categories**. Probe gates **presence**, not identity.
-
-| Format | Probe may omit? | Primary glass |
-|--------|-----------------|---------------|
-| ENG · FUEL · FLUD · ELEC · DRV | Rare if link up | Gauges: RPM, fuel level, speed; sparse numerics |
-| CHAS · BODY · LITE · CLIM · CAM · RNG · ATT · MAP | Yes | Only if GO; blank slot if not |
-| DTC | Yes only if no link | List (empty = none) |
-| BUS · SET · OWN | Product always useful | Dense matrix / identity |
+| Format | Always when link ready? | Probe may omit? | Primary glass |
+|--------|-------------------------|-----------------|---------------|
+| **ENG** | Yes | No | **Tach (RPM)** gauge + sparse numerics |
+| **DRV** | Yes | No | **Speedo + tach** gauges |
+| **ATT** | Yes (operator hard) | No | Horizon ball + heading/compass |
+| **DTC** | Yes (operator hard) | No (omit only if no link) | Fault list; empty = NONE |
+| FUEL | Yes | Rare | Fuel % + level tape |
+| FLUD | Yes | Rare | Key temp gauges (ECT/OIL/TFT) |
+| ELEC | Yes | Rare | Battery gauge |
+| CHAS | No | Yes (TPMS/ABS) | Tire grid when GO |
+| BODY · LITE | Default on truck | May tighten later | Status grids |
+| CLIM · CAM · RNG · MAP | No | Yes | Only if GO |
+| BUS | Yes (shop support) | No | Dense channel dump |
+| OWN · SET | Yes | No | Identity / setup |
 
 ## OSB policy (frozen)
 
 ```
-        1   2   3   4   5     top — format options
+        1   2   3   4   5     top — options for active format
    20                       6
-   19                       7     left / right — format options
+   19                       7     left / right — options
    18      [  GLASS  ]      8
    17                       9
    16                      10
        15  14  13  12  11     bottom
-       OWN sA  sB  sC DCLT
+       OWN  A   B   C  DCLT
 ```
 
 | OSB | Legend | Function |
 |-----|--------|----------|
-| **15** | OWN | Ownship page |
-| **14 / 13 / 12** | Format slots A/B/C | Highlight active; other slot → switch; active → Master Menu |
-| **11** | DCLT | Declutter 0 → 1 → 2 (full / reduced / gauges-only) |
-| **1–10, 16–20** | Format options | Units, lights, BIT jumps (DTC/BUS/SET), page-local |
+| **15** | OWN | Ownship |
+| **14 / 13 / 12** | Format A/B/C | Active lit; other → switch; active → Master Menu |
+| **11** | DCLT | Density 0 → 1 → 2 |
+| **1–10** | Format options | Units, gear, lights, … (page-owned) |
+| **20 / 19 / 16** | BUS · SET · DTC | Support jumps (always labeled when formats exist) |
 
-**Blank-not-repack:** if CHAS is NOGO, the Master Menu omits CHAS; no hollow CHAS format.
+**Default slots after probe:** ENG · DRV · ATT (when all GO).
 
-## Widgets
+**Blank-not-repack:** missing formats omitted from Master Menu; never slide labels to fill gaps.
 
-| Use gauge / ball / tape | Use dense numeric only |
-|-------------------------|-------------------------|
-| RPM, speed, fuel level, battery, key temps | Secondary PIDs, DTCs, BUS dump, identity |
+## Widgets (discipline)
+
+| Use as real widgets | Dense numeric only |
+|---------------------|--------------------|
+| RPM tach, speedo, fuel level tape | Secondary PIDs |
+| Battery gauge, key temps | BUS dump, identity |
 | ATT ball + heading | — |
-| Tire grid when TPMS GO | Door/belt status grids |
+| Tire grid (if TPMS GO) | Door/belt status |
 
 Do not fill the face with tiny gauges for every channel.
 
+## Power-on
+
+1. Black face  
+2. Blank content + chrome: `OWN · · · DCLT` (slots empty until probe)  
+3. Probe off-glass → seed slots (ENG/DRV/ATT) → systems formats  
+
+No GO/NOGO splash on glass. DTC is a format, not cold-power BIT.
+
 ## Master Menu
 
-Lists **GO formats only**. Pick assigns into the slot that opened the menu. Duplicate format on another slot → other slot blanks (MLU habit).
-
-## Interim note
-
-Full ring systems bank (ENG on OSB 1 always…) is **not** the end state. Navigation is **three format slots + Master Menu**.
+GO formats only. Pick assigns into the slot that opened the menu. Duplicate on another slot → blank other (MLU habit).
 
 ## Anti-patterns (rejected)
 
@@ -73,3 +95,4 @@ Full ring systems bank (ENG on OSB 1 always…) is **not** the end state. Naviga
 - Hollow formats for missing equipment  
 - Marketing-dense glass  
 - Write vehicle bus  
+- Permanent car-radio of every category on top/sides  

@@ -1,30 +1,22 @@
-//! Real F-16 **CMFD power-on** glass (public MLU / training model).
+//! Real F-16 **CMFD power-on** glass (public MLU model) for vehicle product.
 //!
-//! Phases (see `docs/reference/cmfd-power-on.md`):
+//! Phases (see `docs/reference/cmfd-power-on.md` + vehicle-cmfd-design.md):
 //! 1. Power apply — pure black  
-//! 2. Display alive — BLANK face (empty content) + MLU OSB chrome  
-//! 3. Format select labels — SWAP · FCR · HSD · SMS · DCLT (training default)
+//! 2. Display alive — BLANK content + format-select chrome  
+//! 3. Bottom: OWN · blank · blank · blank · DCLT (slots fill after probe)
 //!
-//! Capability probe runs in the background. This is **not** a invented BIT
-//! checklist splash. TEST/BIT format is a separate selectable page, not cold power.
+//! Capability probe runs **off-glass**. No GO/NOGO splash. DTC is a format later.
 
 use crate::auto::caps::VehicleCaps;
-use crate::jet::FormatSelect;
 use crate::page::Page;
 use crate::palette::Palette;
 use crate::widget::{bezel_frame, osb_chrome};
-
-/// Training-default format select (left CMFD NAV/A-A style).
-fn power_on_format_select() -> FormatSelect {
-    FormatSelect::default() // FCR / HSD / SMS on OSB 14/13/12
-}
 
 /// Draw authentic CMFD power-on face while probe runs.
 ///
 /// `t` — wall time for phase timing.  
 /// `caps.progress` — 0..1 probe progress (only used to advance visual phase).
 pub fn draw_bit_screen(page: &mut Page, pal: &Palette, caps: &VehicleCaps, t: f32) {
-    // Prefer probe progress; if zero, use wall clock so demo still animates.
     let p = if caps.progress > 0.02 {
         caps.progress.clamp(0.0, 1.0)
     } else {
@@ -34,27 +26,24 @@ pub fn draw_bit_screen(page: &mut Page, pal: &Palette, caps: &VehicleCaps, t: f3
     page.clear();
     page.surface.clear(pal.glass);
 
-    // ── Phase 1: power apply — black glass, no legends ───────────────────
+    // ── Phase 1: power apply — black glass ───────────────────────────────
     if p < 0.12 {
-        // Pure black face (real LCD just powered).
         let _ = caps;
         return;
     }
 
-    // ── Phase 2–3: bezel + OSB chrome, empty content (BLANK format) ───────
+    // ── Phase 2–3: bezel + vehicle format-select chrome, blank content ────
     let b = page.bounds.inset(2);
     bezel_frame(page.surface, b);
 
-    let sel = power_on_format_select();
-    // Bottom L→R = OSB 15..11: SWAP · FCR · HSD · SMS · DCLT
-    // Top / sides empty on blank power-on face (no page softkeys yet).
+    // Top / sides empty until formats ready (unlabeled = no function).
     let top = ["", "", "", "", ""];
     let right = ["", "", "", "", ""];
     let left = ["", "", "", "", ""];
-    let [a, b_lab, c] = sel.slot_labels();
-    let bottom = ["SWAP", a, b_lab, c, "DCLT"];
+    // Bottom L→R OSB 15..11: OWN · slotA · slotB · slotC · DCLT
+    // Slots blank during probe — filled after GO set is known.
+    let bottom = ["OWN", "", "", "", "DCLT"];
 
-    // Highlight active format slot (OSB 14) once "alive"
     let active = if p >= 0.20 { Some(14u8) } else { None };
     osb_chrome(
         page.surface,
@@ -67,7 +56,5 @@ pub fn draw_bit_screen(page: &mut Page, pal: &Palette, caps: &VehicleCaps, t: f3
         pal.dim,
         active,
     );
-
-    // Content: true blank — no center text, no progress bar, no OFP splash.
-    // Real BLANK format has empty glass; format names live on OSB 12/13/14.
+    // Content: true blank.
 }

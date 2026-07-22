@@ -185,22 +185,32 @@ impl VehicleCaps {
         c
     }
 
-    /// Pages allowed for this vehicle (omit if equipment NOGO).
+    /// Formats allowed after probe (Lockheed decision table + product hard pages).
+    ///
+    /// **Always (link ready):** ENG · DRV · FUEL · FLUD · ELEC · **ATT** · **DTC** ·
+    /// OWN · SET · BUS (shop).  
+    /// **Probe-gated:** CHAS · BODY · LITE · CLIM · CAM · RNG · MAP.  
+    /// Blank Master Menu labels for omitted formats — never repack OSB slots.
     pub fn pages(&self) -> Vec<crate::auto::AutoPage> {
         use crate::auto::AutoPage;
         if !self.ready {
             return Vec::new();
         }
+        // Core propulsion / drive / energy — always when link is up.
         let mut p = vec![
-            AutoPage::Eng,
+            AutoPage::Eng,   // tach (hard requirement)
+            AutoPage::Drive, // speedo (hard requirement)
             AutoPage::Fuel,
             AutoPage::Fluid,
             AutoPage::Elec,
-            AutoPage::Drive,
+            AutoPage::Attitude, // dedicated ATT (hard requirement)
+            AutoPage::Faults,   // dedicated DTC (hard requirement)
         ];
+        // Comfort / chassis / sensors — GO only.
         if self.features.tpms || self.features.abs {
             p.push(AutoPage::Chas);
         }
+        // Body/lights: show if we have any body-class data path (always on live truck).
         p.push(AutoPage::Body);
         p.push(AutoPage::Lights);
         if self.features.hvac {
@@ -212,13 +222,10 @@ impl VehicleCaps {
         if self.features.park_sensors {
             p.push(AutoPage::Range);
         }
-        if self.features.attitude {
-            p.push(AutoPage::Attitude);
-        }
         if self.features.map {
             p.push(AutoPage::Map);
         }
-        p.push(AutoPage::Faults);
+        // Shop / identity / setup — always available (not hollow).
         p.push(AutoPage::Bus);
         p.push(AutoPage::Own);
         p.push(AutoPage::Setup);

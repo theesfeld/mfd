@@ -59,11 +59,12 @@ pub struct AutoFormatSelect {
 
 impl Default for AutoFormatSelect {
     fn default() -> Self {
+        // Default slots: tach · speedo · ATT (operator hard formats).
         Self {
             slots: [
                 Some(AutoPage::Eng),
                 Some(AutoPage::Drive),
-                Some(AutoPage::Fuel),
+                Some(AutoPage::Attitude),
             ],
             active: FormatSlot::Osb14,
             menu_open: false,
@@ -75,16 +76,18 @@ impl Default for AutoFormatSelect {
 }
 
 impl AutoFormatSelect {
-    /// Seed slots from probe-allowed pages (first three GO core formats).
+    /// Seed three format slots from GO formats.
+    ///
+    /// Default preference: **ENG · DRV · ATT** (tach, speedo, horizon) when present.
     pub fn from_allowed(allowed: &[AutoPage]) -> Self {
         let prefer = [
-            AutoPage::Eng,
-            AutoPage::Drive,
+            AutoPage::Eng,      // tach
+            AutoPage::Drive,    // speedo
+            AutoPage::Attitude, // horizon / heading
+            AutoPage::Faults,   // DTC
             AutoPage::Fuel,
             AutoPage::Fluid,
             AutoPage::Elec,
-            AutoPage::Attitude,
-            AutoPage::Faults,
         ];
         let mut picked = Vec::new();
         for p in prefer {
@@ -99,7 +102,8 @@ impl AutoFormatSelect {
             if picked.len() == 3 {
                 break;
             }
-            if !picked.contains(&p) && !matches!(p, AutoPage::Own | AutoPage::Setup) {
+            if !picked.contains(&p) && !matches!(p, AutoPage::Own | AutoPage::Setup | AutoPage::Bus)
+            {
                 picked.push(p);
             }
         }
@@ -282,6 +286,14 @@ mod tests {
         let a = fs.handle_osb(13, 1, AutoPage::ALL);
         assert_eq!(a, FormatSelectAction::Show(AutoPage::Drive));
         assert_eq!(fs.current(), AutoPage::Drive);
+    }
+
+    #[test]
+    fn default_slots_are_eng_drv_att() {
+        let fs = AutoFormatSelect::default();
+        assert_eq!(fs.slots[0], Some(AutoPage::Eng));
+        assert_eq!(fs.slots[1], Some(AutoPage::Drive));
+        assert_eq!(fs.slots[2], Some(AutoPage::Attitude));
     }
 
     #[test]

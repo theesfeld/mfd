@@ -948,6 +948,18 @@ pub fn draw_auto_with_video(
                     ..Default::default()
                 },
             );
+            // Digital tach readout under needle (always).
+            value_readout(
+                page.surface,
+                c.x as f32 + tach_w as f32 * 0.5,
+                c.y as f32 + c.h as f32 * 0.78,
+                "rpm",
+                &format!("{:.0}", v.rpm),
+                "",
+                pal.primary,
+                fh * 0.55,
+                fh * 1.3,
+            );
             if dclt < 2 {
                 let mut lines = vec![
                     format!("LOAD  {:.0} %", v.load * 100.0),
@@ -1127,86 +1139,103 @@ pub fn draw_auto_with_video(
             );
         }
         AutoPage::Drive => {
-            // Speed gauge + gear numeric + channel dump.
-            let spd_w = (c.w as f32 * 0.42) as i32;
+            // Hard: large **speedo** + proper **tach** gauges (not a thin tape).
+            let half = (c.w - 12) / 2;
+            let g_h = if dclt >= 2 {
+                c.h - 8
+            } else {
+                (c.h as f32 * 0.62) as i32
+            };
             let spd_n = (v.speed_mph / 120.0).clamp(0.0, 1.0);
+            let rpm_n = (v.rpm / v.rpm_redline).clamp(0.0, 1.0);
             round_gauge(
                 page.surface,
-                Rect::new(c.x, c.y, spd_w, (c.h as f32 * 0.55) as i32),
+                Rect::new(c.x, c.y, half, g_h),
                 RoundGaugeOpts {
                     value: spd_n,
                     redline: Some(0.85),
                     label: "SPD",
                     color: pal.readout,
-                    font_px: fh * 0.7,
+                    font_px: fh * 0.75,
                     ..Default::default()
                 },
             );
             value_readout(
                 page.surface,
-                c.x as f32 + spd_w as f32 * 0.5,
-                c.y as f32 + c.h as f32 * 0.52,
+                c.x as f32 + half as f32 * 0.5,
+                c.y as f32 + g_h as f32 - fh * 1.2,
                 v.speed_unit.name(),
                 &format!("{:.0}", v.speed_unit.from_mph(v.speed_mph)),
-                v.speed_unit.name(),
+                "",
                 pal.readout,
-                fh * 0.6,
-                fh * 1.3,
+                fh * 0.55,
+                fh * 1.2,
+            );
+            round_gauge(
+                page.surface,
+                Rect::new(c.x + half + 8, c.y, half, g_h),
+                RoundGaugeOpts {
+                    value: rpm_n,
+                    redline: Some(0.9),
+                    label: "RPM",
+                    color: pal.primary,
+                    font_px: fh * 0.75,
+                    ..Default::default()
+                },
             );
             value_readout(
                 page.surface,
-                c.x as f32 + c.w as f32 * 0.72,
-                c.y as f32 + c.h as f32 * 0.18,
-                "GEAR",
-                v.gear.label(),
+                c.x as f32 + half as f32 + 8.0 + half as f32 * 0.5,
+                c.y as f32 + g_h as f32 - fh * 1.2,
+                "rpm",
+                &format!("{:.0}", v.rpm),
                 "",
-                pal.nav,
-                fh * 0.75,
-                fh * 1.8,
-            );
-            // Mini RPM tape on right of speed
-            tape(
-                page.surface,
-                Rect::new(c.x + spd_w + 4, c.y + 4, 28, (c.h as f32 * 0.5) as i32),
-                "RPM",
-                (v.rpm / v.rpm_redline).clamp(0.0, 1.0),
                 pal.primary,
-                fh * 0.5,
-                false,
+                fh * 0.55,
+                fh * 1.2,
             );
-            // Park brake: red flash field when on
-            let park_items = [StatusItem {
-                label: "PARK",
-                on: v.park_brake,
-            }];
-            status_grid_flash(
-                page.surface,
-                Rect::new(c.x + c.w / 4, c.y + (c.h as f32 * 0.4) as i32, c.w / 2, 30),
-                &park_items,
-                1,
-                fh * 0.95,
-                pal.warning,
-                pal.dim,
-                Some(&["PARK"]),
-                v.park_brake && flash,
-            );
-            let lines = channels::channels_in_group(v, "DRV")
-                .into_iter()
-                .map(|ch| ch.line())
-                .collect::<Vec<_>>();
-            numeric_matrix(
-                page.surface,
-                Rect::new(
-                    c.x,
-                    c.y + (c.h as f32 * 0.55) as i32,
-                    c.w,
-                    (c.h as f32 * 0.42) as i32,
-                ),
-                &lines,
-                fh * 0.85,
-                pal.readout,
-                2,
-            );
+            if dclt < 2 {
+                let park_items = [StatusItem {
+                    label: "PARK",
+                    on: v.park_brake,
+                }];
+                status_grid_flash(
+                    page.surface,
+                    Rect::new(c.x + 4, c.y + g_h + 2, c.w / 3, 28),
+                    &park_items,
+                    1,
+                    fh * 0.85,
+                    pal.warning,
+                    pal.dim,
+                    Some(&["PARK"]),
+                    v.park_brake && flash,
+                );
+                value_readout(
+                    page.surface,
+                    c.x as f32 + c.w as f32 * 0.72,
+                    c.y as f32 + g_h as f32 + fh * 1.2,
+                    "GEAR",
+                    v.gear.label(),
+                    "",
+                    pal.nav,
+                    fh * 0.65,
+                    fh * 1.4,
+                );
+            }
+            if dclt == 0 {
+                let lines = vec![
+                    format!("4WD   {}", v.drive.label()),
+                    format!("TPS   {:.0} %", v.throttle * 100.0),
+                ];
+                numeric_matrix(
+                    page.surface,
+                    Rect::new(c.x, c.bottom() - (fh * 2.5) as i32, c.w, (fh * 2.4) as i32),
+                    &lines,
+                    fh * 0.75,
+                    pal.readout,
+                    2,
+                );
+            }
         }
         AutoPage::Chas => {
             tire_grid(
@@ -1411,7 +1440,13 @@ pub fn draw_auto_with_video(
             );
         }
         AutoPage::Attitude => {
-            let ball_w = (c.w as f32 * 0.58) as i32;
+            // Dedicated ATT: horizon ball + compass/heading (hard requirement).
+            // DCLT 2 → ball fills glass; lower DCLT keeps heading block.
+            let ball_w = if dclt >= 2 {
+                c.w - 4
+            } else {
+                (c.w as f32 * 0.62) as i32
+            };
             attitude_ball(
                 page.surface,
                 Rect::new(c.x, c.y, ball_w, c.h - 8),
@@ -1423,28 +1458,33 @@ pub fn draw_auto_with_video(
                 pal.readout,
                 pal.dim,
             );
-            let hx = c.x + ball_w + 4;
-            let hw = c.w - ball_w - 8;
-            heading_display(
-                page.surface,
-                Rect::new(hx, c.y + 8, hw, c.h / 3),
-                v.heading_deg,
-                pal.readout,
-                pal.dim,
-                fh,
-            );
-            let lines = channels::channels_in_group(v, "SA")
-                .into_iter()
-                .map(|ch| ch.line())
-                .collect::<Vec<_>>();
-            numeric_matrix(
-                page.surface,
-                Rect::new(hx, c.y + c.h / 2, hw, c.h / 2 - 4),
-                &lines,
-                fh * 0.8,
-                pal.readout,
-                1,
-            );
+            if dclt < 2 {
+                let hx = c.x + ball_w + 4;
+                let hw = (c.w - ball_w - 8).max(40);
+                heading_display(
+                    page.surface,
+                    Rect::new(hx, c.y + 8, hw, c.h / 3),
+                    v.heading_deg,
+                    pal.readout,
+                    pal.dim,
+                    fh,
+                );
+                if dclt == 0 {
+                    let lines = vec![
+                        format!("PITCH {:.1}", v.pitch_deg),
+                        format!("ROLL  {:.1}", v.roll_deg),
+                        format!("HDG   {:05.1}", ((v.heading_deg % 360.0) + 360.0) % 360.0),
+                    ];
+                    numeric_matrix(
+                        page.surface,
+                        Rect::new(hx, c.y + c.h / 2, hw, c.h / 2 - 4),
+                        &lines,
+                        fh * 0.8,
+                        pal.readout,
+                        1,
+                    );
+                }
+            }
         }
         AutoPage::Map => {
             schematic_topo_map(
@@ -1474,24 +1514,25 @@ pub fn draw_auto_with_video(
             );
         }
         AutoPage::Faults => {
+            // Dedicated DTC format (hard requirement). Empty list is honest NONE.
             label(
                 page.surface,
                 c.x as f32 + 4.0,
                 c.y as f32 + 2.0,
-                &format!("COUNT  {}   ·  READ ONLY", v.dtc_count),
+                &format!("COUNT  {}   ·  READ ONLY · NO CLEAR", v.dtc_count),
                 if v.dtc_count > 0 {
                     pal.warning
                 } else {
                     pal.primary
                 },
-                fh * 0.75,
+                fh * 0.7,
             );
             if v.dtcs.is_empty() {
                 value_readout(
                     page.surface,
                     c.center().0 as f32,
                     c.y as f32 + c.h as f32 * 0.45,
-                    "FAULTS",
+                    "DTC",
                     "NONE",
                     "",
                     pal.primary,
