@@ -711,19 +711,70 @@ impl AutoPage {
 
 type Osb5 = [&'static str; 5];
 
-fn legends(page: AutoPage, v: &VehicleSnapshot) -> (Osb5, Osb5, Osb5, Osb5) {
-    let top = ["ENG", "FUEL", "FLUD", "ELEC", "DRV"];
-    let right = ["CHAS", "BODY", "LITE", "CLIM", "CAM"];
+/// Label only if the page is in the probe-allowed set (or set is unknown/empty → show all).
+fn page_lab(allowed: Option<&[AutoPage]>, page: AutoPage, name: &'static str) -> &'static str {
+    match allowed {
+        None | Some([]) => name,
+        Some(a) if a.contains(&page) => name,
+        Some(_) => "",
+    }
+}
+
+/// OSB legends: **adaptive** to probe page set.
+///
+/// Slot **numbers** stay stable when a page is present (ENG = OSB 1). Slots for
+/// pages that did not probe GO are **blank** (unlabeled = no function), same
+/// idea as jet unlabeled OSBs.
+fn legends(
+    page: AutoPage,
+    v: &VehicleSnapshot,
+    allowed: Option<&[AutoPage]>,
+    feat: Option<&crate::auto::caps::FeatureCaps>,
+) -> (Osb5, Osb5, Osb5, Osb5) {
+    let top = [
+        page_lab(allowed, AutoPage::Eng, "ENG"),
+        page_lab(allowed, AutoPage::Fuel, "FUEL"),
+        page_lab(allowed, AutoPage::Fluid, "FLUD"),
+        page_lab(allowed, AutoPage::Elec, "ELEC"),
+        page_lab(allowed, AutoPage::Drive, "DRV"),
+    ];
+    let right = [
+        page_lab(allowed, AutoPage::Chas, "CHAS"),
+        page_lab(allowed, AutoPage::Body, "BODY"),
+        page_lab(allowed, AutoPage::Lights, "LITE"),
+        page_lab(allowed, AutoPage::Clim, "CLIM"),
+        page_lab(allowed, AutoPage::Cam, "CAM"),
+    ];
+    let left = [
+        page_lab(allowed, AutoPage::Bus, "BUS"),
+        page_lab(allowed, AutoPage::Setup, "SET"),
+        page_lab(allowed, AutoPage::Attitude, "ATT"),
+        page_lab(allowed, AutoPage::Map, "MAP"),
+        page_lab(allowed, AutoPage::Faults, "DTC"),
+    ];
+    // Bottom: page-local options; blank option labels that need missing equipment.
+    let fog_ok = feat.map(|f| f.fog_lights).unwrap_or(true);
     let bottom: Osb5 = match page {
         AutoPage::Eng | AutoPage::Drive => ["UNIT", v.speed_unit.name(), "OWN", "SET", "BUS"],
-        AutoPage::Lights => ["LO", "HI", "FOG", "DRL", "INT"],
+        AutoPage::Lights => [
+            "LO",
+            "HI",
+            if fog_ok { "FOG" } else { "" },
+            "DRL",
+            "INT",
+        ],
         AutoPage::Cam => ["CAM", "WHOT", "GHOT", "GATE", "RNG"],
         AutoPage::Range => ["F", "FL", "FR", "R", "RST"],
         AutoPage::Setup => ["UNIT", "BUS", "CAN", "BRT", "OWN"],
         AutoPage::Own => ["VIN", "PROF", "SET", "BUS", "DTC"],
-        _ => ["OWN", "BUS", "DTC", "ATT", "MAP"],
+        _ => [
+            "OWN",
+            page_lab(allowed, AutoPage::Bus, "BUS"),
+            page_lab(allowed, AutoPage::Faults, "DTC"),
+            page_lab(allowed, AutoPage::Attitude, "ATT"),
+            page_lab(allowed, AutoPage::Map, "MAP"),
+        ],
     };
-    let left: Osb5 = ["BUS", "SET", "ATT", "MAP", "DTC"];
     (top, right, bottom, left)
 }
 
@@ -759,14 +810,23 @@ fn chrome(
     which: AutoPage,
     bezel: &BezelState,
     v: &VehicleSnapshot,
+    allowed: Option<&[AutoPage]>,
+    feat: Option<&crate::auto::caps::FeatureCaps>,
 ) {
     let b = page.bounds.inset(2);
-    let (top, right, bottom, left) = legends(which, v);
+    let (top, right, bottom, left) = legends(which, v, allowed, feat);
     // Light the OSB for the **current page** (not only last press). While an
     // OSB is held down, prefer that momentary highlight like a real bezel.
+    // Do not light a blank (not allowed) page slot.
+    let page_osb = which.highlight_osb().filter(|&osb| {
+        allowed
+            .map(|a| a.is_empty() || a.contains(&which))
+            .unwrap_or(true)
+            && osb >= 1
+    });
     let active = (1..=20u8)
         .find(|&id| bezel.is_down(id))
-        .or_else(|| which.highlight_osb())
+        .or(page_osb)
         .or(bezel.last_osb);
     osb_chrome(
         page.surface,
@@ -876,10 +936,19 @@ pub fn draw_auto_with_video(
     page.clear();
     page.surface.clear(pal.glass);
     page.bezel();
-    chrome(page, pal, which, bezel, v);
+    // Adaptive OSB set from probe (when ready); empty/unknown → full SIM set.
+    let allowed_pages: Option<Vec<AutoPage>> = caps.and_then(|c| {
+        if c.ready {
+            Some(c.pages())
+        } else {
+            None
+        }
+    });
+    let allowed_slice = allowed_pages.as_deref();
+    let feat = caps.map(|c| &c.features);
+    chrome(page, pal, which, bezel, v, allowed_slice, feat);
     let mut c = content(page);
     let fh = page.font_px;
-    let feat = caps.map(|c| &c.features);
     let flash = warn::flash_warn_on(t);
 
     // Master caution / warning strip (top of content)

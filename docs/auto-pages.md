@@ -62,20 +62,24 @@ Hardware is the same **20 OSB** ring as F-16 CMFD (numbered 1→20 clockwise fro
 - **Other OSBs** are **page options** for that format (range, CNTL, submodes, …) — not a permanent “all pages on top.”
 - Corner rockers: GAIN / SYM / BRT / CON (not OSBs).
 
-### This vehicle product (adaptive systems banks)
+### This vehicle product (probe-adaptive systems)
 
-We reuse the same 20-button geometry, with **fixed banks** for truck systems (so you can jump without a Master Menu first):
+We reuse the same 20-button geometry. **Which pages exist is decided by the startup probe** (`VehicleCaps::pages()`): only **GO** equipment yields a page. **NOGO / unknown → page omitted** from cycle, OSB press, and **OSB legend** (blank slot = no function).
 
-| Side | OSB | Role |
-|------|-----|------|
-| **Top** | 1–5 | Page bank: ENG · FUEL · FLUD · ELEC · DRV |
-| **Right** | 6–10 | Page bank: CHAS · BODY · LITE · CLIM · CAM |
-| **Left** | 20–16 | Page bank: BUS · SET · ATT · MAP · DTC |
-| **Bottom** | 15–11 | **Page options** for the current page (unit, lights toggles, OWN, …) |
+**Default slot map** when a page **is** present (stable numbers — not a hard-coded always-on menu):
 
-So: **top / left / right ≈ “which page”**, **bottom ≈ “options on this page”** — close to jet habit, but jet puts **format slots on the bottom** and fills the rest from the format. Vehicle glass prioritizes many systems pages on the ring.
+| Side | OSB | Page when GO |
+|------|-----|----------------|
+| **Top** | 1–5 | ENG · FUEL · FLUD · ELEC · DRV |
+| **Right** | 6–10 | CHAS · BODY · LITE · CLIM · CAM |
+| **Left** | 20–16 | BUS · SET · ATT · MAP · DTC |
+| **Bottom** | 15–11 | **Options for the current page** (unit, light toggles, OWN, …); options that need missing equipment are blank |
 
-OWN / RNG are often bottom options or letter keys (`o`, `r`), so they may have no lit ring OSB.
+Example: no TPMS/ABS → **CHAS** legend blank and OSB 6 does nothing. No camera → **CAM** blank. No HVAC → **CLIM** blank.
+
+So: **top / left / right ≈ which page (if present)**, **bottom ≈ options on this page**. Jet puts format slots on the bottom; vehicle glass puts systems pages on the ring and **adapts the set after probe**.
+
+OWN / RNG may be bottom options or keys (`o`, `r`) when not on a dedicated ring slot.
 
 ## Startup (real CMFD power-on)
 
