@@ -242,6 +242,7 @@ impl DisplayList {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_seg(
     surface: &mut Surface,
     x0: i32,
