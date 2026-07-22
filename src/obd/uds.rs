@@ -9,8 +9,10 @@
 //! - `0x10` DiagnosticSessionControl — open extended **read** session when needed
 //! - `0x3E` TesterPresent — keep-alive for that session
 //! - `0x22` ReadDataByIdentifier — data for glass
+//! - `0x19` ReadDTCInformation — DTC detail (read only)
 //!
 //! All other SIDs are rejected in software (no env override).
+//! See `docs/reference/ford-f150-uds-readonly.md`.
 
 use crate::obd::elm::Elm;
 use crate::obd::error::{Error, Result};
@@ -26,6 +28,7 @@ pub const DEFAULT_FUNCTIONAL_HEADER: &str = "7DF";
 /// SIDs permitted on the wire from this product.
 const ALLOWED_SIDS: &[u8] = &[
     0x10, // DiagnosticSessionControl (read path)
+    0x19, // ReadDTCInformation (read)
     0x22, // ReadDataByIdentifier
     0x3E, // TesterPresent
 ];
@@ -105,7 +108,7 @@ pub fn read_did_on_module(elm: &mut Elm, header_hex: &str, did: u16) -> Result<V
     read_data_by_identifier(elm, did)
 }
 
-/// Common DIDs worth probing on many ECUs (may NRC on some). **Read only.**
+/// Generic identification DIDs (ISO / common). **Read only.**
 pub const PROBE_DIDS: &[(u16, &str)] = &[
     (0xF190, "VIN"),
     (0xF191, "vehicle_manufacturer_ecu_hw"),
@@ -114,6 +117,11 @@ pub const PROBE_DIDS: &[(u16, &str)] = &[
     (0xF189, "hw_version"),
     (0xF1A0, "approval"),
 ];
+
+/// `0x19` ReadDTCInformation — report number of DTCs by status mask (example).
+pub fn read_dtc_number_by_status_mask(elm: &mut Elm, status_mask: u8) -> Result<Vec<u8>> {
+    request(elm, &[0x19, 0x01, status_mask])
+}
 
 #[cfg(test)]
 mod tests {
@@ -124,9 +132,12 @@ mod tests {
         assert!(is_read_only_sid(0x22));
         assert!(is_read_only_sid(0x10));
         assert!(is_read_only_sid(0x3E));
+        assert!(is_read_only_sid(0x19));
         assert!(!is_read_only_sid(0x27));
         assert!(!is_read_only_sid(0x2E));
         assert!(!is_read_only_sid(0x14));
         assert!(!is_read_only_sid(0x31));
+        assert!(!is_read_only_sid(0x2F));
+        assert!(!is_read_only_sid(0x34));
     }
 }

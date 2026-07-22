@@ -14,6 +14,7 @@ use std::process;
 use std::time::{Duration, Instant};
 
 use mfd::obd::capture::CaptureWriter;
+use mfd::obd::ford::{self, DecodedDid};
 use mfd::obd::j1979::{self, PRIORITY_PIDS};
 use mfd::obd::session::{ConnectOpts, Session};
 use mfd::obd::uds::{self, PROBE_DIDS};
@@ -151,8 +152,8 @@ fn run() -> Result<(), String> {
     }
 
     if do_uds {
-        eprintln!("  UDS probe (headers 7E0, DIDs)…");
-        let _ = session.extended_session();
+        eprintln!("  UDS probe (generic + Ford F-150 catalog)…");
+        let _ = ford::prepare_pcm_read(&mut session);
         let _ = cap.log_frame(
             "tx",
             "hs",
@@ -171,6 +172,36 @@ fn run() -> Result<(), String> {
                 Err(e) => {
                     eprintln!("    DID {did:04X} {name}: {e}");
                     let _ = cap.log_frame("rx", "hs", &format!("ERR:{e}"), Some(name));
+                }
+            }
+            let _ = session.tester_present();
+        }
+        eprintln!("  Ford DID catalog (PCM 7E0)…");
+        for def in ford::probe_dids() {
+            let req = format!("22{:04X}", def.did);
+            let _ = cap.log_frame("tx", "hs", &req, Some(def.name));
+            match ford::read_did(&mut session, def) {
+                Ok(DecodedDid::Number { name, value, unit }) => {
+                    eprintln!("    DID {:04X} {name}: {value:.2} {unit}", def.did);
+                    let _ = cap.log_frame(
+                        "rx",
+                        "hs",
+                        &format!("{value}"),
+                        Some(&format!("{name} {unit}")),
+                    );
+                    let _ = cap.log_signal(name, value, unit, 0x22, (def.did & 0xFF) as u8, "hs");
+                }
+                Ok(DecodedDid::Text { name, value }) => {
+                    eprintln!("    DID {:04X} {name}: {value}", def.did);
+                    let _ = cap.log_frame("rx", "hs", &value, Some(name));
+                }
+                Ok(DecodedDid::Hex { name, value }) => {
+                    eprintln!("    DID {:04X} {name}: {value}", def.did);
+                    let _ = cap.log_frame("rx", "hs", &value, Some(name));
+                }
+                Err(e) => {
+                    eprintln!("    DID {:04X} {}: {e}", def.did, def.name);
+                    let _ = cap.log_frame("rx", "hs", &format!("ERR:{e}"), Some(def.name));
                 }
             }
             let _ = session.tester_present();

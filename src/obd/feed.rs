@@ -143,16 +143,48 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
             t.vin = Some(vin);
         }
     }
+    // Extended session on PCM for Mode 0x22 extras (read path).
+    let _ = crate::obd::ford::prepare_pcm_read(&mut session);
+
+    let ford_dids: Vec<_> = crate::obd::ford::feed_poll_dids().collect();
     let mut i = 0usize;
+    let mut fi = 0usize;
     let mut keep = 0u32;
     while !stop.load(Ordering::Relaxed) {
         keep += 1;
-        // Refresh DTCs every ~50 PID polls (~1 s at 20 ms)
+        // Refresh DTCs every ~50 PID polls
         if keep % 50 == 1 {
             load_dtcs(&mut session, &tele);
         }
         if keep % 40 == 0 {
             let _ = session.tester_present();
+        }
+        // Interleave Ford 0x22 DIDs (slower than Mode 01).
+        if keep % 8 == 0 && !ford_dids.is_empty() {
+            let def = ford_dids[fi % ford_dids.len()];
+            fi = fi.wrapping_add(1);
+            match crate::obd::ford::read_did(&mut session, def) {
+                Ok(crate::obd::ford::DecodedDid::Number { name, value, .. }) => {
+                    if let Ok(mut t) = tele.lock() {
+                        t.values.insert(name.to_string(), value);
+                        t.ticks = t.ticks.wrapping_add(1);
+                    }
+                }
+                Ok(crate::obd::ford::DecodedDid::Text {
+                    name: "vin",
+                    value,
+                }) => {
+                    if let Ok(mut t) = tele.lock() {
+                        if value.len() >= 11 {
+                            t.vin = Some(value);
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    // NRC / unsupported — skip quietly
+                }
+            }
         }
         let pid = PRIORITY_PIDS[i % PRIORITY_PIDS.len()];
         i = i.wrapping_add(1);
@@ -194,11 +226,21 @@ fn apply_telemetry(t: &Telemetry, v: &mut VehicleSnapshot) {
     if let Some(c) = t.values.get("coolant_temp") {
         v.coolant = ((*c as f32 + 40.0) / 160.0).clamp(0.0, 1.0);
     }
+    // Ford 0x22 DID °C → same normalized tapes
+    if let Some(c) = t.values.get("coolant_temp_c") {
+        v.coolant = ((*c as f32 + 40.0) / 160.0).clamp(0.0, 1.0);
+    }
     if let Some(c) = t.values.get("intake_temp") {
+        v.iat = ((*c as f32 + 40.0) / 120.0).clamp(0.0, 1.0);
+    }
+    if let Some(c) = t.values.get("intake_temp_c") {
         v.iat = ((*c as f32 + 40.0) / 120.0).clamp(0.0, 1.0);
     }
     if let Some(c) = t.values.get("oil_temp") {
         v.oil_temp = ((*c as f32 + 40.0) / 160.0).clamp(0.0, 1.0);
+    }
+    if let Some(c) = t.values.get("trans_temp_c") {
+        v.trans_temp = ((*c as f32 + 40.0) / 160.0).clamp(0.0, 1.0);
     }
     if let Some(c) = t.values.get("ambient_temp") {
         v.temp_out_c = *c as f32;
