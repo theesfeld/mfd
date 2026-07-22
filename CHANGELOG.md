@@ -4,6 +4,7 @@
 
 ### Added
 
+- **Ford F-150 UDS (read-only):** DID catalog, Mode 0x22 poll/decode, doc `ford-f150-uds-readonly.md`, capture probe, UDS `0x19` allow. Refs #79.
 - **VIN / ownship:** `VehicleSnapshot.vin` from Mode 09; chrome `OS ……` + SETUP/OBD full VIN. Refs #77.
 - **FAULT CODES** page (`f` / OSB DTC): loads Mode 03/07/0A codes immediately (read-only; no clear). Refs #75.
 

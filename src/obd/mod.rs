@@ -11,7 +11,8 @@
 //! - [`elm`] — ELM327/STN AT commands
 //! - [`j1979`] — Mode 01 PID decode
 //! - [`isotp`] — multi-frame reassembly
-//! - [`uds`] — read path: `0x10` / `0x3E` / `0x22` only
+//! - [`uds`] — read path: `0x10` / `0x19` / `0x3E` / `0x22`
+//! - [`ford`] — F-150 class DID catalog + decode (verify on truck)
 //! - [`capture`] / [`replay`] — log + play back frames
 //! - [`feed`] — background poll → vehicle snapshot
 //!
@@ -30,6 +31,7 @@ pub mod capture;
 pub mod elm;
 pub mod error;
 pub mod feed;
+pub mod ford;
 pub mod isotp;
 pub mod j1979;
 pub mod replay;
@@ -39,6 +41,7 @@ pub mod uds;
 
 pub use error::{Error, Result};
 pub use feed::ObdFeed;
+pub use ford::{decode_data, feed_poll_dids, prepare_pcm_read, probe_dids, DidDef, F150_DIDS};
 pub use j1979::{
     decode_dtc_response, decode_mode01, format_dtc_bytes, merge_dtcs, Dtc, DtcKind, LiveValue,
     PRIORITY_PIDS,

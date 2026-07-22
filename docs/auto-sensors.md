@@ -51,10 +51,15 @@ Build with feature `obd` (default). **No dependency on obdtui.** Stack is new in
 | `MFD_OBD_BAUD=115200` | Serial baud |
 | `MFD_OBD_REPLAY=docs/odbii-session` | Capture dir or `frames.ndjson` |
 
+### Ford F-150 UDS (read-only)
+
+Protocol + DID catalog: [`docs/reference/ford-f150-uds-readonly.md`](reference/ford-f150-uds-readonly.md)  
+Code: `mfd::obd::ford` (PCM `7E0`, Mode `0x22` DIDs, extended session for reads).
+
 ### Capture tool
 
 ```sh
-# Live truck, Mode 01 + deep UDS probe
+# Live truck, Mode 01 + deep UDS probe (generic + Ford catalog)
 cargo run --release --bin mfd-obd-capture -- \
   --bt 00:04:3E:96:B8:F1 --uds --seconds 120 -o ./obd-cap
 
