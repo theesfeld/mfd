@@ -1,9 +1,20 @@
-//! F-16-class **MFD format** calls.
+//! F-16-class **MFD format** calls (page layouts).
 //!
-//! Layout and OSB legends follow **public** training material (DCS F-16C Early
-//! Access Guide, Chuck’s F-16C guide, Hoggit MFD notes). The HAF basic flight
-//! manual `docs/HAF-F16.pdf` (T.O. GR1F16CJ-1) does **not** contain MFD page art;
-//! it defers to T.O. GR1F16CJ-34-1-1 (avionics). See `docs/reference/`.
+//! # Sources
+//! - **MLU M1 Pilot’s Guide** `docs/246416220-F16-MLU-M1-Pilot-s-Manual.pdf` —
+//!   CMFD OSB rules, format select, colors (primary SoT for CMFD behaviour).
+//!   Digest: `docs/reference/mlu-m1-cmfd.md`.
+//! - HAF GR1F16CJ-1 — airframe; MFD art deferred to 34-1-1.
+//! - Public training (DCS / Chuck) + [F4-SMS](https://github.com/Blu3wolf/F4-SMS) SMS page list.
+//!
+//! # Architecture
+//! - **Widgets** (`crate::widget`) = reusable marks.
+//! - **This module** = page layouts: OSB mnemonics + widget placement.
+//! - **FormatSelect** = OSB 12/13/14 slots + Master Menu (MLU M1).
+
+mod format_select;
+
+pub use format_select::{FormatSelect, FormatSelectAction, FormatSlot};
 
 use crate::bezel::BezelState;
 use crate::font::{draw_text, draw_text_centered, text_width};
@@ -269,9 +280,35 @@ fn legends_for(fmt: Format) -> (Osb5, Osb5, Osb5, Osb5) {
     }
 }
 
-fn chrome(page: &mut Page, pal: &Palette, fmt: Format, bezel: &BezelState) {
+/// Build OSB legends for a layout, injecting OSB 12/13/14 format-select labels.
+///
+/// Bottom row L→R = OSB **15, 14, 13, 12, 11** (MLU M1 Figure 1-14).
+pub fn legends_with_format_select(fmt: Format, select: &FormatSelect) -> (Osb5, Osb5, Osb5, Osb5) {
+    if matches!(fmt, Format::Menu | Format::Reset) {
+        // Master Menu uses fixed menu legends (Figure 1-15).
+        return legends_for(fmt);
+    }
+    let (top, right, _, left) = legends_for(fmt);
+    let [a, b, c] = select.slot_labels();
+    // OSB15 SWAP, OSB14, OSB13, OSB12, OSB11 DCLT
+    let bottom = ["SWAP", a, b, c, "DCLT"];
+    (top, right, bottom, left)
+}
+
+fn chrome(
+    page: &mut Page,
+    pal: &Palette,
+    fmt: Format,
+    bezel: &BezelState,
+    select: Option<&FormatSelect>,
+) {
     let b = page.bounds.inset(2);
-    let (top, right, bottom, left) = legends_for(fmt);
+    let (top, right, bottom, left) = match select {
+        Some(sel) => legends_with_format_select(fmt, sel),
+        None => legends_for(fmt),
+    };
+    // Highlight: last OSB press, or active format slot when idle.
+    let active = bezel.last_osb.or_else(|| select.map(|s| s.active.osb()));
     osb_chrome(
         page.surface,
         b,
@@ -281,9 +318,8 @@ fn chrome(page: &mut Page, pal: &Palette, fmt: Format, bezel: &BezelState) {
         &left,
         page.font_px * 0.65,
         pal.dim,
-        bezel.last_osb,
+        active,
     );
-    // Title strip top-center under OSB1–5
     let c = content_after_osb(b, page.font_px * 0.65);
     page.label_centered(
         c.center().0 as f32,
@@ -404,16 +440,15 @@ fn draw_fcr_bscope(s: &mut Surface, c: Rect, pal: &Palette, t: f32, mode: &str) 
     let bar_y = y1 - (h * (0.55 + 0.35 * (t * 0.4).sin().abs())) as i32;
     s.line_aa(x0 + 2, bar_y, x1 - 2, bar_y, pal.nav);
 
-    // Contacts (synthetic)
+    // Contacts (yellow tracks — MLU Table 1-1 / Fig 1-17).
     let contacts = [
-        (0.35 + 0.05 * t.sin(), 0.62, pal.caution),
-        (0.55, 0.40 + 0.08 * (t * 0.7).cos(), pal.warning),
-        (0.70, 0.75, pal.primary),
+        (0.35 + 0.05 * t.sin(), 0.62, pal.track),
+        (0.55, 0.40 + 0.08 * (t * 0.7).cos(), pal.track),
+        (0.70, 0.75, pal.track),
     ];
     for (az, rng, col) in contacts {
         let px = x0 as f32 + az * w;
         let py = y1 as f32 - rng * h;
-        // Brick target symbol
         s.rect_fill(
             px as i32 - 3,
             py as i32 - 2,
@@ -423,15 +458,15 @@ fn draw_fcr_bscope(s: &mut Surface, c: Rect, pal: &Palette, t: f32, mode: &str) 
         );
     }
 
-    // Acquisition cursor (diamond)
+    // FCR acquisition cursor — cyan safety cursor (Table 1-1 item 1).
     let acx = mid + (0.15 * w) * (t * 0.35).sin();
     let acy = y1 as f32 - h * (0.45 + 0.1 * (t * 0.25).cos());
     let acxi = acx as i32;
     let acyi = acy as i32;
-    s.line_aa(acxi, acyi - 8, acxi + 6, acyi, pal.readout);
-    s.line_aa(acxi + 6, acyi, acxi, acyi + 8, pal.readout);
-    s.line_aa(acxi, acyi + 8, acxi - 6, acyi, pal.readout);
-    s.line_aa(acxi - 6, acyi, acxi, acyi - 8, pal.readout);
+    s.line_aa(acxi, acyi - 8, acxi + 6, acyi, pal.nav);
+    s.line_aa(acxi + 6, acyi, acxi, acyi + 8, pal.nav);
+    s.line_aa(acxi, acyi + 8, acxi - 6, acyi, pal.nav);
+    s.line_aa(acxi - 6, acyi, acxi, acyi - 8, pal.nav);
 
     // Mode / status strip
     box_label(s, x0 as f32 + 4.0, y0 as f32 + 2.0, mode, pal.primary, 11.0);
@@ -458,8 +493,9 @@ fn draw_hsd_page(s: &mut Surface, c: Rect, pal: &Palette, t: f32) {
     for rr in [r_out, r_mid, r_in] {
         s.circle(cx, cy, rr, pal.nav);
     }
-    tick_cardinal(s, cx, cy, r_in, pal.readout);
-    ownship(s, cx, cy, pal.primary);
+    tick_cardinal(s, cx, cy, r_in, pal.primary);
+    // Ownship white (Table 1-1 ownship data).
+    ownship(s, cx, cy, pal.readout);
 
     // FCR search volume wedge (±30°, out to outer ring)
     let hdg = t * 8.0;
@@ -497,38 +533,26 @@ fn draw_hsd_page(s: &mut Surface, c: Rect, pal: &Palette, t: f32) {
         draw_text(s, px + 6.0, py - 4.0, &format!("{}", i + 1), pal.dim, 9.0);
     }
 
-    // Bullseye (cross + circle)
+    // Bullseye — cyan (MLU Fig 1-18).
     let bx = cx as f32 - 0.55 * r_out as f32;
     let by = cy as f32 - 0.25 * r_out as f32;
-    s.circle(bx as i32, by as i32, 6, pal.caution);
-    s.line_aa(
-        bx as i32 - 8,
-        by as i32,
-        bx as i32 + 8,
-        by as i32,
-        pal.caution,
-    );
-    s.line_aa(
-        bx as i32,
-        by as i32 - 8,
-        bx as i32,
-        by as i32 + 8,
-        pal.caution,
-    );
-    draw_text(s, bx + 10.0, by - 4.0, "BULL", pal.caution, 9.0);
+    s.circle(bx as i32, by as i32, 6, pal.nav);
+    s.line_aa(bx as i32 - 8, by as i32, bx as i32 + 8, by as i32, pal.nav);
+    s.line_aa(bx as i32, by as i32 - 8, bx as i32, by as i32 + 8, pal.nav);
+    draw_text(s, bx + 10.0, by - 4.0, "BULL", pal.nav, 9.0);
 
-    // Threat ring (yellow WEZ)
+    // Preplanned threat WEZ — yellow.
     let tx = cx as f32 + 0.55 * r_out as f32;
     let ty = cy as f32 - 0.55 * r_out as f32;
     s.circle(
         tx as i32,
         ty as i32,
         (r_out as f32 * 0.18) as i32,
-        pal.caution,
+        pal.track,
     );
-    draw_text(s, tx - 8.0, ty - 4.0, "SA", pal.caution, 9.0);
+    draw_text(s, tx - 8.0, ty - 4.0, "SA", pal.track, 9.0);
 
-    // Hostile track
+    // Track brick — yellow.
     let hx = cx as f32 + 0.15 * r_out as f32;
     let hy = cy as f32 - 0.65 * r_out as f32;
     s.rect_fill(
@@ -536,7 +560,7 @@ fn draw_hsd_page(s: &mut Surface, c: Rect, pal: &Palette, t: f32) {
         hy as i32 - 4,
         hx as i32 + 4,
         hy as i32 + 4,
-        pal.warning,
+        pal.track,
     );
 
     // Data block
@@ -855,10 +879,22 @@ fn draw_gallery(page: &mut Page, pal: &Palette, c: Rect, t: f32) {
 // ─── Public draw ─────────────────────────────────────────────────────────────
 
 pub fn draw_format(page: &mut Page, fmt: Format, pal: &Palette, bezel: &BezelState, t: f32) {
+    draw_format_sel(page, fmt, pal, bezel, t, None);
+}
+
+/// Draw format with **format-select** OSB 12/13/14 labels (MLU M1).
+pub fn draw_format_sel(
+    page: &mut Page,
+    fmt: Format,
+    pal: &Palette,
+    bezel: &BezelState,
+    t: f32,
+    select: Option<&FormatSelect>,
+) {
     page.clear();
     page.surface.clear(pal.glass);
     page.bezel();
-    chrome(page, pal, fmt, bezel);
+    chrome(page, pal, fmt, bezel, select);
     let c = content(page);
     match fmt {
         Format::Blank => {

@@ -1,14 +1,14 @@
 //! Fighter-glass **symbology colors** (high contrast on black).
 //!
-//! Typical MFD/HUD palette (not airframe paint):
-//! - **Green** — primary mode / normal status / softkeys
-//! - **Cyan** — geometry, nav, secondary symbology
-//! - **White** — primary readout / highlight
-//! - **Amber / yellow** — caution
-//! - **Red** — warning / limit / threat
-//! - **Magenta** — special cue (some jets)
+//! MLU M1 Pilot’s Guide Table 1-1 (color CMFD):
+//! - **Green** — default / range rings / non-colorized marks
+//! - **Cyan** — safety cursors, bullseye class
+//! - **White** — ownship data, STPT/routes/text, FCR volume
+//! - **Yellow** — radar tracks, bugged target
+//! - **Red** — warning / threat / break-X class
+//! - **Black** — glass
 //!
-//! These are library tokens for consistent pages — not classified OEM ROM.
+//! Tokens are library roles — study palette, not classified ROM.
 
 use crate::Color;
 

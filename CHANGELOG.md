@@ -4,7 +4,8 @@
 
 ### Added
 
-- **Real F-16-class MFD formats** from public manuals (DCS F-16C EA Guide / Chuck / Hoggit): Master **MENU**, **FCR** RWS B-scope, **HSD** (ownship, rings, STPT route, bullseye, threats), **SMS INV** stations 1–9, **TGP** FOV/gate/laser, format-specific OSB legends. Demo starts on **FCR**. Notes: HAF GR1F16CJ-1 has no MFD art (defers to 34-1-1). Refs #52.
+- **MLU M1 CMFD model** (Pilot’s Guide 16PR14341): `FormatSelect` OSB **12/13/14** + Master Menu, per-page OSB maps, Table 1-1 colors (`Palette.track` yellow, cyan safety, white ownship). Digest `docs/reference/mlu-m1-cmfd.md`. F4-SMS page pattern noted. Refs #54.
+- **Real F-16-class MFD formats** from public manuals: Master **MENU**, **FCR** RWS B-scope, **HSD**, **SMS INV**, **TGP**. Demo starts on **FCR**. Refs #52.
 - **WIDG** gallery retained for widget QA (`g`). Refs #50.
 - Richer pages: WPN, HAD, FUEL, ECM; auto Setup.
 

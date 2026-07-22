@@ -14,7 +14,7 @@ use std::time::Instant;
 use mfd::auto::{self, AutoPage, ObdSnapshot};
 use mfd::bezel::{BezelEvent, BezelSource, BezelState, KeyboardBezel};
 use mfd::frame::FramePacer;
-use mfd::jet::{self, Format};
+use mfd::jet::{self, Format, FormatSelect, FormatSelectAction};
 use mfd::page::Page;
 use mfd::palette::{ColorMode, Palette};
 use mfd::term::{
@@ -37,10 +37,11 @@ fn main() -> io::Result<()> {
         eprintln!("error: mfd-demo requires pure-asm libmfd (x86_64)");
         std::process::exit(1);
     }
-    eprintln!("loaded libmfd {ver} · square MFD face (~4x4 in class)");
-    eprintln!("OSB 1-5 top · 6-0 right · qwert bot · asdfg left · [ ] BRT");
-    eprintln!("Tab jet/auto · c color · / bank · g gallery · m menu · Esc quit");
-    eprintln!("start: FCR RWS (public F-16 MFD layout)");
+    eprintln!("loaded libmfd {ver} · MLU CMFD 4x4 · format select OSB 12/13/14");
+    eprintln!("OSB 1-5 top · 6-10 right · 15-11 bot · 20-16 left · [ ] BRT");
+    eprintln!("format: press OSB 12/13/14 · press active again = Master Menu");
+    eprintln!("Tab jet/auto · c color · g widget-QA · Esc quit");
+    eprintln!("start: FCR (slot OSB14) — MLU M1 page model");
 
     install_sigint();
     // 30 Hz default keeps Kitty present from queuing into multi-second lag.
@@ -101,11 +102,12 @@ fn main() -> io::Result<()> {
     let mut bezel_src = KeyboardBezel::new();
     let mut bezel = BezelState::default();
     let mut domain = Domain::Jet;
-    // Start on FCR RWS (typical left-MFD air-to-air radar format).
-    let mut jet_fmt = Format::Fcr;
-    let mut jet_bank = 0usize;
+    // MLU M1: three format options on OSB 14/13/12; start FCR active.
+    let mut fmt_sel = FormatSelect::default();
+    let mut jet_fmt = fmt_sel.current();
     let mut auto_page = AutoPage::Cluster;
     let mut color_mode = ColorMode::ColorMfd;
+    let mut osb_tick: u32 = 0;
 
     enter_fullscreen()?;
     let t0 = Instant::now();
@@ -133,14 +135,16 @@ fn main() -> io::Result<()> {
                         ColorMode::HighVis => ColorMode::GreenMono,
                     };
                 }
-                b'/' => jet_bank = jet_bank.wrapping_add(1),
                 b'g' | b'G' => {
                     domain = Domain::Jet;
                     jet_fmt = Format::Gallery;
                 }
                 b'm' | b'M' => {
+                    // Open Master Menu on active slot (same as press highlighted format OSB).
                     domain = Domain::Jet;
-                    jet_fmt = Format::Menu;
+                    osb_tick = osb_tick.wrapping_add(1);
+                    let _ = fmt_sel.handle_osb(fmt_sel.active.osb(), osb_tick);
+                    jet_fmt = fmt_sel.current();
                 }
                 _ => bezel_src.push_key_state(k, &bezel),
             }
@@ -154,27 +158,29 @@ fn main() -> io::Result<()> {
             if let BezelEvent::OsbDown(osb) = ev {
                 match domain {
                     Domain::Jet => {
-                        if let Some(f) = Format::from_top_osb(osb, jet_bank) {
-                            jet_fmt = f;
-                        } else {
-                            // Real F-16 OSB map (public Master Menu / format select).
-                            match osb {
-                                6 => jet_fmt = Format::Sms,
-                                7 => jet_fmt = Format::Hsd,
-                                8 => jet_fmt = Format::Dte,
-                                9 => jet_fmt = Format::Test,
-                                10 => jet_fmt = Format::Menu,
-                                11 => jet_fmt = Format::Gallery,
-                                12 => jet_fmt = Format::Sms,
-                                13 => jet_fmt = Format::Hsd,
-                                14 => jet_fmt = Format::Fcr,
-                                15 => jet_fmt = Format::Menu, // SWAP → menu for demo
-                                16 => jet_fmt = Format::Flir,
-                                17 => jet_fmt = Format::Tfr,
-                                18 => jet_fmt = Format::Wpn,
-                                19 => jet_fmt = Format::Tgp,
-                                20 => jet_fmt = Format::Fcr,
-                                _ => {}
+                        osb_tick = osb_tick.wrapping_add(1);
+                        // 1) Format select / Master Menu (OSB 12/13/14 + menu picks).
+                        match fmt_sel.handle_osb(osb, osb_tick) {
+                            FormatSelectAction::Show(f) => jet_fmt = f,
+                            FormatSelectAction::OpenMenu { .. } => jet_fmt = Format::Menu,
+                            FormatSelectAction::CloseMenu => jet_fmt = fmt_sel.current(),
+                            FormatSelectAction::Ignore => {
+                                // 2) Page-local OSBs only when not format-select.
+                                // Top row and sides are format-specific (rotary / CNTL / etc.).
+                                // Demo shortcuts when not on menu:
+                                if !fmt_sel.menu_open {
+                                    match osb {
+                                        1..=5 | 6..=11 | 15..=20 => {
+                                            // Page owns these; optional demo: top bank still switches
+                                            // via format assign for exploration.
+                                            if let Some(f) = Format::from_top_osb(osb, 0) {
+                                                fmt_sel.assign(fmt_sel.active, f);
+                                                jet_fmt = f;
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
                             }
                         }
                     }
@@ -193,7 +199,9 @@ fn main() -> io::Result<()> {
         page.font_px = if w.min(h) >= 480 { 14.0 } else { 12.0 };
 
         match domain {
-            Domain::Jet => jet::draw_format(&mut page, jet_fmt, &pal, &bezel, t),
+            Domain::Jet => {
+                jet::draw_format_sel(&mut page, jet_fmt, &pal, &bezel, t, Some(&fmt_sel))
+            }
             Domain::Auto => {
                 let obd = ObdSnapshot {
                     rpm: 0.2 + 0.55 * (0.5 + 0.5 * (t * 0.6).sin()),
