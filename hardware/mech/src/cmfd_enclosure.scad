@@ -16,18 +16,18 @@ glass_frame = 3;      // lip under cover glass
 bezel_front_z = 14;   // front face thickness
 rear_z = outer_z - bezel_front_z;
 
-/* [OSB layout] */
+/* [OSB layout — MUST match hardware/tools/kicad_build.py Board A] */
 osb_count_side = 5;
-osb_span = 92;        // center-to-center span of outer OSBs
+osb_span = 78;        // KiCad osb_layout span (mm)
 osb_hole = 9.2;       // switch cap shaft hole
 osb_cap_xy = 12;
 osb_cap_z = 6;
-osb_inset = 11;       // from outer edge to OSB center line
+osb_inset = 14;       // KiCad inset from outer edge
 
-/* [Rocker] */
+/* [Rocker — KiCad rk positions at 26 mm from edges] */
 rocker_w = 14;
 rocker_h = 10;
-rocker_inset = 18;
+rocker_inset = 26;
 
 /* [Ports — rear deck] */
 port_z = 12;          // height of port window band from bottom

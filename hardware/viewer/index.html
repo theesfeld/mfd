@@ -3,100 +3,134 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CMFD platform — exploded view · mfd #137</title>
+  <title>CMFD #137 — photoreal exploded assembly</title>
   <style>
     :root {
-      --bg: #0e1116;
-      --panel: #1a2030;
-      --text: #e8eef7;
+      --bg: #0a0c10;
+      --panel: rgba(18, 22, 32, 0.92);
+      --text: #eef2f8;
       --muted: #8b9bb4;
       --accent: #3d8bfd;
       --blue: #2a6db5;
-      --silver: #c5ced9;
-      --warn: #e8b84a;
+      --ok: #3ecf8e;
     }
     * { box-sizing: border-box; }
-    html, body {
-      margin: 0; height: 100%;
-      background: var(--bg); color: var(--text);
-      font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
-    }
-    #app { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
+    html, body { margin: 0; height: 100%; background: #000; color: var(--text);
+      font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+    #app { display: grid; grid-template-columns: minmax(280px, 320px) 1fr; height: 100%; }
     aside {
-      background: var(--panel);
-      border-right: 1px solid #2a3348;
-      padding: 1rem 1.1rem;
-      overflow: auto;
+      background: var(--panel); border-right: 1px solid #2a3348;
+      padding: 1rem 1.1rem; overflow: auto; backdrop-filter: blur(12px);
+      z-index: 2;
     }
-    h1 { font-size: 1.05rem; margin: 0 0 0.25rem; font-weight: 600; }
-    .sub { color: var(--muted); font-size: 0.8rem; margin-bottom: 1rem; line-height: 1.35; }
+    h1 { font-size: 1.05rem; margin: 0 0 0.2rem; font-weight: 600; letter-spacing: -0.02em; }
+    .sub { color: var(--muted); font-size: 0.78rem; line-height: 1.4; margin-bottom: 0.9rem; }
+    .badge {
+      display: inline-block; font-size: 0.65rem; padding: 0.15rem 0.45rem;
+      border-radius: 4px; background: #1a3d2a; color: var(--ok); margin-bottom: 0.6rem;
+      font-weight: 600; letter-spacing: 0.04em;
+    }
+    .ctrl { margin: 0.85rem 0; }
+    .ctrl h2 {
+      font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--muted); margin: 0 0 0.4rem;
+    }
+    input[type="range"] { width: 100%; accent-color: var(--accent); }
     label.row {
-      display: flex; align-items: center; gap: 0.5rem;
-      font-size: 0.85rem; margin: 0.35rem 0; cursor: pointer;
+      display: flex; align-items: center; gap: 0.45rem;
+      font-size: 0.8rem; margin: 0.28rem 0; cursor: pointer;
     }
-    input[type="range"] { width: 100%; }
-    .ctrl { margin: 1rem 0; }
-    .ctrl h2 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 0.4rem; }
     button {
       background: #243049; color: var(--text); border: 1px solid #3a4a66;
-      border-radius: 6px; padding: 0.45rem 0.7rem; cursor: pointer; font-size: 0.8rem;
-      margin: 0.2rem 0.2rem 0.2rem 0;
+      border-radius: 6px; padding: 0.42rem 0.65rem; cursor: pointer; font-size: 0.78rem;
+      margin: 0.15rem 0.15rem 0.15rem 0;
     }
     button:hover { background: #2d3c5c; }
     button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button.ghost { background: transparent; }
+    #stage { position: relative; width: 100%; height: 100%; background: #050608; }
     #c { width: 100%; height: 100%; display: block; }
-    .legend { font-size: 0.75rem; color: var(--muted); margin-top: 1rem; line-height: 1.45; }
-    .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+    #hud {
+      position: absolute; left: 12px; bottom: 12px; font-size: 0.72rem;
+      color: var(--muted); pointer-events: none; line-height: 1.45;
+      text-shadow: 0 1px 4px #000;
+    }
+    .legend { font-size: 0.72rem; color: var(--muted); margin-top: 0.75rem; line-height: 1.45; }
+    .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
     a { color: var(--accent); }
-    @media (max-width: 800px) {
+    .dims {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 0.7rem; background: #121722; padding: 0.55rem 0.65rem;
+      border-radius: 6px; color: #a8b8d0; line-height: 1.5;
+    }
+    @media (max-width: 900px) {
       #app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-      aside { max-height: 40vh; }
+      aside { max-height: 38vh; }
     }
   </style>
 </head>
 <body>
   <div id="app">
     <aside>
+      <div class="badge">SPEC-ACCURATE · KiCad + BOM + OpenSCAD</div>
       <h1>CMFD platform</h1>
-      <p class="sub">Universal multi-function display · F-16 CMFD spirit + late-80s industrial skin · Issue <a href="https://github.com/theesfeld/mfd/issues/137">#137</a></p>
+      <p class="sub">
+        Issue <a href="https://github.com/theesfeld/mfd/issues/137">#137</a> ·
+        dimensions from <code>kicad_build.py</code> + <code>cmfd_enclosure.scad</code> ·
+        parts from BOM / ORDER-THIS.md
+      </p>
+
+      <div class="dims">
+        Case 148×148×58 mm<br/>
+        Board A 148×148×1.6 · cutout 102<br/>
+        Board B 120×90×1.6<br/>
+        Glass 102 mm · OSB span 78 · inset 14<br/>
+        Switches 6×6×4.3 mm ×24 · 18650 ×2
+      </div>
 
       <div class="ctrl">
         <h2>Explode</h2>
-        <input id="explode" type="range" min="0" max="100" value="55" />
+        <input id="explode" type="range" min="0" max="100" value="48" />
       </div>
       <div class="ctrl">
-        <h2>Rotation</h2>
-        <button type="button" id="spin">Toggle spin</button>
-        <button type="button" id="reset">Reset view</button>
-      </div>
-      <div class="ctrl">
-        <h2>Layers</h2>
-        <label class="row"><input type="checkbox" data-layer="bumpers" checked /> Corner bumpers (TPU)</label>
-        <label class="row"><input type="checkbox" data-layer="front" checked /> Front bezel</label>
-        <label class="row"><input type="checkbox" data-layer="caps" checked /> OSB caps ×20</label>
-        <label class="row"><input type="checkbox" data-layer="rockers" checked /> Rockers ×4</label>
-        <label class="row"><input type="checkbox" data-layer="glass" checked /> Cover glass + LCD</label>
-        <label class="row"><input type="checkbox" data-layer="boardA" checked /> Board A — bezel MCU</label>
-        <label class="row"><input type="checkbox" data-layer="boardB" checked /> Board B — SoM carrier</label>
-        <label class="row"><input type="checkbox" data-layer="som" checked /> Linux SoM</label>
-        <label class="row"><input type="checkbox" data-layer="battery" checked /> 18650 tray</label>
-        <label class="row"><input type="checkbox" data-layer="rear" checked /> Rear shell</label>
+        <h2>View</h2>
+        <button type="button" class="primary" id="spin">Toggle spin</button>
+        <button type="button" id="reset">Reset camera</button>
+        <button type="button" id="uhd">4K screenshot</button>
       </div>
       <div class="ctrl">
         <h2>Presets</h2>
-        <button type="button" class="primary" id="preset-exploded">Exploded</button>
-        <button type="button" id="preset-closed">Closed unit</button>
-        <button type="button" id="preset-electronics">Electronics only</button>
+        <button type="button" id="p-exp">Exploded</button>
+        <button type="button" id="p-closed">Closed product</button>
+        <button type="button" id="p-elec">Electronics only</button>
+        <button type="button" id="p-bezel">Bezel detail</button>
+      </div>
+      <div class="ctrl">
+        <h2>Layers</h2>
+        <label class="row"><input type="checkbox" data-layer="bumpers" checked /> TPU corner bumpers ×4</label>
+        <label class="row"><input type="checkbox" data-layer="front" checked /> Front bezel (PETG)</label>
+        <label class="row"><input type="checkbox" data-layer="caps" checked /> OSB caps ×20 + rockers ×4</label>
+        <label class="row"><input type="checkbox" data-layer="glass" checked /> Cover glass + 4″ IPS</label>
+        <label class="row"><input type="checkbox" data-layer="boardA" checked /> Board A switch PCB</label>
+        <label class="row"><input type="checkbox" data-layer="wires" checked /> Dupont harness</label>
+        <label class="row"><input type="checkbox" data-layer="boardB" checked /> Board B carrier</label>
+        <label class="row"><input type="checkbox" data-layer="som" checked /> SoM + USB-C + RJ45</label>
+        <label class="row"><input type="checkbox" data-layer="battery" checked /> 18650 tray + cells</label>
+        <label class="row"><input type="checkbox" data-layer="rear" checked /> Rear shell</label>
+        <label class="row"><input type="checkbox" data-layer="labels" checked /> Part callouts</label>
       </div>
       <p class="legend">
-        <span class="swatch" style="background:#9ec0e8"></span> Front bezel (PETG)<br/>
-        <span class="swatch" style="background:#2a6db5"></span> Walkman blue accents<br/>
-        <span class="swatch" style="background:#3d5a40"></span> Board A · <span class="swatch" style="background:#1e3a5f"></span> Board B<br/>
-        <span class="swatch" style="background:#c5a04a"></span> SoM · <span class="swatch" style="background:#666"></span> Cells<br/>
-        Drag to orbit · scroll to zoom · not flight hardware
+        <span class="sw" style="background:#2a6db5"></span> Walkman blue face<br/>
+        <span class="sw" style="background:#1b4d2e"></span> FR4 Board A/B<br/>
+        <span class="sw" style="background:#c0c5cc"></span> Pin headers / HASL<br/>
+        <span class="sw" style="background:#2a2a2a"></span> TPU bumpers<br/>
+        Drag orbit · scroll zoom · right-drag pan
       </p>
     </aside>
-    <canvas id="c"></canvas>
+    <div id="stage">
+      <canvas id="c"></canvas>
+      <div id="hud">CMFD · photoreal preview · mm scale · not flight hardware</div>
+    </div>
   </div>
 
   <script type="importmap">
@@ -108,272 +142,816 @@
   }
   </script>
   <script type="module">
-    import * as THREE from 'three';
-    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+    import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+    import { CMFD, osbCenters, pinOffset } from "./cmfd-layout.js";
 
-    const canvas = document.getElementById('c');
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    renderer.setClearColor(0x0e1116, 1);
+    // --- scale: 1 unit = 1 mm ---
+    const S = 1;
+    const C = CMFD.colors;
+
+    const canvas = document.getElementById("c");
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      alpha: false,
+      powerPreference: "high-performance",
+      preserveDrawingBuffer: true, // screenshots
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
     renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.physicallyCorrectLights = true;
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0x0e1116, 40, 90);
+    scene.background = new THREE.Color(0x07090d);
+    scene.fog = new THREE.FogExp2(0x07090d, 0.00115);
 
-    const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
-    camera.position.set(28, 22, 32);
+    const camera = new THREE.PerspectiveCamera(32, 1, 0.5, 2000);
+    camera.position.set(220, 160, 260);
 
     const controls = new OrbitControls(camera, canvas);
     controls.enableDamping = true;
-    controls.target.set(0, 0, 0);
+    controls.dampingFactor = 0.06;
+    controls.target.set(0, 20, 0);
+    controls.maxPolarAngle = Math.PI * 0.49;
+    controls.minDistance = 80;
+    controls.maxDistance = 600;
 
-    const amb = new THREE.AmbientLight(0x8899bb, 0.55);
-    scene.add(amb);
-    const key = new THREE.DirectionalLight(0xffffff, 1.1);
-    key.position.set(15, 25, 12);
+    // Environment
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+    // Lights
+    scene.add(new THREE.AmbientLight(0xb0c0d8, 0.25));
+    const key = new THREE.DirectionalLight(0xfff5e8, 2.2);
+    key.position.set(120, 220, 90);
     key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.camera.near = 10;
+    key.shadow.camera.far = 600;
+    key.shadow.camera.left = -200;
+    key.shadow.camera.right = 200;
+    key.shadow.camera.top = 200;
+    key.shadow.camera.bottom = -200;
+    key.shadow.bias = -0.0002;
     scene.add(key);
-    const fill = new THREE.DirectionalLight(0x6688cc, 0.35);
-    fill.position.set(-12, 8, -10);
+    const fill = new THREE.DirectionalLight(0x6a8cff, 0.55);
+    fill.position.set(-140, 80, -100);
     scene.add(fill);
-    const rim = new THREE.DirectionalLight(0x2a6db5, 0.4);
-    rim.position.set(0, -5, -15);
+    const rim = new THREE.DirectionalLight(0x2a6db5, 0.65);
+    rim.position.set(0, 40, -180);
     scene.add(rim);
+    const hemi = new THREE.HemisphereLight(0xdde8ff, 0x1a1510, 0.35);
+    scene.add(hemi);
 
-    // ground shadow disc
+    // Ground
     const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(18, 48),
-      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 })
+      new THREE.CircleGeometry(280, 64),
+      new THREE.MeshStandardMaterial({
+        color: 0x0a0c10,
+        metalness: 0.4,
+        roughness: 0.85,
+      })
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -8;
+    ground.receiveShadow = true;
     scene.add(ground);
+    const shadowMat = new THREE.ShadowMaterial({ opacity: 0.45 });
+    const shadowPlane = new THREE.Mesh(new THREE.CircleGeometry(120, 48), shadowMat);
+    shadowPlane.rotation.x = -Math.PI / 2;
+    shadowPlane.position.y = -7.5;
+    shadowPlane.receiveShadow = true;
+    scene.add(shadowPlane);
 
-    const OUTER = 14.8; // cm for readability (1 unit = 1 cm); real is 148 mm
-    const S = 0.1; // scale factor mm→scene: 148mm → 14.8 units already as cm
-    // Use cm: outer 14.8, glass 10.2, depth 5.8
+    // Materials
+    const mat = {
+      bezel: new THREE.MeshPhysicalMaterial({
+        color: C.bezel_silver,
+        metalness: 0.55,
+        roughness: 0.28,
+        clearcoat: 0.45,
+        clearcoatRoughness: 0.25,
+      }),
+      blue: new THREE.MeshPhysicalMaterial({
+        color: C.walkman_blue,
+        metalness: 0.35,
+        roughness: 0.32,
+        clearcoat: 0.5,
+        clearcoatRoughness: 0.2,
+      }),
+      rear: new THREE.MeshPhysicalMaterial({
+        color: C.rear_grey,
+        metalness: 0.4,
+        roughness: 0.4,
+        clearcoat: 0.2,
+      }),
+      fr4: new THREE.MeshPhysicalMaterial({
+        color: C.fr4,
+        metalness: 0.05,
+        roughness: 0.55,
+      }),
+      fr4b: new THREE.MeshPhysicalMaterial({
+        color: C.fr4_mask,
+        metalness: 0.08,
+        roughness: 0.5,
+      }),
+      copper: new THREE.MeshPhysicalMaterial({
+        color: C.copper,
+        metalness: 1,
+        roughness: 0.35,
+      }),
+      gold: new THREE.MeshPhysicalMaterial({
+        color: C.gold,
+        metalness: 1,
+        roughness: 0.28,
+      }),
+      silk: new THREE.MeshStandardMaterial({ color: C.silk, roughness: 0.7 }),
+      cap: new THREE.MeshPhysicalMaterial({
+        color: C.plastic_cap,
+        metalness: 0.08,
+        roughness: 0.38,
+        clearcoat: 0.35,
+      }),
+      tpu: new THREE.MeshStandardMaterial({
+        color: C.tpu,
+        metalness: 0.05,
+        roughness: 0.92,
+      }),
+      lcd: new THREE.MeshPhysicalMaterial({
+        color: C.lcd_black,
+        metalness: 0.7,
+        roughness: 0.15,
+      }),
+      glass: new THREE.MeshPhysicalMaterial({
+        color: C.lcd_glass,
+        metalness: 0.1,
+        roughness: 0.05,
+        transmission: 0.55,
+        thickness: 1.2,
+        transparent: true,
+        opacity: 0.55,
+        ior: 1.5,
+      }),
+      pin: new THREE.MeshPhysicalMaterial({
+        color: C.pin_metal,
+        metalness: 0.95,
+        roughness: 0.22,
+      }),
+      switch: new THREE.MeshStandardMaterial({
+        color: C.switch_body,
+        metalness: 0.15,
+        roughness: 0.55,
+      }),
+      cell: new THREE.MeshPhysicalMaterial({
+        color: 0x1a1a1a,
+        metalness: 0.85,
+        roughness: 0.25,
+      }),
+      cellBlue: new THREE.MeshPhysicalMaterial({
+        color: C.walkman_blue,
+        metalness: 0.4,
+        roughness: 0.35,
+      }),
+      wire: new THREE.MeshStandardMaterial({
+        color: 0x222222,
+        roughness: 0.7,
+      }),
+      wireColor: [
+        0xc0392b, 0x2980b9, 0x27ae60, 0xf1c40f, 0x8e44ad, 0xe67e22, 0x1abc9c, 0xecf0f1,
+      ].map(
+        (c) =>
+          new THREE.MeshStandardMaterial({
+            color: c,
+            roughness: 0.55,
+            metalness: 0.05,
+          })
+      ),
+      som: new THREE.MeshPhysicalMaterial({
+        color: 0xc5a04a,
+        metalness: 0.5,
+        roughness: 0.35,
+      }),
+      shield: new THREE.MeshPhysicalMaterial({
+        color: 0x9aa3ad,
+        metalness: 0.85,
+        roughness: 0.3,
+      }),
+      label: new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.9,
+        depthTest: false,
+      }),
+    };
+
+    function mesh(geo, material, cast = true) {
+      const m = new THREE.Mesh(geo, material);
+      m.castShadow = cast;
+      m.receiveShadow = true;
+      return m;
+    }
+
+    function rbox(w, h, d, r, material) {
+      return mesh(new RoundedBoxGeometry(w, h, d, 4, r), material);
+    }
+
+    // Center assembly on origin (case center)
+    const half = CMFD.outer_xy / 2;
+
+    /** Convert board-local mm (origin bottom-left of Board A, Y up on PCB) to 3D. */
+    function boardAToWorld(x, y, z = 0) {
+      // Board sits with copper up; PCB Y maps to world -Z (front of case is +Z outward for face)
+      // Stack along +Y (up). Face of unit looks +Z.
+      return new THREE.Vector3(x - half, z, -(y - half));
+    }
 
     const layers = {};
     const basePos = {};
     const explodeDir = {};
 
-    function mat(color, opts = {}) {
-      return new THREE.MeshStandardMaterial({
-        color, metalness: opts.metalness ?? 0.25, roughness: opts.roughness ?? 0.55,
-        transparent: !!opts.opacity && opts.opacity < 1,
-        opacity: opts.opacity ?? 1,
-      });
-    }
-
-    function roundedBox(w, h, d, r, material) {
-      // approximate with box (r for future)
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
-      m.castShadow = true;
-      m.receiveShadow = true;
-      return m;
-    }
-
-    function addLayer(name, mesh, home, dir) {
-      layers[name] = mesh;
+    function addLayer(name, obj, home, dir) {
+      layers[name] = obj;
       basePos[name] = home.clone();
       explodeDir[name] = dir.clone().normalize();
-      mesh.position.copy(home);
-      scene.add(mesh);
+      obj.position.copy(home);
+      scene.add(obj);
     }
 
-    // --- Rear shell ---
+    // ---------- PCB texture (procedural FR4 + pads + silk) ----------
+    function makePcbTexture(kind) {
+      const size = 2048;
+      const cnv = document.createElement("canvas");
+      cnv.width = cnv.height = size;
+      const ctx = cnv.getContext("2d");
+      // soldermask
+      const g = ctx.createLinearGradient(0, 0, size, size);
+      g.addColorStop(0, "#0f4a2c");
+      g.addColorStop(0.5, "#1b5c38");
+      g.addColorStop(1, "#0a3a22");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, size, size);
+      // noise
+      for (let i = 0; i < 8000; i++) {
+        ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.03})`;
+        ctx.fillRect(Math.random() * size, Math.random() * size, 2, 2);
+      }
+      const sc = size / 148;
+      if (kind === "A") {
+        // cutout
+        const cut = 102 * sc;
+        const ox = 23 * sc;
+        ctx.fillStyle = "#050505";
+        ctx.fillRect(ox, ox, cut, cut);
+        // holes
+        ctx.fillStyle = "#111";
+        for (const [hx, hy] of CMFD.boardA.holes) {
+          ctx.beginPath();
+          ctx.arc(hx * sc, (148 - hy) * sc, 1.6 * sc, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // silk
+        ctx.fillStyle = "#e8eef5";
+        ctx.font = `bold ${Math.floor(3.2 * sc)}px sans-serif`;
+        ctx.fillText("CMFD BEZEL A", 22 * sc, (148 - 143) * sc);
+        ctx.font = `${Math.floor(2.2 * sc)}px sans-serif`;
+        ctx.fillText("1 pin / button  ·  #137", 22 * sc, (148 - 140) * sc);
+        // pads at switches + pins
+        const centers = osbCenters();
+        for (const o of centers) {
+          const px = o.x * sc;
+          const py = (148 - o.y) * sc;
+          // gold pads
+          ctx.fillStyle = "#c9a227";
+          ctx.fillRect(px - 3 * sc, py - 3 * sc, 6 * sc, 6 * sc);
+          // pin
+          const p = pinOffset(o.side, o.x, o.y);
+          ctx.fillStyle = "#d0d5dc";
+          ctx.beginPath();
+          ctx.arc(p.x * sc, (148 - p.y) * sc, 0.9 * sc, 0, Math.PI * 2);
+          ctx.fill();
+          // track
+          ctx.strokeStyle = "#b87333";
+          ctx.lineWidth = 0.35 * sc;
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.lineTo(p.x * sc, (148 - p.y) * sc);
+          ctx.stroke();
+          // refdes
+          ctx.fillStyle = "#dfe6ef";
+          ctx.font = `${Math.floor(1.6 * sc)}px monospace`;
+          ctx.fillText(String(o.id), px + 3.5 * sc, py - 3.5 * sc);
+        }
+        for (const [name, [rx, ry]] of Object.entries(CMFD.rockers)) {
+          ctx.fillStyle = "#c9a227";
+          ctx.fillRect(rx * sc - 3 * sc, (148 - ry) * sc - 3 * sc, 6 * sc, 6 * sc);
+          ctx.fillStyle = "#e8eef5";
+          ctx.font = `${Math.floor(1.8 * sc)}px sans-serif`;
+          ctx.fillText(name, rx * sc - 4 * sc, (148 - ry) * sc - 5 * sc);
+        }
+      } else {
+        // Board B 120x90 drawn into 148 canvas with letterbox
+        const bw = 120,
+          bh = 90;
+        const scx = size / bw;
+        const scy = size / bh;
+        ctx.fillStyle = "#0d3b24";
+        ctx.fillRect(0, 0, size, size);
+        ctx.fillStyle = "#e8eef5";
+        ctx.font = `bold ${Math.floor(3.5 * scx)}px sans-serif`;
+        ctx.fillText("CMFD BOARD-B CARRIER", 4 * scx, 8 * scx);
+        ctx.font = `${Math.floor(2.2 * scx)}px sans-serif`;
+        ctx.fillText("SoM · USB-C · Eth · bezel pins", 4 * scx, 12 * scx);
+        const parts = [
+          [...CMFD.boardB.j_bezel, 50, 6, "J_BEZEL"],
+          [...CMFD.boardB.som_a, 20, 12, "SoM_A"],
+          [...CMFD.boardB.som_b, 20, 12, "SoM_B"],
+          [...CMFD.boardB.usbc, 10, 8, "USB-C"],
+          [...CMFD.boardB.rj45, 16, 18, "RJ45"],
+        ];
+        for (const [x, y, w, h, lab] of parts) {
+          ctx.fillStyle = "#111";
+          ctx.fillRect((x - w / 2) * scx, (bh - y - h / 2) * scy, w * scx, h * scy);
+          ctx.fillStyle = "#c9a227";
+          ctx.strokeStyle = "#c9a227";
+          ctx.lineWidth = 1;
+          ctx.strokeRect((x - w / 2) * scx, (bh - y - h / 2) * scy, w * scx, h * scy);
+          ctx.fillStyle = "#e8eef5";
+          ctx.font = `${Math.floor(2 * scx)}px monospace`;
+          ctx.fillText(lab, (x - w / 2) * scx, (bh - y - h / 2) * scy - 2);
+        }
+      }
+      const tex = new THREE.CanvasTexture(cnv);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      return tex;
+    }
+
+    // ---------- Layers ----------
+
+    // REAR SHELL
     {
       const g = new THREE.Group();
-      const shell = roundedBox(14.8, 4.4, 14.8, 0.8, mat(0x6a7585, { metalness: 0.35, roughness: 0.45 }));
-      shell.position.y = 0;
+      const shell = rbox(CMFD.outer_xy, CMFD.rear_z, CMFD.outer_xy, CMFD.corner_r * 0.35, mat.rear);
+      shell.position.y = CMFD.rear_z / 2;
       g.add(shell);
-      // port nubs
-      const portMat = mat(0x222830, { metalness: 0.6, roughness: 0.3 });
-      [[-4, -7.2, -1.5], [-2, -7.2, -1.5], [1, -7.2, -1.2], [4, -7.2, -1.5]].forEach(([x, z, y]) => {
-        const p = roundedBox(0.9, 0.45, 0.4, 0.05, portMat);
-        p.position.set(x, y, z);
+      // port cut visuals on -Z face (bottom edge of product when standing)
+      const portY = 12;
+      const ports = [
+        [-40, 9, 3.5, "USB"],
+        [-22, 9, 3.5, "USB"],
+        [5, 15, 9, "RJ45"],
+        [30, 12, 5, "IO"],
+        [50, 6, 6, "AUD"],
+      ];
+      for (const [x, w, h] of ports) {
+        const p = rbox(w, h, 2.5, 0.4, mat.pin);
+        p.position.set(x, portY, -CMFD.outer_xy / 2 + 1);
         g.add(p);
-      });
-      addLayer('rear', g, new THREE.Vector3(0, -3.5, 0), new THREE.Vector3(0, -1, 0));
+      }
+      // vent slots
+      for (let i = 0; i < 5; i++) {
+        const v = rbox(1.2, 2.5, 8, 0.2, mat.rear);
+        v.position.set(-CMFD.outer_xy / 2 + 1.5, 28 + i * 4, -20 + i * 8);
+        g.add(v);
+      }
+      addLayer("rear", g, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, -1, 0));
     }
 
-    // --- Battery tray + cells ---
+    // BATTERY
     {
       const g = new THREE.Group();
-      const tray = roundedBox(4.2, 2.2, 7.8, 0.2, mat(0x3a3f48));
+      const tray = rbox(42, 22, 78, 2, mat.rear);
       g.add(tray);
-      const cellMat = mat(0x2a2a2a, { metalness: 0.7, roughness: 0.25 });
       for (let i = 0; i < 2; i++) {
-        const cell = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.9, 0.9, 6.5, 24),
-          cellMat
+        const cell = mesh(
+          new THREE.CylinderGeometry(9.1, 9.1, 65, 32),
+          mat.cell
         );
         cell.rotation.x = Math.PI / 2;
-        cell.position.set(-1 + i * 2, 0.2, 0);
-        // wrap blue accent
-        const band = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.92, 0.92, 1.2, 24),
-          mat(0x2a6db5, { metalness: 0.4, roughness: 0.4 })
-        );
+        cell.position.set(-10 + i * 20, 1, 0);
+        g.add(cell);
+        const band = mesh(new THREE.CylinderGeometry(9.2, 9.2, 14, 32), mat.cellBlue);
         band.rotation.x = Math.PI / 2;
         band.position.copy(cell.position);
-        g.add(cell);
         g.add(band);
       }
-      addLayer('battery', g, new THREE.Vector3(0, -2.2, 0), new THREE.Vector3(0, -1, 0.15));
+      addLayer("battery", g, new THREE.Vector3(0, 14, 8), new THREE.Vector3(0, -0.9, 0.15));
     }
 
-    // --- Board B ---
+    // BOARD B
     {
       const g = new THREE.Group();
-      const pcb = roundedBox(12.0, 0.16, 9.0, 0.1, mat(0x1e3a5f, { metalness: 0.1, roughness: 0.7 }));
+      const tex = makePcbTexture("B");
+      const topMat = mat.fr4.clone();
+      topMat.map = tex;
+      topMat.roughness = 0.48;
+      const pcb = mesh(
+        new THREE.BoxGeometry(CMFD.boardB.w, CMFD.boardB.thickness, CMFD.boardB.h),
+        [mat.fr4b, mat.fr4b, topMat, mat.fr4b, mat.fr4b, mat.fr4b]
+      );
       g.add(pcb);
-      // chips
-      [[-2, 0.2, 0], [3, 0.15, 1], [3, 0.12, -1.5], [0, 0.1, 2]].forEach(([x, y, z], i) => {
-        const chip = roundedBox(1.2 + (i % 2) * 0.5, 0.2, 1.0, 0.05, mat(0x111111, { metalness: 0.5, roughness: 0.4 }));
-        chip.position.set(x, y, z);
-        g.add(chip);
-      });
-      // USB-C
-      [-2.5, 0.5].forEach((x) => {
-        const u = roundedBox(0.9, 0.25, 0.35, 0.05, mat(0xcccccc, { metalness: 0.8, roughness: 0.2 }));
-        u.position.set(x, 0, -4.3);
-        g.add(u);
-      });
-      addLayer('boardB', g, new THREE.Vector3(0, -0.8, 0), new THREE.Vector3(0, -0.3, 0));
-    }
-
-    // --- SoM ---
-    {
-      const g = new THREE.Group();
-      const som = roundedBox(4.5, 0.35, 3.2, 0.1, mat(0xc5a04a, { metalness: 0.45, roughness: 0.35 }));
+      // SoM
+      const som = rbox(45, 3.5, 32, 0.6, mat.som);
+      som.position.set(
+        CMFD.boardB.som_a[0] - CMFD.boardB.w / 2,
+        2.5,
+        -(CMFD.boardB.som_a[1] - CMFD.boardB.h / 2)
+      );
       g.add(som);
-      const shield = roundedBox(3.2, 0.25, 2.2, 0.05, mat(0x9aa3ad, { metalness: 0.7, roughness: 0.3 }));
-      shield.position.y = 0.25;
+      const shield = rbox(32, 2.2, 22, 0.3, mat.shield);
+      shield.position.copy(som.position);
+      shield.position.y += 2.5;
       g.add(shield);
-      addLayer('som', g, new THREE.Vector3(-2.5, -0.4, 0.5), new THREE.Vector3(-0.4, 0.2, 0));
+      // USB-C
+      const usb = rbox(9, 3.2, 7, 0.4, mat.pin);
+      usb.position.set(
+        CMFD.boardB.usbc[0] - CMFD.boardB.w / 2,
+        2,
+        -(CMFD.boardB.usbc[1] - CMFD.boardB.h / 2)
+      );
+      g.add(usb);
+      // RJ45
+      const rj = rbox(16, 13, 21, 0.5, mat.switch);
+      rj.position.set(
+        CMFD.boardB.rj45[0] - CMFD.boardB.w / 2,
+        7,
+        -(CMFD.boardB.rj45[1] - CMFD.boardB.h / 2)
+      );
+      g.add(rj);
+      // bezel pin row
+      for (let i = 0; i < 20; i++) {
+        const pin = mesh(new THREE.CylinderGeometry(0.35, 0.35, 6, 8), mat.pin);
+        pin.position.set(
+          CMFD.boardB.j_bezel[0] - CMFD.boardB.w / 2 - 24 + i * 2.54,
+          3.5,
+          -(CMFD.boardB.j_bezel[1] - CMFD.boardB.h / 2)
+        );
+        g.add(pin);
+      }
+      // chips
+      for (const [x, z, w, d] of [
+        [70 - 60, -(72 - 45), 4, 4],
+        [95 - 60, -(40 - 45), 6, 5],
+      ]) {
+        const chip = rbox(w, 1.2, d, 0.15, mat.switch);
+        chip.position.set(x, 1.4, z);
+        g.add(chip);
+      }
+      addLayer("boardB", g, new THREE.Vector3(0, 28, 0), new THREE.Vector3(0, -0.35, 0));
     }
 
-    // --- Board A (frame with aperture) ---
+    // SoM callout layer (duplicate highlight — already on B; keep separate for toggle of RF/SoM detail)
     {
       const g = new THREE.Group();
+      const som = rbox(45, 3.5, 32, 0.6, mat.som);
+      g.add(som);
+      const ant = mesh(new THREE.BoxGeometry(12, 0.4, 2), mat.gold);
+      ant.position.set(20, 2, 10);
+      g.add(ant);
+      addLayer("som", g, new THREE.Vector3(-20, 32, 5), new THREE.Vector3(-0.4, 0.2, 0.1));
+    }
+
+    // BOARD A — accurate switch panel
+    {
+      const g = new THREE.Group();
+      const tex = makePcbTexture("A");
+      const topMat = mat.fr4.clone();
+      topMat.map = tex;
+      topMat.roughness = 0.45;
+      // frame PCB as box with hole — use shape extrude
       const shape = new THREE.Shape();
-      const o = 7.0, i = 5.25;
-      shape.moveTo(-o, -o); shape.lineTo(o, -o); shape.lineTo(o, o); shape.lineTo(-o, o); shape.lineTo(-o, -o);
+      const o = CMFD.boardA.w / 2;
+      shape.moveTo(-o, -o);
+      shape.lineTo(o, -o);
+      shape.lineTo(o, o);
+      shape.lineTo(-o, o);
+      shape.closePath();
       const hole = new THREE.Path();
-      hole.moveTo(-i, -i); hole.lineTo(-i, i); hole.lineTo(i, i); hole.lineTo(i, -i); hole.lineTo(-i, -i);
+      const ci = CMFD.boardA.cut / 2;
+      hole.moveTo(-ci, -ci);
+      hole.lineTo(-ci, ci);
+      hole.lineTo(ci, ci);
+      hole.lineTo(ci, -ci);
+      hole.closePath();
       shape.holes.push(hole);
-      const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.16, bevelEnabled: false });
+      const geo = new THREE.ExtrudeGeometry(shape, {
+        depth: CMFD.boardA.thickness,
+        bevelEnabled: false,
+      });
       geo.rotateX(-Math.PI / 2);
-      const pcb = new THREE.Mesh(geo, mat(0x3d5a40, { metalness: 0.15, roughness: 0.65 }));
-      pcb.castShadow = true;
+      // UV-ish: use solid FR4 + overlay plane with texture
+      const pcb = mesh(geo, mat.fr4);
       g.add(pcb);
-      // MCU blob
-      const mcu = roundedBox(1.0, 0.15, 1.0, 0.05, mat(0x111111));
-      mcu.position.set(0, 0.15, -5.8);
-      g.add(mcu);
-      addLayer('boardA', g, new THREE.Vector3(0, 0.5, 0), new THREE.Vector3(0, 0.5, 0));
+      // textured top plane (frame only via alpha would be ideal; full plane with cut hole)
+      const topShape = shape.clone();
+      const topGeo = new THREE.ShapeGeometry(topShape, 32);
+      topGeo.rotateX(-Math.PI / 2);
+      // map UVs roughly
+      const uv = topGeo.attributes.uv;
+      for (let i = 0; i < uv.count; i++) {
+        const x = topGeo.attributes.position.getX(i);
+        const z = topGeo.attributes.position.getZ(i);
+        uv.setXY(i, (x + o) / CMFD.boardA.w, 1 - (z + o) / CMFD.boardA.h);
+      }
+      const topMesh = new THREE.Mesh(
+        topGeo,
+        new THREE.MeshPhysicalMaterial({
+          map: tex,
+          metalness: 0.08,
+          roughness: 0.42,
+          clearcoat: 0.15,
+        })
+      );
+      topMesh.position.y = CMFD.boardA.thickness + 0.02;
+      topMesh.receiveShadow = true;
+      g.add(topMesh);
+
+      // Physical switches + pins
+      const centers = osbCenters();
+      for (const osw of centers) {
+        const local = boardAToWorld(osw.x, osw.y, CMFD.boardA.thickness + 2.15);
+        // convert: boardAToWorld already centered — but g is centered at board center too
+        const lx = osw.x - half;
+        const lz = -(osw.y - half);
+        const body = rbox(6, 4.3, 6, 0.3, mat.switch);
+        body.position.set(lx, CMFD.boardA.thickness + 2.15, lz);
+        g.add(body);
+        const stem = mesh(new THREE.CylinderGeometry(1.2, 1.2, 1.5, 12), mat.cap);
+        stem.position.set(lx, CMFD.boardA.thickness + 4.6, lz);
+        g.add(stem);
+        // pin header
+        const p = pinOffset(osw.side, osw.x, osw.y);
+        const px = p.x - half;
+        const pz = -(p.y - half);
+        const post = mesh(new THREE.BoxGeometry(2.0, 8, 2.0), mat.pin);
+        post.position.set(px, CMFD.boardA.thickness + 4, pz);
+        g.add(post);
+        // plastic base of header
+        const base = rbox(2.4, 2.2, 2.4, 0.15, mat.switch);
+        base.position.set(px, CMFD.boardA.thickness + 1.1, pz);
+        g.add(base);
+      }
+      // Rockers as dual tact + labels
+      for (const [name, [rx, ry]] of Object.entries(CMFD.rockers)) {
+        const lx = rx - half;
+        const lz = -(ry - half);
+        const body = rbox(6, 4.3, 6, 0.3, mat.switch);
+        body.position.set(lx, CMFD.boardA.thickness + 2.15, lz);
+        g.add(body);
+        const hx = rx + (rx < half ? -5.5 : 5.5);
+        const hy = ry + (ry < half ? -5.5 : 5.5);
+        const px = Math.min(Math.max(hx, 3.5), 144.5) - half;
+        const pz = -(Math.min(Math.max(hy, 3.5), 144.5) - half);
+        const post = mesh(new THREE.BoxGeometry(2, 8, 2), mat.pin);
+        post.position.set(px, CMFD.boardA.thickness + 4, pz);
+        g.add(post);
+      }
+      // GND header
+      const gx = CMFD.boardA.gnd_header[0] - half;
+      const gz = -(CMFD.boardA.gnd_header[1] - half);
+      for (let i = 0; i < 2; i++) {
+        const post = mesh(new THREE.BoxGeometry(2, 8, 2), mat.pin);
+        post.position.set(gx + (i - 0.5) * 2.54, CMFD.boardA.thickness + 4, gz);
+        g.add(post);
+      }
+
+      addLayer("boardA", g, new THREE.Vector3(0, 42, 0), new THREE.Vector3(0, 0.55, 0));
     }
 
-    // --- Glass + LCD ---
+    // WIRES
     {
       const g = new THREE.Group();
-      const lcd = roundedBox(10.2, 0.12, 10.2, 0.05, mat(0x0a1210, { metalness: 0.6, roughness: 0.15 }));
-      g.add(lcd);
-      // symbology fake
-      const grid = new THREE.GridHelper(9, 12, 0x1a4a2a, 0x0d2818);
-      grid.position.y = 0.08;
-      g.add(grid);
-      const glass = roundedBox(10.4, 0.08, 10.4, 0.05, mat(0x88aacc, { metalness: 0.9, roughness: 0.05, opacity: 0.25 }));
-      glass.position.y = 0.15;
-      g.add(glass);
-      addLayer('glass', g, new THREE.Vector3(0, 1.0, 0), new THREE.Vector3(0, 0.7, 0));
+      const centers = osbCenters();
+      centers.forEach((osw, i) => {
+        const p = pinOffset(osw.side, osw.x, osw.y);
+        const x1 = p.x - half;
+        const z1 = -(p.y - half);
+        const y1 = 42 + CMFD.boardA.thickness + 8;
+        // Board B bezel pin strip
+        const x2 = CMFD.boardB.j_bezel[0] - CMFD.boardB.w / 2 - 24 + (i % 20) * 2.54;
+        const z2 = 0;
+        const y2 = 28 + 6;
+        const curve = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(x1, y1, z1),
+          new THREE.Vector3(x1 * 0.7, (y1 + y2) / 2 + 12, z1 * 0.5),
+          new THREE.Vector3(x2, y2, z2),
+        ]);
+        const tube = mesh(
+          new THREE.TubeGeometry(curve, 24, 0.35, 6, false),
+          mat.wireColor[i % mat.wireColor.length],
+          false
+        );
+        g.add(tube);
+      });
+      addLayer("wires", g, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0.15, 0));
     }
 
-    // --- Front bezel ---
+    // GLASS + LCD
+    {
+      const g = new THREE.Group();
+      const lcd = rbox(CMFD.bom.lcd.xy, CMFD.bom.lcd.z, CMFD.bom.lcd.xy, 0.4, mat.lcd);
+      g.add(lcd);
+      // fake MFD symbology on emissive plane
+      const cnv = document.createElement("canvas");
+      cnv.width = cnv.height = 1024;
+      const ctx = cnv.getContext("2d");
+      ctx.fillStyle = "#020403";
+      ctx.fillRect(0, 0, 1024, 1024);
+      ctx.strokeStyle = "#1a5c3a";
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 12; i++) {
+        ctx.beginPath();
+        ctx.arc(512, 512, 40 + i * 35, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = "#2ee6a0";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(512, 120);
+      ctx.lineTo(512, 904);
+      ctx.moveTo(120, 512);
+      ctx.lineTo(904, 512);
+      ctx.stroke();
+      ctx.fillStyle = "#7dffc8";
+      ctx.font = "28px monospace";
+      ctx.fillText("ENG  ·  DRV  ·  ATT", 320, 80);
+      ctx.fillText("OSB 14", 460, 960);
+      ctx.fillStyle = "#3d9cff";
+      ctx.beginPath();
+      ctx.arc(512, 560, 8, 0, Math.PI * 2);
+      ctx.fill();
+      const symTex = new THREE.CanvasTexture(cnv);
+      symTex.colorSpace = THREE.SRGBColorSpace;
+      const sym = mesh(
+        new THREE.PlaneGeometry(96, 96),
+        new THREE.MeshBasicMaterial({ map: symTex, transparent: true })
+      );
+      sym.rotation.x = -Math.PI / 2;
+      sym.position.y = CMFD.bom.lcd.z / 2 + 0.2;
+      g.add(sym);
+      const glass = rbox(CMFD.glass_xy + 2, 1.1, CMFD.glass_xy + 2, 0.3, mat.glass);
+      glass.position.y = CMFD.bom.lcd.z / 2 + 1.0;
+      g.add(glass);
+      addLayer("glass", g, new THREE.Vector3(0, 48, 0), new THREE.Vector3(0, 0.75, 0));
+    }
+
+    // FRONT BEZEL
     {
       const g = new THREE.Group();
       const shape = new THREE.Shape();
-      const o = 7.4, i = 5.1;
-      // outer rounded approx as square
-      shape.moveTo(-o, -o); shape.lineTo(o, -o); shape.lineTo(o, o); shape.lineTo(-o, o); shape.closePath();
+      const o = CMFD.outer_xy / 2;
+      const r = CMFD.corner_r;
+      // rounded rect approx
+      shape.moveTo(-o + r, -o);
+      shape.lineTo(o - r, -o);
+      shape.absarc(o - r, -o + r, r, -Math.PI / 2, 0, false);
+      shape.lineTo(o, o - r);
+      shape.absarc(o - r, o - r, r, 0, Math.PI / 2, false);
+      shape.lineTo(-o + r, o);
+      shape.absarc(-o + r, o - r, r, Math.PI / 2, Math.PI, false);
+      shape.lineTo(-o, -o + r);
+      shape.absarc(-o + r, -o + r, r, Math.PI, Math.PI * 1.5, false);
       const hole = new THREE.Path();
-      hole.moveTo(-i, -i); hole.lineTo(-i, i); hole.lineTo(i, i); hole.lineTo(i, -i); hole.closePath();
+      const gi = CMFD.glass_xy / 2;
+      hole.moveTo(-gi, -gi);
+      hole.lineTo(-gi, gi);
+      hole.lineTo(gi, gi);
+      hole.lineTo(gi, -gi);
+      hole.closePath();
       shape.holes.push(hole);
-      const geo = new THREE.ExtrudeGeometry(shape, { depth: 1.4, bevelEnabled: false });
+      const geo = new THREE.ExtrudeGeometry(shape, {
+        depth: CMFD.bezel_front_z,
+        bevelEnabled: true,
+        bevelThickness: 0.4,
+        bevelSize: 0.4,
+        bevelSegments: 2,
+      });
       geo.rotateX(-Math.PI / 2);
-      const bezel = new THREE.Mesh(geo, mat(0xb8c6d6, { metalness: 0.4, roughness: 0.4 }));
+      const bezel = mesh(geo, mat.bezel);
       g.add(bezel);
-      // blue face plate insert (Walkman)
-      const blue = roundedBox(13.6, 0.08, 13.6, 0.3, mat(0x2a6db5, { metalness: 0.35, roughness: 0.45 }));
-      blue.position.y = 0.75;
-      // cut center of blue mentally — use ring via same extrude smaller
+      // Walkman blue face plate
+      const blue = rbox(CMFD.outer_xy - 10, 0.6, CMFD.outer_xy - 10, 2, mat.blue);
+      blue.position.y = CMFD.bezel_front_z - 0.8;
       g.add(blue);
-      // hide center of blue with dark
-      const cut = roundedBox(10.5, 0.1, 10.5, 0.1, mat(0xb8c6d6, { metalness: 0.4, roughness: 0.4 }));
-      cut.position.y = 0.76;
+      // cut blue center
+      const cut = rbox(CMFD.glass_xy + 4, 0.8, CMFD.glass_xy + 4, 0.5, mat.bezel);
+      cut.position.y = CMFD.bezel_front_z - 0.75;
       g.add(cut);
-      addLayer('front', g, new THREE.Vector3(0, 1.8, 0), new THREE.Vector3(0, 1, 0));
+      // OSB holes (dark wells)
+      for (const osw of osbCenters(CMFD.outer_xy, CMFD.outer_xy)) {
+        // map enclosure inset 14 span 78 same as board
+        const lx = osw.x - half;
+        const lz = -(osw.y - half);
+        const well = mesh(new THREE.CylinderGeometry(4.6, 4.6, CMFD.bezel_front_z, 20), mat.switch);
+        well.position.set(lx, CMFD.bezel_front_z / 2, lz);
+        g.add(well);
+      }
+      addLayer("front", g, new THREE.Vector3(0, 52, 0), new THREE.Vector3(0, 1, 0));
     }
 
-    // --- OSB caps ---
+    // CAPS + ROCKERS
     {
       const g = new THREE.Group();
-      const capMat = mat(0xdde3ea, { metalness: 0.2, roughness: 0.5 });
-      const span = 9.2, step = span / 4, inset = 1.1, c = 0;
-      const centers = [];
-      // top 1-5
-      for (let i = 0; i < 5; i++) centers.push([-span / 2 + i * step, span / 2 + inset * 0.3]);
-      // right 6-10
-      for (let i = 0; i < 5; i++) centers.push([span / 2 + inset * 0.3, span / 2 - i * step]);
-      // bottom L→R = 15..11
-      for (let i = 0; i < 5; i++) centers.push([-span / 2 + i * step, -span / 2 - inset * 0.3]);
-      // left 20..16
-      for (let i = 0; i < 5; i++) centers.push([-span / 2 - inset * 0.3, span / 2 - i * step]);
-      centers.forEach(([x, z], idx) => {
-        const cap = roundedBox(1.1, 0.45, 1.1, 0.15, capMat);
-        cap.position.set(x * 1.15, 0, z * 1.15);
+      for (const osw of osbCenters(CMFD.outer_xy, CMFD.outer_xy)) {
+        const lx = osw.x - half;
+        const lz = -(osw.y - half);
+        const cap = rbox(CMFD.bom.osb_cap.xy, CMFD.bom.osb_cap.z, CMFD.bom.osb_cap.xy, 1.0, mat.cap);
+        cap.position.set(lx, CMFD.bom.osb_cap.z / 2, lz);
         g.add(cap);
-        // number sprite-like
-        if (idx === 0 || idx === 5 || idx === 10 || idx === 15) {
-          const tip = roundedBox(0.25, 0.1, 0.25, 0.02, mat(0x2a6db5));
-          tip.position.set(x * 1.15, 0.28, z * 1.15);
-          g.add(tip);
-        }
-      });
-      addLayer('caps', g, new THREE.Vector3(0, 2.6, 0), new THREE.Vector3(0, 1.1, 0));
+        // legend dish
+        const dish = rbox(8, 0.4, 8, 0.6, mat.blue);
+        dish.position.set(lx, CMFD.bom.osb_cap.z - 0.2, lz);
+        g.add(dish);
+      }
+      for (const [name, [rx, ry]] of Object.entries(CMFD.rockers)) {
+        // rockers use same coords on 148 envelope
+        const lx = rx - half;
+        const lz = -(ry - half);
+        const rk = rbox(CMFD.bom.rocker_cap.w, CMFD.bom.rocker_cap.z, CMFD.bom.rocker_cap.h, 0.8, mat.cap);
+        rk.position.set(lx, 3, lz);
+        g.add(rk);
+      }
+      addLayer("caps", g, new THREE.Vector3(0, 68, 0), new THREE.Vector3(0, 1.15, 0));
     }
 
-    // --- Rockers ---
+    // BUMPERS
     {
       const g = new THREE.Group();
-      const rk = mat(0x8a93a0, { metalness: 0.35, roughness: 0.4 });
-      const pos = [[-5.5, 5.5], [5.5, 5.5], [-5.5, -5.5], [5.5, -5.5]];
-      pos.forEach(([x, z]) => {
-        const r = roundedBox(1.4, 0.35, 1.0, 0.1, rk);
-        r.position.set(x, 0, z);
-        g.add(r);
-      });
-      addLayer('rockers', g, new THREE.Vector3(0, 2.9, 0), new THREE.Vector3(0, 1.2, 0));
-    }
-
-    // --- Bumpers ---
-    {
-      const g = new THREE.Group();
-      const bm = mat(0x3a3a3a, { metalness: 0.05, roughness: 0.9 });
-      [[-7.2, -7.2], [7.2, -7.2], [7.2, 7.2], [-7.2, 7.2]].forEach(([x, z]) => {
-        const b = roundedBox(2.0, 5.0, 2.0, 0.4, bm);
-        b.position.set(x, 0, z);
+      const s = CMFD.outer_xy / 2 - 4;
+      for (const [x, z] of [
+        [-s, -s],
+        [s, -s],
+        [s, s],
+        [-s, s],
+      ]) {
+        const b = rbox(22, CMFD.bom.bumper.z, 22, 4, mat.tpu);
+        b.position.set(x, CMFD.bom.bumper.z / 2 - 4, z);
         g.add(b);
-      });
-      addLayer('bumpers', g, new THREE.Vector3(0, -0.5, 0), new THREE.Vector3(0, 0, 0));
+      }
+      addLayer("bumpers", g, new THREE.Vector3(0, 5, 0), new THREE.Vector3(0, 0, 0));
     }
 
-    let explode = 0.55;
+    // LABELS
+    {
+      const g = new THREE.Group();
+      function makeLabel(text, x, y, z) {
+        const cnv = document.createElement("canvas");
+        cnv.width = 512;
+        cnv.height = 128;
+        const ctx = cnv.getContext("2d");
+        ctx.clearRect(0, 0, 512, 128);
+        ctx.fillStyle = "rgba(10,14,22,0.75)";
+        ctx.roundRect(8, 24, 496, 80, 12);
+        ctx.fill();
+        ctx.strokeStyle = "#3d8bfd";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.fillStyle = "#eef2f8";
+        ctx.font = "bold 36px sans-serif";
+        ctx.fillText(text, 28, 78);
+        const tex = new THREE.CanvasTexture(cnv);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const m = new THREE.Mesh(
+          new THREE.PlaneGeometry(48, 12),
+          new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false })
+        );
+        m.position.set(x, y, z);
+        m.renderOrder = 10;
+        return m;
+      }
+      const labs = [
+        ["Front bezel PETG 148³", 90, 75, 40],
+        ["Board A 148×148 FR4", 95, 50, 20],
+        ["4″ IPS + glass 102 mm", 90, 58, -10],
+        ["Board B 120×90 carrier", 85, 35, 30],
+        ["2× 18650 tray", 70, 18, 40],
+        ["Rear shell 58 mm deep", 80, 8, -50],
+      ];
+      for (const [t, x, y, z] of labs) g.add(makeLabel(t, x, y, z));
+      addLayer("labels", g, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.2, 0.1, 0));
+    }
+
+    // Labels face camera
+    function faceCamera() {
+      if (!layers.labels || !layers.labels.visible) return;
+      layers.labels.traverse((ch) => {
+        if (ch.isMesh) ch.quaternion.copy(camera.quaternion);
+      });
+    }
+
+    // explode
+    let explode = 0.48;
     let spinning = true;
 
     function applyExplode() {
-      const e = explode * 6.5;
+      const e = explode * 55;
       for (const name of Object.keys(layers)) {
         const home = basePos[name];
         const dir = explodeDir[name];
@@ -385,52 +963,89 @@
       }
     }
 
-    document.getElementById('explode').addEventListener('input', (ev) => {
+    document.getElementById("explode").addEventListener("input", (ev) => {
       explode = Number(ev.target.value) / 100;
       applyExplode();
     });
-
-    document.querySelectorAll('input[data-layer]').forEach((el) => {
-      el.addEventListener('change', () => {
-        const n = el.getAttribute('data-layer');
+    document.querySelectorAll("input[data-layer]").forEach((el) => {
+      el.addEventListener("change", () => {
+        const n = el.getAttribute("data-layer");
         if (layers[n]) layers[n].visible = el.checked;
       });
     });
-
-    document.getElementById('spin').onclick = () => { spinning = !spinning; };
-    document.getElementById('reset').onclick = () => {
-      camera.position.set(28, 22, 32);
-      controls.target.set(0, 0, 0);
+    document.getElementById("spin").onclick = () => {
+      spinning = !spinning;
     };
-    document.getElementById('preset-exploded').onclick = () => {
-      explode = 0.7;
-      document.getElementById('explode').value = 70;
-      Object.keys(layers).forEach((n) => { layers[n].visible = true; });
-      document.querySelectorAll('input[data-layer]').forEach((el) => { el.checked = true; });
+    document.getElementById("reset").onclick = () => {
+      camera.position.set(220, 160, 260);
+      controls.target.set(0, 20, 0);
+    };
+    document.getElementById("p-exp").onclick = () => {
+      explode = 0.65;
+      document.getElementById("explode").value = 65;
+      Object.keys(layers).forEach((n) => {
+        layers[n].visible = true;
+      });
+      document.querySelectorAll("input[data-layer]").forEach((el) => {
+        el.checked = true;
+      });
       applyExplode();
     };
-    document.getElementById('preset-closed').onclick = () => {
+    document.getElementById("p-closed").onclick = () => {
       explode = 0;
-      document.getElementById('explode').value = 0;
+      document.getElementById("explode").value = 0;
       applyExplode();
     };
-    document.getElementById('preset-electronics').onclick = () => {
+    document.getElementById("p-elec").onclick = () => {
       explode = 0.5;
-      document.getElementById('explode').value = 50;
-      const show = new Set(['boardA', 'boardB', 'som', 'battery', 'glass']);
+      document.getElementById("explode").value = 50;
+      const show = new Set(["boardA", "boardB", "som", "battery", "glass", "wires", "labels"]);
       Object.keys(layers).forEach((n) => {
         layers[n].visible = show.has(n);
       });
-      document.querySelectorAll('input[data-layer]').forEach((el) => {
-        el.checked = show.has(el.getAttribute('data-layer'));
+      document.querySelectorAll("input[data-layer]").forEach((el) => {
+        el.checked = show.has(el.getAttribute("data-layer"));
       });
       applyExplode();
+    };
+    document.getElementById("p-bezel").onclick = () => {
+      explode = 0.35;
+      document.getElementById("explode").value = 35;
+      const show = new Set(["front", "caps", "glass", "boardA", "labels"]);
+      Object.keys(layers).forEach((n) => {
+        layers[n].visible = show.has(n);
+      });
+      document.querySelectorAll("input[data-layer]").forEach((el) => {
+        el.checked = show.has(el.getAttribute("data-layer"));
+      });
+      camera.position.set(40, 120, 160);
+      controls.target.set(0, 55, 0);
+      applyExplode();
+    };
+
+    // 4K screenshot
+    document.getElementById("uhd").onclick = () => {
+      const w = 3840,
+        h = 2160;
+      const old = [canvas.width, canvas.height];
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      faceCamera();
+      renderer.render(scene, camera);
+      const a = document.createElement("a");
+      a.download = "cmfd-exploded-4k.png";
+      a.href = canvas.toDataURL("image/png");
+      a.click();
+      // restore
+      resize();
     };
 
     function resize() {
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
-      if (canvas.width !== w || canvas.height !== h) {
+      if (canvas.width !== Math.floor(w * renderer.getPixelRatio()) ||
+          canvas.height !== Math.floor(h * renderer.getPixelRatio())) {
         renderer.setSize(w, h, false);
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
@@ -439,11 +1054,13 @@
 
     applyExplode();
 
+    let t0 = performance.now();
     function frame(t) {
       resize();
       if (spinning) {
-        scene.rotation.y = t * 0.00015;
+        scene.rotation.y = (t - t0) * 0.00008;
       }
+      faceCamera();
       controls.update();
       renderer.render(scene, camera);
       requestAnimationFrame(frame);

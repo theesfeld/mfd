@@ -82,9 +82,9 @@ Software already knows button presses as “OSB 1–20” and rockers. You only 
 
 ---
 
-## 5. See the 3D exploded model
+## 5. See the 3D exploded model (spec-accurate)
 
-Open this file in a web browser (needs internet once for the 3D library):
+Open in a browser (needs internet once for Three.js). Geometry matches KiCad Board A/B, BOM parts, and the 148 mm enclosure:
 
 `hardware/viewer/index.html`
 
