@@ -21,11 +21,13 @@
 pub mod boot;
 pub mod caps;
 pub mod channels;
+pub mod format_select;
 pub mod probe;
 pub mod vehicle_profile;
 
 pub use boot::draw_bit_screen;
 pub use caps::{BitLine, BitState, FeatureCaps, VehicleCaps};
+pub use format_select::{AutoFormatSelect, FormatSelectAction, FormatSlot};
 pub use probe::DemoProbe;
 
 use crate::bezel::BezelState;
@@ -646,136 +648,69 @@ impl AutoPage {
         }
     }
 
-    /// Top OSB 1–5: ENG bank
-    pub fn from_top_osb(osb: u8) -> Option<AutoPage> {
-        match osb {
-            1 => Some(AutoPage::Eng),
-            2 => Some(AutoPage::Fuel),
-            3 => Some(AutoPage::Fluid),
-            4 => Some(AutoPage::Elec),
-            5 => Some(AutoPage::Drive),
-            _ => None,
-        }
-    }
-
-    /// Right OSB 6–10
-    pub fn from_right_osb(osb: u8) -> Option<AutoPage> {
-        match osb {
-            6 => Some(AutoPage::Chas),
-            7 => Some(AutoPage::Body),
-            8 => Some(AutoPage::Lights),
-            9 => Some(AutoPage::Clim),
-            10 => Some(AutoPage::Cam),
-            _ => None,
-        }
-    }
-
-    /// Left OSB 16–20
-    pub fn from_left_osb(osb: u8) -> Option<AutoPage> {
+    /// Left support OSB → format jump (BUS / SET / DTC).
+    pub fn from_left_support_osb(osb: u8) -> Option<AutoPage> {
         match osb {
             20 => Some(AutoPage::Bus),
             19 => Some(AutoPage::Setup),
-            18 => Some(AutoPage::Attitude),
-            17 => Some(AutoPage::Map),
             16 => Some(AutoPage::Faults),
             _ => None,
-        }
-    }
-
-    /// OSB index (1..=20) that selects this page — used to light the active legend.
-    ///
-    /// Matches real CMFD habit: the **active format** stays highlighted. Pages
-    /// only on bottom softkeys (OWN, RNG) have no fixed ring OSB → `None`.
-    pub fn highlight_osb(self) -> Option<u8> {
-        match self {
-            AutoPage::Eng => Some(1),
-            AutoPage::Fuel => Some(2),
-            AutoPage::Fluid => Some(3),
-            AutoPage::Elec => Some(4),
-            AutoPage::Drive => Some(5),
-            AutoPage::Chas => Some(6),
-            AutoPage::Body => Some(7),
-            AutoPage::Lights => Some(8),
-            AutoPage::Clim => Some(9),
-            AutoPage::Cam => Some(10),
-            AutoPage::Faults => Some(16),
-            AutoPage::Map => Some(17),
-            AutoPage::Attitude => Some(18),
-            AutoPage::Setup => Some(19),
-            AutoPage::Bus => Some(20),
-            // Bottom-row / key-only pages — no permanent ring slot
-            AutoPage::Own | AutoPage::Range => None,
         }
     }
 }
 
 type Osb5 = [&'static str; 5];
 
-/// Label only if the page is in the probe-allowed set (or set is unknown/empty → show all).
-fn page_lab(allowed: Option<&[AutoPage]>, page: AutoPage, name: &'static str) -> &'static str {
-    match allowed {
-        None | Some([]) => name,
-        Some(a) if a.contains(&page) => name,
-        Some(_) => "",
+/// Format-local options (top / right / left). Bottom is format-select chrome.
+fn option_legends(
+    page: AutoPage,
+    v: &VehicleSnapshot,
+    feat: Option<&crate::auto::caps::FeatureCaps>,
+) -> (Osb5, Osb5, Osb5) {
+    let fog_ok = feat.map(|f| f.fog_lights).unwrap_or(true);
+    let left: Osb5 = ["BUS", "SET", "", "", "DTC"];
+    match page {
+        AutoPage::Drive => (
+            ["UNIT", v.speed_unit.name(), "P", "R", "D"],
+            ["N", "M", "", "", ""],
+            left,
+        ),
+        AutoPage::Fuel | AutoPage::Fluid | AutoPage::Elec | AutoPage::Eng => (
+            ["UNIT", v.speed_unit.name(), "", "", ""],
+            ["", "", "", "", ""],
+            left,
+        ),
+        AutoPage::Lights => (
+            ["LO", "HI", if fog_ok { "FOG" } else { "" }, "DRL", "INT"],
+            ["", "", "", "", ""],
+            left,
+        ),
+        AutoPage::Cam => (
+            ["CAM", "WHOT", "GHOT", "GATE", "RNG"],
+            ["", "", "", "", ""],
+            left,
+        ),
+        AutoPage::Range => (["F", "FL", "FR", "R", "RST"], ["", "", "", "", ""], left),
+        AutoPage::Own => (["VIN", "PROF", "", "", ""], ["", "", "", "", ""], left),
+        AutoPage::Setup => (
+            ["UNIT", v.speed_unit.name(), "BRT", "", ""],
+            ["", "", "", "", ""],
+            left,
+        ),
+        AutoPage::Clim => (["AC", "FAN+", "DEF", "", ""], ["", "", "", "", ""], left),
+        _ => (["", "", "", "", ""], ["", "", "", "", ""], left),
     }
 }
 
-/// OSB legends: **adaptive** to probe page set.
-///
-/// Slot **numbers** stay stable when a page is present (ENG = OSB 1). Slots for
-/// pages that did not probe GO are **blank** (unlabeled = no function), same
-/// idea as jet unlabeled OSBs.
-fn legends(
-    page: AutoPage,
-    v: &VehicleSnapshot,
-    allowed: Option<&[AutoPage]>,
-    feat: Option<&crate::auto::caps::FeatureCaps>,
-) -> (Osb5, Osb5, Osb5, Osb5) {
-    let top = [
-        page_lab(allowed, AutoPage::Eng, "ENG"),
-        page_lab(allowed, AutoPage::Fuel, "FUEL"),
-        page_lab(allowed, AutoPage::Fluid, "FLUD"),
-        page_lab(allowed, AutoPage::Elec, "ELEC"),
-        page_lab(allowed, AutoPage::Drive, "DRV"),
-    ];
-    let right = [
-        page_lab(allowed, AutoPage::Chas, "CHAS"),
-        page_lab(allowed, AutoPage::Body, "BODY"),
-        page_lab(allowed, AutoPage::Lights, "LITE"),
-        page_lab(allowed, AutoPage::Clim, "CLIM"),
-        page_lab(allowed, AutoPage::Cam, "CAM"),
-    ];
-    let left = [
-        page_lab(allowed, AutoPage::Bus, "BUS"),
-        page_lab(allowed, AutoPage::Setup, "SET"),
-        page_lab(allowed, AutoPage::Attitude, "ATT"),
-        page_lab(allowed, AutoPage::Map, "MAP"),
-        page_lab(allowed, AutoPage::Faults, "DTC"),
-    ];
-    // Bottom: page-local options; blank option labels that need missing equipment.
-    let fog_ok = feat.map(|f| f.fog_lights).unwrap_or(true);
-    let bottom: Osb5 = match page {
-        AutoPage::Eng | AutoPage::Drive => ["UNIT", v.speed_unit.name(), "OWN", "SET", "BUS"],
-        AutoPage::Lights => [
-            "LO",
-            "HI",
-            if fog_ok { "FOG" } else { "" },
-            "DRL",
-            "INT",
-        ],
-        AutoPage::Cam => ["CAM", "WHOT", "GHOT", "GATE", "RNG"],
-        AutoPage::Range => ["F", "FL", "FR", "R", "RST"],
-        AutoPage::Setup => ["UNIT", "BUS", "CAN", "BRT", "OWN"],
-        AutoPage::Own => ["VIN", "PROF", "SET", "BUS", "DTC"],
-        _ => [
-            "OWN",
-            page_lab(allowed, AutoPage::Bus, "BUS"),
-            page_lab(allowed, AutoPage::Faults, "DTC"),
-            page_lab(allowed, AutoPage::Attitude, "ATT"),
-            page_lab(allowed, AutoPage::Map, "MAP"),
-        ],
+/// Bottom L→R = OSB 15..11: OWN · slotA · slotB · slotC · DCLT
+fn format_select_bottom(fmt: &AutoFormatSelect) -> Osb5 {
+    let [a, b, c] = fmt.slot_labels();
+    let dclt = match fmt.dclt {
+        0 => "DCLT",
+        1 => "DCL1",
+        _ => "DCL2",
     };
-    (top, right, bottom, left)
+    ["OWN", a, b, c, dclt]
 }
 
 /// Dense numeric matrix (preferred glass style).
@@ -804,6 +739,7 @@ fn numeric_matrix(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn chrome(
     page: &mut Page,
     pal: &Palette,
@@ -812,21 +748,26 @@ fn chrome(
     v: &VehicleSnapshot,
     allowed: Option<&[AutoPage]>,
     feat: Option<&crate::auto::caps::FeatureCaps>,
+    fmt: Option<&AutoFormatSelect>,
 ) {
     let b = page.bounds.inset(2);
-    let (top, right, bottom, left) = legends(which, v, allowed, feat);
-    // Light the OSB for the **current page** (not only last press). While an
-    // OSB is held down, prefer that momentary highlight like a real bezel.
-    // Do not light a blank (not allowed) page slot.
-    let page_osb = which.highlight_osb().filter(|&osb| {
-        allowed
-            .map(|a| a.is_empty() || a.contains(&which))
-            .unwrap_or(true)
-            && osb >= 1
-    });
+    let allow = allowed.unwrap_or(AutoPage::ALL);
+    let (top, right, bottom, left, active_osb) = if let Some(f) = fmt {
+        if f.menu_open {
+            let (t, r, bot, l) = format_select::master_menu_legends(allow);
+            (t, r, bot, l, Some(f.menu_target.osb()))
+        } else {
+            let (t, r, l) = option_legends(which, v, feat);
+            let bot = format_select_bottom(f);
+            (t, r, bot, l, Some(f.active.osb()))
+        }
+    } else {
+        let (t, r, l) = option_legends(which, v, feat);
+        (t, r, ["OWN", "", "", "", "DCLT"], l, None)
+    };
     let active = (1..=20u8)
         .find(|&id| bezel.is_down(id))
-        .or(page_osb)
+        .or(active_osb)
         .or(bezel.last_osb);
     osb_chrome(
         page.surface,
@@ -840,14 +781,18 @@ fn chrome(
         active,
     );
     let c = content_after_osb(b, page.font_px * 0.65);
+    let title = if fmt.map(|f| f.menu_open).unwrap_or(false) {
+        "MASTER MENU"
+    } else {
+        which.title()
+    };
     page.label_centered(
         c.center().0 as f32,
         c.y as f32 + page.font_px * 0.45,
-        which.title(),
+        title,
         pal.primary,
     );
-    // Ownship VIN — small identity line under page title (when known).
-    if !v.vin.is_empty() {
+    if !v.vin.is_empty() && !fmt.map(|f| f.menu_open).unwrap_or(false) {
         let os = format!("OS  {}", short_vin(&v.vin));
         page.label_centered(
             c.center().0 as f32,
@@ -915,11 +860,12 @@ pub fn draw_auto(
     v: &VehicleSnapshot,
     t: f32,
 ) {
-    draw_auto_with_video(page, which, pal, bezel, v, t, None, None, None);
+    draw_auto_with_video(page, which, pal, bezel, v, t, None, None, None, None);
 }
 
 /// Draw auto page; optional live greyscale camera frame for FLIR.
 /// `caps` omits equipment that did not probe GO (fog, HSWM, …).
+/// `fmt` drives MLU-class format select chrome + DCLT density.
 /// `warns` drives master strip + flash fields.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_auto_with_video(
@@ -932,24 +878,33 @@ pub fn draw_auto_with_video(
     cam_frame: Option<&GreyFrame>,
     caps: Option<&VehicleCaps>,
     warns: Option<&[ActiveWarn]>,
+    fmt: Option<&AutoFormatSelect>,
 ) {
     page.clear();
     page.surface.clear(pal.glass);
     page.bezel();
-    // Adaptive OSB set from probe (when ready); empty/unknown → full SIM set.
-    let allowed_pages: Option<Vec<AutoPage>> = caps.and_then(|c| {
-        if c.ready {
-            Some(c.pages())
-        } else {
-            None
-        }
-    });
+    let allowed_pages: Option<Vec<AutoPage>> =
+        caps.and_then(|c| if c.ready { Some(c.pages()) } else { None });
     let allowed_slice = allowed_pages.as_deref();
     let feat = caps.map(|c| &c.features);
-    chrome(page, pal, which, bezel, v, allowed_slice, feat);
+    let dclt = fmt.map(|f| f.dclt).unwrap_or(0);
+    chrome(page, pal, which, bezel, v, allowed_slice, feat, fmt);
     let mut c = content(page);
     let fh = page.font_px;
     let flash = warn::flash_warn_on(t);
+
+    // Master Menu glass: format catalog (GO only)
+    if fmt.map(|f| f.menu_open).unwrap_or(false) {
+        let allow = allowed_slice.unwrap_or(AutoPage::ALL);
+        let mut lines: Vec<String> = allow.iter().map(|p| format!("· {}", p.title())).collect();
+        if lines.is_empty() {
+            lines.push("NO FORMATS".into());
+        }
+        lines.insert(0, "SELECT FORMAT".into());
+        lines.push("PRESS OSB 12-14 TO CANCEL".into());
+        numeric_matrix(page.surface, c.inset(4), &lines, fh * 0.75, pal.readout, 1);
+        return;
+    }
 
     // Master caution / warning strip (top of content)
     if let Some(ws) = warns {
@@ -974,7 +929,12 @@ pub fn draw_auto_with_video(
 
     match which {
         AutoPage::Eng => {
-            let tach_w = (c.w as f32 * 0.42) as i32;
+            // Primary: RPM gauge. Secondary: sparse ENG numerics (DCLT drops matrix).
+            let tach_w = if dclt >= 2 {
+                c.w - 8
+            } else {
+                (c.w as f32 * 0.48) as i32
+            };
             let rpm_n = (v.rpm / v.rpm_redline).clamp(0.0, 1.1);
             round_gauge(
                 page.surface,
@@ -988,25 +948,28 @@ pub fn draw_auto_with_video(
                     ..Default::default()
                 },
             );
-            let lines = channels::channels_in_group(v, "ENG")
-                .into_iter()
-                .map(|ch| ch.line())
-                .collect::<Vec<_>>();
-            numeric_matrix(
-                page.surface,
-                Rect::new(c.x + tach_w + 4, c.y, c.w - tach_w - 6, c.h),
-                &lines,
-                fh * 0.85,
-                pal.readout,
-                1,
-            );
+            if dclt < 2 {
+                let mut lines = vec![
+                    format!("LOAD  {:.0} %", v.load * 100.0),
+                    format!("TPS   {:.0} %", v.throttle * 100.0),
+                    format!("MAF   {:.1} g/s", v.maf_gps),
+                    format!("ECT   {:.0} C", v.coolant_c),
+                ];
+                if dclt == 0 {
+                    lines.push(format!("OIL   {:.0} C", v.oil_temp_c));
+                    lines.push(format!("IAT   {:.0} C", v.iat_c));
+                }
+                numeric_matrix(
+                    page.surface,
+                    Rect::new(c.x + tach_w + 4, c.y, c.w - tach_w - 6, c.h),
+                    &lines,
+                    fh * 0.85,
+                    pal.readout,
+                    1,
+                );
+            }
         }
         AutoPage::Fuel => {
-            let lines = channels::channels_in_group(v, "FUEL")
-                .into_iter()
-                .chain(channels::channels_in_group(v, "ELEC").into_iter().take(2))
-                .map(|ch| ch.line())
-                .collect::<Vec<_>>();
             let bingo = warns
                 .map(|w| w.iter().any(|x| x.id == WarnId::Bingo))
                 .unwrap_or(false);
@@ -1015,63 +978,58 @@ pub fn draw_auto_with_video(
             } else {
                 pal.primary
             };
-            // Big numerics + small fuel tape
+            // Level tape + big % — useful widgets only.
             value_readout(
                 page.surface,
-                c.x as f32 + c.w as f32 * 0.28,
+                c.center().0 as f32,
                 c.y as f32 + c.h as f32 * 0.28,
                 if bingo { "BINGO" } else { "FUEL" },
                 &format!("{:.0}", v.fuel * 100.0),
                 "%",
                 fuel_col,
                 fh * 0.75,
-                fh * 2.0,
-            );
-            value_readout(
-                page.surface,
-                c.x as f32 + c.w as f32 * 0.72,
-                c.y as f32 + c.h as f32 * 0.28,
-                "FP",
-                &format!("{:.0}", v.fuel_pressure_kpa),
-                "kPa",
-                pal.caution,
-                fh * 0.7,
-                fh * 1.6,
+                fh * 2.2,
             );
             tape(
                 page.surface,
-                Rect::new(c.x + 8, c.bottom() - 48, c.w - 16, 40),
+                Rect::new(c.x + 8, c.bottom() - 52, c.w - 16, 44),
                 "FUEL",
                 v.fuel,
-                pal.primary,
+                fuel_col,
                 fh * 0.7,
                 true,
             );
-            numeric_matrix(
-                page.surface,
-                Rect::new(
-                    c.x,
-                    c.y + (c.h as f32 * 0.45) as i32,
-                    c.w,
-                    (c.h as f32 * 0.35) as i32,
-                ),
-                &lines,
-                fh * 0.75,
-                pal.readout,
-                2,
-            );
+            if dclt == 0 {
+                let lines = vec![
+                    format!("FP    {:.0} kPa", v.fuel_pressure_kpa),
+                    format!("BATT  {:.1} V", v.battery_v),
+                ];
+                numeric_matrix(
+                    page.surface,
+                    Rect::new(
+                        c.x,
+                        c.y + (c.h as f32 * 0.48) as i32,
+                        c.w,
+                        (c.h as f32 * 0.2) as i32,
+                    ),
+                    &lines,
+                    fh * 0.8,
+                    pal.readout,
+                    2,
+                );
+            }
         }
         AutoPage::Fluid => {
-            // Four small gauges (OIL · ECT · TFT · IAT) + dense numeric matrix.
-            let gw = (c.w - 12) / 4;
-            let gh = (c.h as f32 * 0.42) as i32;
-            let temps = [
-                ("OIL", v.oil_temp, v.oil_temp_c, pal.caution),
+            // Key temps only (ECT · OIL · TFT) — not a four-gauge wall.
+            let n = if dclt >= 2 { 2 } else { 3 };
+            let gw = (c.w - 12) / n;
+            let gh = (c.h as f32 * 0.55) as i32;
+            let temps: &[(&str, f32, f32, crate::Color)] = &[
                 ("ECT", v.coolant, v.coolant_c, pal.primary),
+                ("OIL", v.oil_temp, v.oil_temp_c, pal.caution),
                 ("TFT", v.trans_temp, v.trans_temp_c, pal.nav),
-                ("IAT", v.iat, v.iat_c, pal.readout),
             ];
-            for (i, (lab, norm, deg, col)) in temps.iter().enumerate() {
+            for (i, (lab, norm, deg, col)) in temps.iter().take(n as usize).enumerate() {
                 let gx = c.x + 2 + i as i32 * (gw + 2);
                 round_gauge(
                     page.surface,
@@ -1081,31 +1039,33 @@ pub fn draw_auto_with_video(
                         redline: Some(0.85),
                         label: lab,
                         color: *col,
-                        font_px: fh * 0.55,
+                        font_px: fh * 0.6,
                         ..Default::default()
                     },
                 );
                 label(
                     page.surface,
-                    gx as f32 + 2.0,
-                    (c.y + gh - (fh * 0.9) as i32) as f32,
+                    gx as f32 + 4.0,
+                    (c.y + gh - (fh * 0.95) as i32) as f32,
                     &format!("{:.0}C", deg),
                     pal.readout,
-                    fh * 0.6,
+                    fh * 0.65,
                 );
             }
-            let lines = channels::channels_in_group(v, "FLUID")
-                .into_iter()
-                .map(|ch| ch.line())
-                .collect::<Vec<_>>();
-            numeric_matrix(
-                page.surface,
-                Rect::new(c.x, c.y + gh + 4, c.w, (c.h - gh - 6).max(20)),
-                &lines,
-                fh * 0.8,
-                pal.readout,
-                2,
-            );
+            if dclt == 0 {
+                let lines = vec![
+                    format!("IAT   {:.0} C", v.iat_c),
+                    format!("AAT   {:.0} C", v.temp_out_c),
+                ];
+                numeric_matrix(
+                    page.surface,
+                    Rect::new(c.x, c.y + gh + 4, c.w, (c.h - gh - 6).max(20)),
+                    &lines,
+                    fh * 0.8,
+                    pal.readout,
+                    2,
+                );
+            }
         }
         AutoPage::Elec => {
             let batt_w = (c.w as f32 * 0.48) as i32;
@@ -1669,7 +1629,7 @@ pub fn draw_auto_obd(
     v.throttle = obd.throttle;
     v.load = obd.load;
     v.dtc_count = obd.dtc_count;
-    draw_auto_with_video(page, which, pal, bezel, &v, t, None, None, None);
+    draw_auto_with_video(page, which, pal, bezel, &v, t, None, None, None, None);
 }
 
 pub fn rpm_norm(rpm: f32, redline: f32) -> f32 {

@@ -1,7 +1,7 @@
 # MFD — multi-function display library
 
 <!-- agents:status:begin -->
-> **Status:** active · `0.1.0-dev.1` · **vehicle CMFD** · drive capture · display-only · [#93](https://github.com/theesfeld/mfd/issues/93) · MIT
+> **Status:** active · `0.1.0-dev.1` · **vehicle CMFD** · format select · drive capture · display-only · [#103](https://github.com/theesfeld/mfd/issues/103) · MIT
 <!-- agents:status:end -->
 
 ## What this is

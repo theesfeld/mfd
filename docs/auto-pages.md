@@ -62,24 +62,20 @@ Hardware is the same **20 OSB** ring as F-16 CMFD (numbered 1→20 clockwise fro
 - **Other OSBs** are **page options** for that format (range, CNTL, submodes, …) — not a permanent “all pages on top.”
 - Corner rockers: GAIN / SYM / BRT / CON (not OSBs).
 
-### This vehicle product (probe-adaptive systems)
+### This vehicle product (Lockheed-class format select)
 
-We reuse the same 20-button geometry. **Which pages exist is decided by the startup probe** (`VehicleCaps::pages()`): only **GO** equipment yields a page. **NOGO / unknown → page omitted** from cycle, OSB press, and **OSB legend** (blank slot = no function).
+**Canonical design:** [`docs/reference/vehicle-cmfd-design.md`](reference/vehicle-cmfd-design.md)
 
-**Default slot map** when a page **is** present (stable numbers — not a hard-coded always-on menu):
+| Side | OSB | Role |
+|------|-----|------|
+| **Bottom** | 15 · 14 · 13 · 12 · 11 | **OWN** · **format A/B/C** · **DCLT** |
+| **Top / right** | 1–10 | **Options for the active format** only |
+| **Left** | 20 · 19 · 16 | **BUS · SET · DTC** support jumps |
 
-| Side | OSB | Page when GO |
-|------|-----|----------------|
-| **Top** | 1–5 | ENG · FUEL · FLUD · ELEC · DRV |
-| **Right** | 6–10 | CHAS · BODY · LITE · CLIM · CAM |
-| **Left** | 20–16 | BUS · SET · ATT · MAP · DTC |
-| **Bottom** | 15–11 | **Options for the current page** (unit, light toggles, OWN, …); options that need missing equipment are blank |
-
-Example: no TPMS/ABS → **CHAS** legend blank and OSB 6 does nothing. No camera → **CAM** blank. No HVAC → **CLIM** blank.
-
-So: **top / left / right ≈ which page (if present)**, **bottom ≈ options on this page**. Jet puts format slots on the bottom; vehicle glass puts systems pages on the ring and **adapts the set after probe**.
-
-OWN / RNG may be bottom options or keys (`o`, `r`) when not on a dedicated ring slot.
+- Fixed **category formats**; probe gates **presence** (Master Menu lists GO only; blank = no function).  
+- Active format slot **highlighted**. Press active slot → **Master Menu**.  
+- **Widgets:** gauges only where useful (RPM, speed, fuel level, key temps, ATT ball).  
+- **DCLT:** full → reduced numerics → gauges-only.
 
 ## Startup (real CMFD power-on)
 

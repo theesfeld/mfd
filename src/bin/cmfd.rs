@@ -17,7 +17,9 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-use mfd::auto::{self, AutoPage, DemoProbe, GearSelect, VehicleSnapshot};
+use mfd::auto::{
+    self, AutoFormatSelect, AutoPage, DemoProbe, FormatSelectAction, GearSelect, VehicleSnapshot,
+};
 use mfd::bezel::{BezelEvent, BezelSource, BezelState, KeyboardBezel};
 use mfd::font::{draw_text, text_width};
 use mfd::frame::FramePacer;
@@ -105,6 +107,7 @@ fn main() -> io::Result<()> {
     let mut demo_probe = DemoProbe::start();
     let mut boot_done = false;
     let mut available_pages: Vec<AutoPage> = Vec::new();
+    let mut fmt_sel = AutoFormatSelect::default();
     let mut warn_eng = WarningEngine::new();
 
     #[cfg(feature = "obd")]
@@ -168,9 +171,11 @@ fn main() -> io::Result<()> {
                         EscAction::Quit => RUNNING.store(false, Ordering::Relaxed),
                         EscAction::PageNext if boot_done => {
                             auto_page = cycle_auto(auto_page, 1, &available_pages);
+                            fmt_sel.assign(fmt_sel.active, auto_page);
                         }
                         EscAction::PagePrev if boot_done => {
                             auto_page = cycle_auto(auto_page, -1, &available_pages);
+                            fmt_sel.assign(fmt_sel.active, auto_page);
                         }
                         EscAction::Ignore | EscAction::PageNext | EscAction::PagePrev => {}
                     }
@@ -194,28 +199,92 @@ fn main() -> io::Result<()> {
                     bezel_src.push_key_state(k, &bezel);
                 }
                 // Systems page jumps (after BIT)
-                b'1' => auto_page = AutoPage::Eng,
-                b'2' => auto_page = AutoPage::Fuel,
-                b'3' => auto_page = AutoPage::Fluid,
-                b'4' => auto_page = AutoPage::Elec,
-                b'5' => auto_page = AutoPage::Drive,
-                b'6' => auto_page = AutoPage::Chas,
-                b'7' => auto_page = AutoPage::Body,
-                b'8' => auto_page = AutoPage::Lights,
-                b'9' => auto_page = AutoPage::Clim,
-                b'0' => auto_page = AutoPage::Cam,
-                b'r' | b'R' => auto_page = AutoPage::Range,
-                b'b' | b'B' => auto_page = AutoPage::Bus,
-                b'w' | b'W' => auto_page = AutoPage::Own,
-                b'o' | b'O' => auto_page = AutoPage::Own,
-                b's' | b'S' => auto_page = AutoPage::Setup,
+                b'1' => {
+                    auto_page = AutoPage::Eng;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'2' => {
+                    auto_page = AutoPage::Fuel;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'3' => {
+                    auto_page = AutoPage::Fluid;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'4' => {
+                    auto_page = AutoPage::Elec;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'5' => {
+                    auto_page = AutoPage::Drive;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'6' => {
+                    auto_page = AutoPage::Chas;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'7' => {
+                    auto_page = AutoPage::Body;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'8' => {
+                    auto_page = AutoPage::Lights;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'9' => {
+                    auto_page = AutoPage::Clim;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'0' => {
+                    auto_page = AutoPage::Cam;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'r' | b'R' => {
+                    auto_page = AutoPage::Range;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'b' | b'B' => {
+                    auto_page = AutoPage::Bus;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'w' | b'W' | b'o' | b'O' => auto_page = AutoPage::Own,
+                b's' | b'S' | b'h' | b'H' => {
+                    auto_page = AutoPage::Setup;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
                 b'u' | b'U' => vehicle.speed_unit = vehicle.speed_unit.cycle(),
-                b'n' | b'N' => auto_page = cycle_auto(auto_page, 1, &available_pages),
-                b'p' | b'P' => auto_page = cycle_auto(auto_page, -1, &available_pages),
-                b'h' | b'H' => auto_page = AutoPage::Setup,
-                b'v' | b'V' => auto_page = AutoPage::Attitude,
-                b'x' | b'X' => auto_page = AutoPage::Map,
-                b'f' | b'F' => auto_page = AutoPage::Faults,
+                b'n' | b'N' => {
+                    auto_page = cycle_auto(auto_page, 1, &available_pages);
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'p' | b'P' => {
+                    auto_page = cycle_auto(auto_page, -1, &available_pages);
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'v' | b'V' => {
+                    auto_page = AutoPage::Attitude;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'x' | b'X' => {
+                    auto_page = AutoPage::Map;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'f' | b'F' => {
+                    auto_page = AutoPage::Faults;
+                    fmt_sel.assign(fmt_sel.active, auto_page);
+                }
+                b'm' | b'M' if boot_done => {
+                    // Open Master Menu into active slot (keyboard)
+                    let _ = fmt_sel.handle_osb(
+                        fmt_sel.active.osb(),
+                        osb_tick,
+                        if available_pages.is_empty() {
+                            AutoPage::ALL
+                        } else {
+                            &available_pages
+                        },
+                    );
+                }
                 // [ ] ; ' - = , .  → real bezel knobs (BRT CON SYM GAIN)
                 _ => bezel_src.push_key_state(k, &bezel),
             }
@@ -232,40 +301,61 @@ fn main() -> io::Result<()> {
                     continue;
                 }
                 osb_tick = osb_tick.wrapping_add(1);
-                if let Some(p) = AutoPage::from_top_osb(osb) {
-                    if available_pages.is_empty() || available_pages.contains(&p) {
-                        auto_page = p;
-                    }
-                } else if let Some(p) = AutoPage::from_right_osb(osb) {
-                    if available_pages.is_empty() || available_pages.contains(&p) {
-                        auto_page = p;
-                    }
-                } else if let Some(p) = AutoPage::from_left_osb(osb) {
-                    if available_pages.is_empty() || available_pages.contains(&p) {
-                        auto_page = p;
-                    }
+                let allow = if available_pages.is_empty() {
+                    AutoPage::ALL
                 } else {
-                    match (auto_page, osb) {
-                        (AutoPage::Eng | AutoPage::Setup, 11 | 15) => {
-                            vehicle.speed_unit = vehicle.speed_unit.cycle();
-                        }
-                        (AutoPage::Drive, 11) => vehicle.gear = GearSelect::Park,
-                        (AutoPage::Drive, 12) => vehicle.gear = GearSelect::Reverse,
-                        (AutoPage::Drive, 13) => vehicle.gear = GearSelect::Neutral,
-                        (AutoPage::Drive, 14) => vehicle.gear = GearSelect::Drive,
-                        (AutoPage::Drive, 15) => vehicle.gear = GearSelect::Manual,
-                        (AutoPage::Lights, 11) => vehicle.light_interior = !vehicle.light_interior,
-                        (AutoPage::Lights, 12) => vehicle.light_drive = !vehicle.light_drive,
-                        (AutoPage::Lights, 13) => vehicle.light_fog = !vehicle.light_fog,
-                        (AutoPage::Lights, 14) => vehicle.light_high = !vehicle.light_high,
-                        (AutoPage::Lights, 15) => vehicle.light_low = !vehicle.light_low,
-                        (AutoPage::Clim, 16) => vehicle.hvac_ac = !vehicle.hvac_ac,
-                        (AutoPage::Clim, 17) => {
-                            vehicle.hvac_fan = (vehicle.hvac_fan + 0.1).min(1.0)
-                        }
-                        (AutoPage::Clim, 18) => vehicle.hvac_defrost = !vehicle.hvac_defrost,
-                        _ => {}
+                    available_pages.as_slice()
+                };
+                // MLU-class format select first (12/13/14, 11 DCLT, 15 OWN, Master Menu).
+                match fmt_sel.handle_osb(osb, osb_tick, allow) {
+                    FormatSelectAction::Show(p) => {
+                        auto_page = p;
+                        continue;
                     }
+                    FormatSelectAction::OpenMenu { .. } | FormatSelectAction::CloseMenu => {
+                        continue;
+                    }
+                    FormatSelectAction::Own => {
+                        auto_page = AutoPage::Own;
+                        continue;
+                    }
+                    FormatSelectAction::Declutter => continue,
+                    FormatSelectAction::Ignore => {}
+                }
+                // Left BIT jumps (BUS / SET / DTC)
+                if let Some(p) = AutoPage::from_left_support_osb(osb) {
+                    if allow.is_empty() || allow.contains(&p) {
+                        auto_page = p;
+                    }
+                    continue;
+                }
+                // Format-local options (top / right OSBs only when labeled)
+                match (auto_page, osb) {
+                    (
+                        AutoPage::Eng
+                        | AutoPage::Fuel
+                        | AutoPage::Fluid
+                        | AutoPage::Elec
+                        | AutoPage::Drive
+                        | AutoPage::Setup,
+                        1 | 2,
+                    ) => {
+                        vehicle.speed_unit = vehicle.speed_unit.cycle();
+                    }
+                    (AutoPage::Drive, 3) => vehicle.gear = GearSelect::Park,
+                    (AutoPage::Drive, 4) => vehicle.gear = GearSelect::Reverse,
+                    (AutoPage::Drive, 5) => vehicle.gear = GearSelect::Drive,
+                    (AutoPage::Drive, 6) => vehicle.gear = GearSelect::Neutral,
+                    (AutoPage::Drive, 7) => vehicle.gear = GearSelect::Manual,
+                    (AutoPage::Lights, 1) => vehicle.light_low = !vehicle.light_low,
+                    (AutoPage::Lights, 2) => vehicle.light_high = !vehicle.light_high,
+                    (AutoPage::Lights, 3) => vehicle.light_fog = !vehicle.light_fog,
+                    (AutoPage::Lights, 4) => vehicle.light_drive = !vehicle.light_drive,
+                    (AutoPage::Lights, 5) => vehicle.light_interior = !vehicle.light_interior,
+                    (AutoPage::Clim, 1) => vehicle.hvac_ac = !vehicle.hvac_ac,
+                    (AutoPage::Clim, 2) => vehicle.hvac_fan = (vehicle.hvac_fan + 0.1).min(1.0),
+                    (AutoPage::Clim, 3) => vehicle.hvac_defrost = !vehicle.hvac_defrost,
+                    _ => {}
                 }
             }
         }
@@ -295,13 +385,17 @@ fn main() -> io::Result<()> {
         if !boot_done && caps_now.ready {
             boot_done = true;
             available_pages = caps_now.pages();
-            if !available_pages.contains(&auto_page) {
-                auto_page = available_pages.first().copied().unwrap_or(AutoPage::Eng);
+            fmt_sel = AutoFormatSelect::from_allowed(&available_pages);
+            auto_page = fmt_sel.current();
+            if !available_pages.is_empty() && !available_pages.contains(&auto_page) {
+                auto_page = available_pages[0];
+                fmt_sel.assign(fmt_sel.active, auto_page);
             }
             eprintln!(
-                "BIT COMPLETE · {} pages · {}",
+                "BIT COMPLETE · {} formats · {} · slots {:?}",
                 available_pages.len(),
-                caps_now.link
+                caps_now.link,
+                fmt_sel.slot_labels()
             );
         }
 
@@ -370,6 +464,7 @@ fn main() -> io::Result<()> {
                 cam_frame.as_ref(),
                 Some(&caps_now),
                 Some(&active),
+                Some(&fmt_sel),
             );
             let cam = if cam_frame.is_some() { "CAM" } else { "SYN" };
             let aw = if active.is_empty() {
@@ -377,9 +472,17 @@ fn main() -> io::Result<()> {
             } else {
                 format!(" · {}", active[0].label)
             };
-            // Live BT / bus link on every page (OWN has the full block).
             let link = vehicle.bus_status_short();
-            let status = format!("{} · {link} · {}{aw} · o=OWN", auto_page.title(), cam);
+            let dcl = match fmt_sel.dclt {
+                0 => "D0",
+                1 => "D1",
+                _ => "D2",
+            };
+            let status = if fmt_sel.menu_open {
+                format!("MENU · {link} · {cam}{aw}")
+            } else {
+                format!("{} · {link} · {dcl} · {cam}{aw}", auto_page.title())
+            };
             draw_demo_status(page.surface, &status, pal.dim, font_px * 0.55);
         }
 
@@ -484,20 +587,19 @@ fn print_banner(ver: &str) {
     eprintln!("  STARTUP");
     eprintln!("    CMFD power-on until capability probe finishes");
     eprintln!();
-    eprintln!("  SYSTEMS  n/p  1 ENG 2 FUEL 3 FLUD 4 ELEC 5 DRV 6 CHAS …");
-    eprintln!("    b BUS  f DTC  v ATT  x MAP  o OWN  s SET  r RNG");
+    eprintln!("  FORMAT SELECT (MLU habit)");
+    eprintln!("    OSB 12/13/14  format slots (active lit; press active → Master Menu)");
+    eprintln!("    OSB 11 DCLT   declutter  ·  OSB 15 OWN");
+    eprintln!("    n/p / arrows  cycle format into active slot");
+    eprintln!("    Master Menu lists GO formats only (blank = no function)");
     eprintln!();
-    eprintln!("  LINK");
-    eprintln!("    OWN page = Bluetooth MAC · channel · adapter · protocol");
-    eprintln!("    Bottom strip = BT LIVE / ERR / SIM on every page");
+    eprintln!("  KEYS  b BUS  f DTC  v ATT  x MAP  o OWN  s SET  r RNG  c color");
     eprintln!();
-    eprintln!("  WARNINGS (speaker)");
-    eprintln!("    BINGO low fuel · ALERT park brake / tire / door");
-    eprintln!("    Red flash fields · master caution strip");
-    eprintln!("    MFD_AUDIO=0 mute · needs aplay (alsa-utils)");
+    eprintln!("  LINK  OWN page = BT MAC · adapter · protocol");
     eprintln!();
-    eprintln!("  BEZEL  [ ] BRT  ·  MFD_OBD_BT=00:04:3E:96:B8:F1");
-    eprintln!("  Drive: ./cmfd.sh  ·  arrows n/p page · c color · Esc quit");
+    eprintln!("  WARN  BINGO / ALERT  ·  MFD_AUDIO=0 mute");
+    eprintln!("  BEZEL [ ] BRT  ·  MFD_OBD_BT=00:04:3E:96:B8:F1");
+    eprintln!("  Drive: ./cmfd.sh  ·  Esc quit");
     eprintln!();
 }
 
