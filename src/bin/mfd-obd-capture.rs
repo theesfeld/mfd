@@ -126,13 +126,18 @@ fn run() -> Result<(), String> {
     eprintln!("  uds:     {do_uds}");
     eprintln!("  crush:   {crush}");
 
-    let mut session = Session::connect(ConnectOpts {
+    let opts = ConnectOpts {
         serial_path: port,
         baud,
         bt_mac: bt,
         bt_channel: channel,
         replay,
         timeout: Duration::from_millis(if crush { 2_500 } else { 4_000 }),
+    };
+    eprintln!("  link:     resilient search until OBD answers…");
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let mut session = Session::connect_resilient(&opts, &stop, |msg| {
+        eprintln!("  … {msg}");
     })
     .map_err(|e| e.to_string())?;
 

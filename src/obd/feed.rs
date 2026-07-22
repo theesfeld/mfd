@@ -1,6 +1,10 @@
 //! Background poller → [`VehicleSnapshot`](crate::auto::VehicleSnapshot).
 //!
-//! Startup: capability probe (BIT), then DTC + Mode 01 / Ford DID poll.
+//! **Link policy:** when BT/serial/replay env is set, the feed **always starts**
+//! and **keeps searching / reconnecting** until the process exits. A single failed
+//! connect does **not** drop the glass to silent SIM.
+//!
+//! Startup: resilient connect → capability probe (BIT) → DTC + Mode 01 / Ford DID poll.
 //! Optional **capture** via `MFD_OBD_CAPTURE` (same process owns Bluetooth — only one
 //! RFCOMM client can attach to the ELM).
 //! Optional **crush** via `MFD_OBD_CRUSH=1`: discover every Mode 01 PID + multi-module
@@ -12,9 +16,10 @@ use crate::auto::caps::VehicleCaps;
 use crate::auto::probe;
 use crate::auto::{DtcEntry, DtcKind, VehicleSnapshot};
 use crate::obd::capture::CaptureWriter;
+use crate::obd::error::Error as ObdError;
 use crate::obd::ford::{self, DecodedDid, HDR_ABS, HDR_BCM, HDR_IPC, HDR_PCM, HDR_PSCM};
 use crate::obd::j1979::{self, PRIORITY_PIDS};
-use crate::obd::session::Session;
+use crate::obd::session::{ConnectOpts, Session};
 use crate::obd::uds::{self, PROBE_DIDS};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -41,6 +46,8 @@ struct Telemetry {
     link_channel: String,
     adapter_id: String,
     protocol: String,
+    /// SEARCH · CONN · BIT · LIVE · RECONN
+    link_phase: String,
 }
 
 /// Background OBD poller (native stack).
@@ -52,17 +59,54 @@ pub struct ObdFeed {
 
 impl ObdFeed {
     /// Start if `MFD_OBD_PORT`, `MFD_OBD_BT`, or `MFD_OBD_REPLAY` is set.
+    ///
+    /// Starts the worker **immediately** even if the dongle is offline — the
+    /// worker keeps searching / reconnecting. Never fails open into silent SIM
+    /// when OBD env is configured.
     pub fn try_start_from_env() -> Option<Self> {
-        match Session::from_env() {
-            Ok(Some(session)) => Self::from_session(session).ok(),
-            Ok(None) => None,
+        let opts = ConnectOpts::from_env()?;
+        match Self::start_with_opts(opts) {
+            Ok(f) => Some(f),
             Err(e) => {
-                eprintln!("mfd obd: {e}");
+                eprintln!("mfd obd: failed to start feed thread: {e}");
                 None
             }
         }
     }
 
+    /// Start resilient feed from connect options (does not require a live session yet).
+    pub fn start_with_opts(opts: ConnectOpts) -> Result<Self, String> {
+        let (kind, addr, channel) = link_from_opts(&opts);
+        let stop = Arc::new(AtomicBool::new(false));
+        let tele = Arc::new(Mutex::new(Telemetry {
+            status: format!("SEARCH {kind} {addr}"),
+            caps: VehicleCaps {
+                phase: "SEARCH OBD".into(),
+                link: format!("{kind} {addr}"),
+                ..Default::default()
+            },
+            link_kind: kind,
+            link_addr: addr,
+            link_channel: channel,
+            link_phase: "SEARCH".into(),
+            ..Default::default()
+        }));
+        let stop_t = Arc::clone(&stop);
+        let tele_t = Arc::clone(&tele);
+
+        let join = thread::Builder::new()
+            .name("mfd-obd".into())
+            .spawn(move || supervisor_loop(opts, stop_t, tele_t))
+            .map_err(|e| e.to_string())?;
+
+        Ok(Self {
+            stop,
+            tele,
+            _join: Some(join),
+        })
+    }
+
+    /// Legacy: start from an already-open session (one-shot; no outer reconnect).
     pub fn from_session(session: Session) -> Result<Self, String> {
         let (kind, addr, channel) = link_from_env_and_name(session.name());
         let stop = Arc::new(AtomicBool::new(false));
@@ -78,6 +122,7 @@ impl ObdFeed {
             link_channel: channel,
             adapter_id: session.identity().to_string(),
             protocol: session.protocol().to_string(),
+            link_phase: "BIT".into(),
             ..Default::default()
         }));
         let stop_t = Arc::clone(&stop);
@@ -85,7 +130,11 @@ impl ObdFeed {
 
         let join = thread::Builder::new()
             .name("mfd-obd".into())
-            .spawn(move || run_loop(session, stop_t, tele_t))
+            .spawn(move || {
+                let mut cap = None;
+                let _ = run_session(session, &stop_t, &tele_t, &mut cap, false);
+                finish_cap(cap);
+            })
             .map_err(|e| e.to_string())?;
 
         Ok(Self {
@@ -115,6 +164,23 @@ impl ObdFeed {
                 } else {
                     t.link_addr.clone()
                 };
+                let phase = if t.link_phase.is_empty() {
+                    "…"
+                } else {
+                    t.link_phase.as_str()
+                };
+                if phase == "SEARCH" || phase == "RECONN" || phase == "CONN" {
+                    return format!(
+                        "{} {} · {addr} · {}",
+                        t.link_kind,
+                        phase,
+                        if t.status.is_empty() {
+                            "…"
+                        } else {
+                            &t.status
+                        }
+                    );
+                }
                 if !t.caps.ready {
                     format!(
                         "BIT {:.0}% {} · {} {}",
@@ -150,6 +216,124 @@ impl ObdFeed {
             })
             .unwrap_or_else(|_| "OBD lock".into())
     }
+}
+
+/// Outer loop: connect forever, run session, on link death reconnect.
+fn supervisor_loop(opts: ConnectOpts, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemetry>>) {
+    eprintln!(
+        "mfd obd: supervisor start (resilient connect) · {}",
+        opts.bt_mac
+            .as_deref()
+            .or(opts.serial_path.as_deref())
+            .unwrap_or("replay")
+    );
+    let mut cap: Option<CaptureWriter> = None;
+    let mut ever_live = false;
+    while !stop.load(Ordering::Relaxed) {
+        let phase = if ever_live { "RECONN" } else { "SEARCH" };
+        set_phase(
+            &tele,
+            phase,
+            if ever_live { "reconnect" } else { "searching" },
+        );
+
+        let session = match Session::connect_resilient(&opts, &stop, |msg| {
+            set_phase(&tele, if ever_live { "RECONN" } else { "CONN" }, msg);
+        }) {
+            Ok(s) => s,
+            Err(e) => {
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                eprintln!("mfd obd: connect aborted: {e}");
+                thread::sleep(Duration::from_secs(1));
+                continue;
+            }
+        };
+
+        // Refresh address from live transport name (bt://MAC:ch).
+        if let Ok(mut t) = tele.lock() {
+            let name = session.name().to_string();
+            if let Some(rest) = name.strip_prefix("bt://") {
+                if let Some((mac, ch)) = rest.split_once(':') {
+                    t.link_addr = mac.to_string();
+                    t.link_channel = ch.to_string();
+                } else {
+                    t.link_addr = rest.to_string();
+                }
+            }
+            t.adapter_id = session.identity().to_string();
+            t.protocol = session.protocol().to_string();
+            t.error = None;
+            t.link_phase = "BIT".into();
+            t.status = format!("probe {}", session.name());
+        }
+
+        let adapter = format!("{} · {}", session.name(), session.protocol());
+        if cap.is_none() {
+            cap = open_capture(&adapter);
+            if let Some(ref c) = cap {
+                if let Ok(mut t) = tele.lock() {
+                    t.capture_dir = Some(c.dir().display().to_string());
+                }
+            }
+        }
+
+        match run_session(session, &stop, &tele, &mut cap, ever_live) {
+            SessionEnd::Stop => break,
+            SessionEnd::LinkLost(reason) => {
+                ever_live = true;
+                eprintln!("mfd obd: link lost ({reason}) — reconnecting…");
+                if let Ok(mut t) = tele.lock() {
+                    t.error = Some(reason);
+                    t.link_phase = "RECONN".into();
+                }
+                // Brief pause before next connect (avoid spin).
+                thread::sleep(Duration::from_millis(800));
+            }
+        }
+    }
+    finish_cap(cap);
+    eprintln!("mfd obd: supervisor stop");
+}
+
+fn set_phase(tele: &Arc<Mutex<Telemetry>>, phase: &str, detail: &str) {
+    if let Ok(mut t) = tele.lock() {
+        t.link_phase = phase.into();
+        t.status = detail.into();
+        if !t.caps.ready {
+            t.caps.phase = match phase {
+                "SEARCH" => "SEARCH OBD".into(),
+                "RECONN" => "RECONNECT".into(),
+                "CONN" => "CONNECTING".into(),
+                _ => detail.into(),
+            };
+            t.caps.link = format!("{} {}", t.link_kind, t.link_addr);
+        }
+        // Keep glass honest while hunting: not LIVE.
+        if phase == "SEARCH" || phase == "RECONN" || phase == "CONN" {
+            t.error = Some(detail.into());
+        }
+    }
+}
+
+enum SessionEnd {
+    Stop,
+    LinkLost(String),
+}
+
+/// Resolve link kind / address / channel from connect options.
+fn link_from_opts(opts: &ConnectOpts) -> (String, String, String) {
+    if let Some(ref mac) = opts.bt_mac {
+        return ("BT".into(), mac.clone(), opts.bt_channel.to_string());
+    }
+    if let Some(ref port) = opts.serial_path {
+        return ("SERIAL".into(), port.clone(), "-".into());
+    }
+    if let Some(ref rep) = opts.replay {
+        return ("REPLAY".into(), rep.display().to_string(), "-".into());
+    }
+    ("OBD".into(), "—".into(), "-".into())
 }
 
 /// Resolve link kind / address / channel for glass from env + transport name.
@@ -317,17 +501,15 @@ struct LiveDid {
     name: &'static str,
 }
 
-fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemetry>>) {
-    let adapter = format!("{} · {}", session.name(), session.protocol());
+fn run_session(
+    mut session: Session,
+    stop: &AtomicBool,
+    tele: &Arc<Mutex<Telemetry>>,
+    cap: &mut Option<CaptureWriter>,
+    skip_full_probe: bool,
+) -> SessionEnd {
     // Refresh adapter identity / protocol after session is live.
     if let Ok(mut t) = tele.lock() {
-        if t.adapter_id.is_empty() {
-            t.adapter_id = session.identity().to_string();
-        }
-        if t.protocol.is_empty() {
-            t.protocol = session.protocol().to_string();
-        }
-        // Prefer ATI / ATDP once available
         let id = session.identity().to_string();
         let proto = session.protocol().to_string();
         if !id.is_empty() {
@@ -336,12 +518,8 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
         if !proto.is_empty() {
             t.protocol = proto;
         }
-    }
-    let mut cap = open_capture(&adapter);
-    if let Some(ref c) = cap {
-        if let Ok(mut t) = tele.lock() {
-            t.capture_dir = Some(c.dir().display().to_string());
-        }
+        t.link_phase = "BIT".into();
+        t.error = None;
     }
     // Discover phase: full wire log; continuous poll samples frames (signals always).
     if let Some(c) = cap.as_mut() {
@@ -349,27 +527,41 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
     }
     let crush = env_truthy("MFD_OBD_CRUSH");
 
-    // ── BIT / capability probe first ──────────────────────────────────────
-    let mut caps = probe::run_live_probe(&mut session);
-    // run_live_probe already finalizes pages; ensure cache even if path changes.
-    if caps.page_list.is_empty() {
-        caps.finalize_pages();
-    }
-    if let Ok(mut t) = tele.lock() {
-        t.caps = caps;
+    // ── BIT / capability probe (full on first link; light re-init after reconnect) ──
+    let need_probe = !skip_full_probe
+        || tele
+            .lock()
+            .map(|t| !t.caps.ready || t.caps.page_list.is_empty())
+            .unwrap_or(true);
+    if need_probe {
+        let mut caps = probe::run_live_probe(&mut session);
+        if caps.page_list.is_empty() {
+            caps.finalize_pages();
+        }
+        if let Ok(mut t) = tele.lock() {
+            let link = format!("{} {}", t.link_kind, t.link_addr);
+            caps.link = link;
+            t.caps = caps;
+            t.status = format!("live {}", session.name());
+            t.adapter_id = session.identity().to_string();
+            t.protocol = session.protocol().to_string();
+            t.link_phase = "LIVE".into();
+            t.error = None;
+        }
+    } else if let Ok(mut t) = tele.lock() {
         t.status = format!("live {}", session.name());
+        t.link_phase = "LIVE".into();
+        t.error = None;
         t.adapter_id = session.identity().to_string();
         t.protocol = session.protocol().to_string();
-        t.caps.link = format!("{} {}", t.link_kind, t.link_addr);
     }
     if stop.load(Ordering::Relaxed) {
-        finish_cap(cap);
-        return;
+        return SessionEnd::Stop;
     }
 
     // Mode 09 VIN + extras
     if let Ok(vin) = session.read_vin_mode09() {
-        cap_frame(&mut cap, "rx", &format!("VIN:{vin}"), Some("mode09"));
+        cap_frame(cap, "rx", &format!("VIN:{vin}"), Some("mode09"));
         if let Some(c) = cap.as_mut() {
             c.set_vin(&vin);
         }
@@ -378,14 +570,14 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
         }
     }
     for cmd in ["090A", "0904", "0906"] {
-        cap_frame(&mut cap, "tx", cmd, Some("mode09"));
+        cap_frame(cap, "tx", cmd, Some("mode09"));
         match session.request_raw(cmd) {
-            Ok(b) => cap_frame(&mut cap, "rx", &uds::hex_bytes(&b), Some("mode09")),
-            Err(e) => cap_frame(&mut cap, "rx", &format!("ERR:{e}"), Some("mode09")),
+            Ok(b) => cap_frame(cap, "rx", &uds::hex_bytes(&b), Some("mode09")),
+            Err(e) => cap_frame(cap, "rx", &format!("ERR:{e}"), Some("mode09")),
         }
     }
 
-    load_dtcs(&mut session, &tele, &mut cap);
+    load_dtcs(&mut session, tele, cap);
     let _ = ford::prepare_pcm_read(&mut session);
 
     // Discover Mode 01 PIDs (always when live; essential for crush)
@@ -403,7 +595,7 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
             .map(|p| format!("{p:02X}"))
             .collect::<Vec<_>>()
             .join(",");
-        cap_frame(&mut cap, "rx", &format!("PIDS:{list}"), Some("discover"));
+        cap_frame(cap, "rx", &format!("PIDS:{list}"), Some("discover"));
         eprintln!("mfd obd: {} Mode 01 PIDs", poll_pids.len());
     }
 
@@ -424,7 +616,7 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
                 break;
             }
             eprintln!("mfd obd: UDS module {mod_name} {hdr}");
-            cap_frame(&mut cap, "tx", &format!("ATSH{hdr}"), Some(mod_name));
+            cap_frame(cap, "tx", &format!("ATSH{hdr}"), Some(mod_name));
             let _ = session.elm_mut().set_header(hdr);
             let _ = session.extended_session();
             let _ = session.tester_present();
@@ -433,10 +625,10 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
                     break;
                 }
                 let req = format!("22{did:04X}");
-                cap_frame(&mut cap, "tx", &req, Some(name));
+                cap_frame(cap, "tx", &req, Some(name));
                 match session.read_did(hdr, did) {
                     Ok(data) => {
-                        cap_frame(&mut cap, "rx", &uds::hex_bytes(&data), Some(name));
+                        cap_frame(cap, "rx", &uds::hex_bytes(&data), Some(name));
                         live_dids.push(LiveDid {
                             header: hdr.into(),
                             did,
@@ -444,7 +636,7 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
                         });
                     }
                     Err(e) => {
-                        cap_frame(&mut cap, "rx", &format!("ERR:{e}"), Some(name));
+                        cap_frame(cap, "rx", &format!("ERR:{e}"), Some(name));
                     }
                 }
             }
@@ -455,11 +647,11 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
                     }
                     let _ = session.elm_mut().set_header(def.header);
                     let req = format!("22{:04X}", def.did);
-                    cap_frame(&mut cap, "tx", &req, Some(def.name));
+                    cap_frame(cap, "tx", &req, Some(def.name));
                     match ford::read_did(&mut session, def) {
                         Ok(DecodedDid::Number { name, value, unit }) => {
-                            cap_frame(&mut cap, "rx", &format!("{value}"), Some(name));
-                            cap_signal(&mut cap, name, value, unit, 0x22, (def.did & 0xFF) as u8);
+                            cap_frame(cap, "rx", &format!("{value}"), Some(name));
+                            cap_signal(cap, name, value, unit, 0x22, (def.did & 0xFF) as u8);
                             if let Ok(mut t) = tele.lock() {
                                 t.values.insert(name.to_string(), value);
                             }
@@ -470,7 +662,7 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
                             });
                         }
                         Ok(DecodedDid::Text { name, value }) => {
-                            cap_frame(&mut cap, "rx", &value, Some(name));
+                            cap_frame(cap, "rx", &value, Some(name));
                             if name == "vin" && value.len() >= 11 {
                                 if let Some(c) = cap.as_mut() {
                                     c.set_vin(&value);
@@ -486,7 +678,7 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
                             });
                         }
                         Ok(DecodedDid::Hex { name, value }) => {
-                            cap_frame(&mut cap, "rx", &value, Some(name));
+                            cap_frame(cap, "rx", &value, Some(name));
                             live_dids.push(LiveDid {
                                 header: def.header.into(),
                                 did: def.did,
@@ -494,7 +686,7 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
                             });
                         }
                         Err(e) => {
-                            cap_frame(&mut cap, "rx", &format!("ERR:{e}"), Some(def.name));
+                            cap_frame(cap, "rx", &format!("ERR:{e}"), Some(def.name));
                         }
                     }
                 }
@@ -503,7 +695,7 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
         live_dids.sort_by(|a, b| (a.header.as_str(), a.did).cmp(&(b.header.as_str(), b.did)));
         live_dids.dedup_by(|a, b| a.header == b.header && a.did == b.did);
         cap_frame(
-            &mut cap,
+            cap,
             "rx",
             &format!("LIVE_DIDS:{}", live_dids.len()),
             Some("discover"),
@@ -524,6 +716,7 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
     let mut fi = 0usize;
     let mut di = 0usize;
     let mut keep = 0u32;
+    let mut hard_fails = 0u32;
     let link_name = session.name().to_string();
     while !stop.load(Ordering::Relaxed) {
         keep = keep.wrapping_add(1);
@@ -532,10 +725,10 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
         }
         // DTC refresh less often — expensive and allocates.
         if keep % 200 == 1 {
-            load_dtcs(&mut session, &tele, &mut cap);
+            load_dtcs(&mut session, tele, cap);
         }
         if keep % 40 == 0 {
-            cap_frame(&mut cap, "tx", "3E80", Some("TesterPresent"));
+            cap_frame(cap, "tx", "3E80", Some("TesterPresent"));
             let _ = session.tester_present();
         }
 
@@ -544,18 +737,18 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
             let def = ford_dids[fi % ford_dids.len()];
             fi = fi.wrapping_add(1);
             let req = format!("22{:04X}", def.did);
-            cap_frame(&mut cap, "tx", &req, Some(def.name));
+            cap_frame(cap, "tx", &req, Some(def.name));
             match ford::read_did(&mut session, def) {
                 Ok(DecodedDid::Number { name, value, unit }) => {
-                    cap_frame(&mut cap, "rx", &format!("{value}"), Some(name));
-                    cap_signal(&mut cap, name, value, unit, 0x22, (def.did & 0xFF) as u8);
+                    cap_frame(cap, "rx", &format!("{value}"), Some(name));
+                    cap_signal(cap, name, value, unit, 0x22, (def.did & 0xFF) as u8);
                     if let Ok(mut t) = tele.lock() {
                         set_value(&mut t, name, value);
                         t.ticks = t.ticks.wrapping_add(1);
                     }
                 }
                 Ok(DecodedDid::Text { name: "vin", value }) => {
-                    cap_frame(&mut cap, "rx", &value, Some("vin"));
+                    cap_frame(cap, "rx", &value, Some("vin"));
                     if value.len() >= 11 {
                         if let Some(c) = cap.as_mut() {
                             c.set_vin(&value);
@@ -571,10 +764,10 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
                         DecodedDid::Hex { name, value } => (name, value),
                         DecodedDid::Number { name, value, .. } => (name, format!("{value}")),
                     };
-                    cap_frame(&mut cap, "rx", &s, Some(n));
+                    cap_frame(cap, "rx", &s, Some(n));
                 }
                 Err(e) => {
-                    cap_frame(&mut cap, "rx", &format!("ERR:{e}"), Some(def.name));
+                    cap_frame(cap, "rx", &format!("ERR:{e}"), Some(def.name));
                 }
             }
         }
@@ -584,14 +777,14 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
             let entry = &live_dids[di % live_dids.len()];
             di = di.wrapping_add(1);
             let req = format!("22{:04X}", entry.did);
-            cap_frame(&mut cap, "tx", &req, Some(entry.name));
+            cap_frame(cap, "tx", &req, Some(entry.name));
             match session.read_did(&entry.header, entry.did) {
                 Ok(data) => {
                     let hex = uds::hex_bytes(&data);
-                    cap_frame(&mut cap, "rx", &hex, Some(entry.name));
+                    cap_frame(cap, "rx", &hex, Some(entry.name));
                     if let Some(&b0) = data.first() {
                         cap_signal(
-                            &mut cap,
+                            cap,
                             entry.name,
                             b0 as f64,
                             "raw",
@@ -601,7 +794,7 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
                     }
                 }
                 Err(e) => {
-                    cap_frame(&mut cap, "rx", &format!("ERR:{e}"), Some(entry.name));
+                    cap_frame(cap, "rx", &format!("ERR:{e}"), Some(entry.name));
                 }
             }
         }
@@ -610,7 +803,7 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
         let pid = poll_pids[i % poll_pids.len()];
         i = i.wrapping_add(1);
         let cmd = j1979::mode01_command(pid);
-        cap_frame(&mut cap, "tx", &cmd, None);
+        cap_frame(cap, "tx", &cmd, None);
         match session.read_pid(pid) {
             Ok(v) => {
                 let key: &str = if v.name == "pid_raw" {
@@ -638,12 +831,14 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
                 } else {
                     v.name
                 };
-                cap_frame(&mut cap, "rx", &format!("OK:{:02X}", v.pid), Some(key));
-                cap_signal(&mut cap, key, v.value, v.unit, v.mode, v.pid);
+                cap_frame(cap, "rx", &format!("OK:{:02X}", v.pid), Some(key));
+                cap_signal(cap, key, v.value, v.unit, v.mode, v.pid);
+                hard_fails = 0;
                 if let Ok(mut t) = tele.lock() {
                     set_value(&mut t, key, v.value);
                     t.ticks = t.ticks.wrapping_add(1);
                     t.error = None;
+                    t.link_phase = "LIVE".into();
                     // Avoid format! every poll — reuse status when stable.
                     if !t.status.starts_with("live ") {
                         t.status.clear();
@@ -654,9 +849,17 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
             }
             Err(e) => {
                 // Only log continuous errors sparsely (sampled frames handle this).
-                cap_frame(&mut cap, "rx", &format!("ERR:{e}"), None);
+                cap_frame(cap, "rx", &format!("ERR:{e}"), None);
+                let msg = e.to_string();
+                if is_hard_link_error(&e) {
+                    hard_fails = hard_fails.saturating_add(1);
+                    if hard_fails >= 8 {
+                        return SessionEnd::LinkLost(msg);
+                    }
+                } else {
+                    hard_fails = 0;
+                }
                 if let Ok(mut t) = tele.lock() {
-                    let msg = e.to_string();
                     if !msg.contains("NO DATA") {
                         t.error = Some(msg);
                     }
@@ -673,7 +876,18 @@ fn run_loop(mut session: Session, stop: Arc<AtomicBool>, tele: Arc<Mutex<Telemet
         thread::sleep(Duration::from_millis(if crush { 15 } else { 25 }));
     }
 
-    finish_cap(cap);
+    SessionEnd::Stop
+}
+
+fn is_hard_link_error(e: &ObdError) -> bool {
+    matches!(
+        e,
+        ObdError::Io(_)
+            | ObdError::NotOpen
+            | ObdError::Timeout
+            | ObdError::Adapter(_)
+            | ObdError::Serial(_)
+    )
 }
 
 fn finish_cap(cap: Option<CaptureWriter>) {
@@ -737,12 +951,13 @@ fn apply_telemetry(t: &Telemetry, v: &mut VehicleSnapshot) {
         .map(|p| short_path(p))
         .unwrap_or_default();
     assign_str(&mut v.bus_capture, &cap);
-    let state = if !t.caps.ready {
-        "BIT"
-    } else if t.error.is_some() {
-        "ERR"
-    } else {
-        "LIVE"
+    let state = match t.link_phase.as_str() {
+        "SEARCH" => "SEARCH",
+        "RECONN" => "RECONN",
+        "CONN" => "CONN",
+        _ if !t.caps.ready => "BIT",
+        _ if t.error.is_some() => "ERR",
+        _ => "LIVE",
     };
     assign_str(&mut v.bus_state, state);
     if let Some(e) = &t.error {

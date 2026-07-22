@@ -1,4 +1,7 @@
 //! Byte-level transports: serial path and Bluetooth RFCOMM.
+//!
+//! Linux Bluetooth: RFCOMM SPP sockets + optional BlueZ (`bluetoothctl`) assist
+//! for power-on, connect, and OBD-like device discovery.
 
 use crate::obd::error::{Error, Result};
 use std::io::{Read, Write};
@@ -121,9 +124,12 @@ impl Transport for SerialTransport {
 mod bt {
     use super::*;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::process::Command;
 
     const AF_BLUETOOTH: libc::c_int = 31;
     const BTPROTO_RFCOMM: libc::c_int = 3;
+    /// Connect wait when socket is non-blocking (adapter may be waking).
+    const CONNECT_WAIT: Duration = Duration::from_secs(8);
 
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -168,6 +174,93 @@ mod bt {
         Ok(BdAddr { b: parts })
     }
 
+    /// Name looks like a classic OBD / ELM / STN adapter.
+    pub fn name_looks_like_obd(name: &str) -> bool {
+        let u = name.to_ascii_uppercase();
+        const KEYS: &[&str] = &[
+            "OBD", "ELM", "STN", "OBDLINK", "VLINKER", "VEEPEAK", "OBDII", "OBD2", "MX+",
+            "SCANTOOL", "PLX", "BAFX", "KONNWEI", "CARISTA", "FIXD", "LELINK", "CGDI",
+        ];
+        KEYS.iter().any(|k| u.contains(k))
+    }
+
+    /// Power controller on (best effort).
+    pub fn bluez_power_on() {
+        let _ = Command::new("bluetoothctl").args(["power", "on"]).output();
+    }
+
+    /// Ask BlueZ to connect classic profile (helps some dongles before RFCOMM).
+    pub fn bluez_connect(mac: &str) {
+        let Some(mac) = normalize_mac(mac) else {
+            return;
+        };
+        let _ = Command::new("bluetoothctl")
+            .args(["connect", &mac])
+            .output();
+    }
+
+    /// Trust device (best effort; reduces re-pair prompts).
+    pub fn bluez_trust(mac: &str) {
+        let Some(mac) = normalize_mac(mac) else {
+            return;
+        };
+        let _ = Command::new("bluetoothctl").args(["trust", &mac]).output();
+    }
+
+    /// Paired/known devices from `bluetoothctl devices` as `(mac, name)`.
+    pub fn list_bluez_devices() -> Vec<(String, String)> {
+        let Ok(out) = Command::new("bluetoothctl").args(["devices"]).output() else {
+            return Vec::new();
+        };
+        if !out.status.success() {
+            return Vec::new();
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut list = Vec::new();
+        for line in text.lines() {
+            // "Device AA:BB:CC:DD:EE:FF Name here"
+            let line = line.trim();
+            let rest = line.strip_prefix("Device ").unwrap_or(line);
+            let mut parts = rest.splitn(2, char::is_whitespace);
+            let Some(mac_raw) = parts.next() else {
+                continue;
+            };
+            let Some(mac) = normalize_mac(mac_raw) else {
+                continue;
+            };
+            let name = parts.next().unwrap_or("").trim().to_string();
+            list.push((mac, name));
+        }
+        list
+    }
+
+    /// MACs that look like OBD adapters (paired/known), preferred MAC first if given.
+    pub fn discover_obd_macs(preferred: Option<&str>) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(p) = preferred.and_then(normalize_mac) {
+            out.push(p);
+        }
+        for (mac, name) in list_bluez_devices() {
+            if name_looks_like_obd(&name) && !out.iter().any(|m| m == &mac) {
+                out.push(mac);
+            }
+        }
+        // Also include any device whose MAC was preferred already handled.
+        // If nothing OBD-like found, keep preferred only (retry that forever).
+        out
+    }
+
+    /// Common SPP channels to try after the configured channel fails.
+    pub fn rfcomm_channel_candidates(preferred: u8) -> Vec<u8> {
+        let mut ch = vec![preferred];
+        for c in [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] {
+            if !ch.contains(&c) {
+                ch.push(c);
+            }
+        }
+        ch
+    }
+
     pub struct BtSppTransport {
         label: String,
         mac: String,
@@ -182,12 +275,43 @@ mod bt {
             let mac = normalize_mac(&raw)
                 .ok_or_else(|| Error::Adapter(format!("invalid Bluetooth MAC: {raw}")))?;
             Ok(Self {
-                label: format!("bt://{mac}"),
+                label: format!("bt://{mac}:{channel}"),
                 mac,
                 channel,
                 timeout,
                 fd: None,
             })
+        }
+
+        pub fn mac(&self) -> &str {
+            &self.mac
+        }
+
+        pub fn channel(&self) -> u8 {
+            self.channel
+        }
+    }
+
+    fn set_socket_timeouts(fd: libc::c_int, timeout: Duration) {
+        let tv = libc::timeval {
+            tv_sec: timeout.as_secs() as libc::time_t,
+            tv_usec: timeout.subsec_micros() as libc::suseconds_t,
+        };
+        unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_RCVTIMEO,
+                &tv as *const _ as *const libc::c_void,
+                std::mem::size_of::<libc::timeval>() as libc::socklen_t,
+            );
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_SNDTIMEO,
+                &tv as *const _ as *const libc::c_void,
+                std::mem::size_of::<libc::timeval>() as libc::socklen_t,
+            );
         }
     }
 
@@ -197,9 +321,22 @@ mod bt {
         }
 
         fn open(&mut self) -> Result<()> {
+            // BlueZ assist: ensure adapter is powered and classic link is up.
+            bluez_power_on();
+            bluez_trust(&self.mac);
+            bluez_connect(&self.mac);
+            std::thread::sleep(Duration::from_millis(300));
+
             let fd = unsafe { libc::socket(AF_BLUETOOTH, libc::SOCK_STREAM, BTPROTO_RFCOMM) };
             if fd < 0 {
                 return Err(Error::Io(std::io::Error::last_os_error()));
+            }
+            // Non-blocking connect with deadline so a dead dongle does not hang forever.
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+            if flags >= 0 {
+                unsafe {
+                    libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+                }
             }
             let owned = unsafe { OwnedFd::from_raw_fd(fd) };
             let addr = SockaddrRc {
@@ -215,35 +352,65 @@ mod bt {
                 )
             };
             if rc != 0 {
-                return Err(Error::Adapter(format!(
-                    "RFCOMM connect {}:{}: {}",
-                    self.mac,
-                    self.channel,
-                    std::io::Error::last_os_error()
-                )));
+                let err = std::io::Error::last_os_error();
+                let einprogress = err.raw_os_error() == Some(libc::EINPROGRESS)
+                    || err.kind() == std::io::ErrorKind::WouldBlock;
+                if !einprogress {
+                    return Err(Error::Adapter(format!(
+                        "RFCOMM connect {}:{}: {err}",
+                        self.mac, self.channel
+                    )));
+                }
+                // Wait for writable (connected) or error.
+                let mut pfd = libc::pollfd {
+                    fd: owned.as_raw_fd(),
+                    events: libc::POLLOUT,
+                    revents: 0,
+                };
+                let ms = CONNECT_WAIT.as_millis().min(i32::MAX as u128) as libc::c_int;
+                let pr = unsafe { libc::poll(&mut pfd, 1, ms) };
+                if pr == 0 {
+                    return Err(Error::Adapter(format!(
+                        "RFCOMM connect {}:{}: timeout ({CONNECT_WAIT:?})",
+                        self.mac, self.channel
+                    )));
+                }
+                if pr < 0 {
+                    return Err(Error::Io(std::io::Error::last_os_error()));
+                }
+                let mut so_err: libc::c_int = 0;
+                let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+                let gr = unsafe {
+                    libc::getsockopt(
+                        owned.as_raw_fd(),
+                        libc::SOL_SOCKET,
+                        libc::SO_ERROR,
+                        &mut so_err as *mut _ as *mut libc::c_void,
+                        &mut len,
+                    )
+                };
+                if gr != 0 {
+                    return Err(Error::Io(std::io::Error::last_os_error()));
+                }
+                if so_err != 0 {
+                    return Err(Error::Adapter(format!(
+                        "RFCOMM connect {}:{}: {}",
+                        self.mac,
+                        self.channel,
+                        std::io::Error::from_raw_os_error(so_err)
+                    )));
+                }
             }
-            // Socket timeouts
-            let tv = libc::timeval {
-                tv_sec: self.timeout.as_secs() as libc::time_t,
-                tv_usec: (self.timeout.subsec_micros()) as libc::suseconds_t,
-            };
-            unsafe {
-                libc::setsockopt(
-                    owned.as_raw_fd(),
-                    libc::SOL_SOCKET,
-                    libc::SO_RCVTIMEO,
-                    &tv as *const _ as *const libc::c_void,
-                    std::mem::size_of::<libc::timeval>() as libc::socklen_t,
-                );
-                libc::setsockopt(
-                    owned.as_raw_fd(),
-                    libc::SOL_SOCKET,
-                    libc::SO_SNDTIMEO,
-                    &tv as *const _ as *const libc::c_void,
-                    std::mem::size_of::<libc::timeval>() as libc::socklen_t,
-                );
+            // Back to blocking + I/O timeouts for ELM text protocol.
+            let flags = unsafe { libc::fcntl(owned.as_raw_fd(), libc::F_GETFL) };
+            if flags >= 0 {
+                unsafe {
+                    libc::fcntl(owned.as_raw_fd(), libc::F_SETFL, flags & !libc::O_NONBLOCK);
+                }
             }
+            set_socket_timeouts(owned.as_raw_fd(), self.timeout);
             self.fd = Some(owned);
+            self.label = format!("bt://{}:{}", self.mac, self.channel);
             Ok(())
         }
 
@@ -302,9 +469,69 @@ mod bt {
 }
 
 #[cfg(target_os = "linux")]
-pub use bt::{normalize_mac, BtSppTransport};
+pub use bt::{
+    bluez_connect, bluez_power_on, bluez_trust, discover_obd_macs, list_bluez_devices,
+    name_looks_like_obd, normalize_mac, rfcomm_channel_candidates, BtSppTransport,
+};
 
 #[cfg(not(target_os = "linux"))]
 pub fn normalize_mac(mac: &str) -> Option<String> {
-    Some(mac.to_string())
+    let parts: Vec<&str> = mac.split([':', '-']).collect();
+    if parts.len() != 6 {
+        return None;
+    }
+    Some(
+        parts
+            .iter()
+            .map(|p| p.to_ascii_uppercase())
+            .collect::<Vec<_>>()
+            .join(":"),
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn discover_obd_macs(preferred: Option<&str>) -> Vec<String> {
+    preferred.and_then(normalize_mac).into_iter().collect()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn rfcomm_channel_candidates(preferred: u8) -> Vec<u8> {
+    vec![preferred]
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn bluez_power_on() {}
+
+#[cfg(not(target_os = "linux"))]
+pub fn bluez_connect(_mac: &str) {}
+
+#[cfg(not(target_os = "linux"))]
+pub fn name_looks_like_obd(name: &str) -> bool {
+    let u = name.to_ascii_uppercase();
+    u.contains("OBD") || u.contains("ELM")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mac_normalize() {
+        assert_eq!(
+            normalize_mac("00:04:3e:96:b8:f1").as_deref(),
+            Some("00:04:3E:96:B8:F1")
+        );
+        assert_eq!(
+            normalize_mac("00-04-3E-96-B8-F1").as_deref(),
+            Some("00:04:3E:96:B8:F1")
+        );
+        assert!(normalize_mac("bad").is_none());
+    }
+
+    #[test]
+    fn obd_name_filter() {
+        assert!(name_looks_like_obd("OBDLink MX+ 41832"));
+        assert!(name_looks_like_obd("ELM327 v1.5"));
+        assert!(!name_looks_like_obd("HHKB-Hybrid_1"));
+    }
 }

@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Bluetooth OBD link robustness:** feed always starts when `MFD_OBD_BT` is set; keeps searching (preferred MAC + OBD-named paired devices, RFCOMM channel scan, BlueZ connect assist); reconnects after link loss; glass shows SEARCH/RECONN. `cmfd.sh` powers BlueZ and pre-connects. Pair once with `bluetoothctl`. Refs #119.
 - **Long-run slowdown / host bog:** capture uses BufWriter + sampled continuous frames (default) and change-gated signals; less flush thrash. HashMap keys reused; Kitty base64 encode-into; SIM in-place update; GO page list cached; caps frozen after BIT (no HashSet clone every frame). Demo probe no longer rebuilds `demo_complete` every tick. Full wire log: `MFD_OBD_CAPTURE_FULL=1`. Refs #117.
 
 ### Added

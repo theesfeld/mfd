@@ -19,13 +19,16 @@
 //! # Env
 //! | Variable | Meaning |
 //! |----------|---------|
-//! | `MFD_OBD_BT=AA:BB:…` | Bluetooth classic MAC (SPP) |
-//! | `MFD_OBD_BT_CHANNEL=1` | RFCOMM channel (default 1) |
+//! | `MFD_OBD_BT=AA:BB:…` | Bluetooth classic MAC (SPP); feed **keeps searching** until up |
+//! | `MFD_OBD_BT_CHANNEL=1` | Preferred RFCOMM channel (others tried on failure) |
 //! | `MFD_OBD_PORT=/dev/ttyUSB0` | Serial / rfcomm device |
 //! | `MFD_OBD_BAUD=115200` | Serial baud |
 //! | `MFD_OBD_REPLAY=path` | Capture dir or frames.ndjson |
 //! | `MFD_OBD_CAPTURE=dir` | Live capture dir (same process as glass) |
 //! | `MFD_OBD_CRUSH=1` | Discover all Mode 01 PIDs + multi-module UDS |
+//!
+//! Bluetooth: BlueZ assist (`bluetoothctl power/connect`), OBD-name discovery among
+//! paired devices, channel scan, and reconnect after link loss. Pair the dongle once.
 
 #![cfg(feature = "obd")]
 
@@ -49,3 +52,5 @@ pub use j1979::{
     PRIORITY_PIDS,
 };
 pub use session::{ConnectOpts, Session};
+// transport helpers used by capture tool / tests
+pub use transport::{discover_obd_macs, normalize_mac};

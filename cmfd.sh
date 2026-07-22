@@ -41,6 +41,30 @@ export MFD_OBD_BT_CHANNEL="${MFD_OBD_BT_CHANNEL:-1}"
 export MFD_HZ="${MFD_HZ:-30}"
 export MFD_OBD_CRUSH="${MFD_OBD_CRUSH:-1}"
 
+# Best-effort BlueZ bring-up before glass (pairing still required once).
+ensure_bt_obd() {
+  local mac="${MFD_OBD_BT:-}"
+  if [[ -z "$mac" || -n "${MFD_OBD_PORT:-}" || -n "${MFD_OBD_REPLAY:-}" ]]; then
+    return 0
+  fi
+  if ! command -v bluetoothctl >/dev/null 2>&1; then
+    echo "cmfd: bluetoothctl not found — RFCOMM only (no BlueZ assist)"
+    return 0
+  fi
+  echo "cmfd: BlueZ power on + connect $mac (OBD dongle)"
+  bluetoothctl power on >/dev/null 2>&1 || true
+  bluetoothctl trust "$mac" >/dev/null 2>&1 || true
+  # connect may fail if dongle is off — cmfd keeps searching
+  if bluetoothctl connect "$mac" >/dev/null 2>&1; then
+    echo "cmfd: BlueZ connect OK · $mac"
+  else
+    echo "cmfd: BlueZ connect pending · $mac"
+    echo "  If unpaired: put dongle in pairing mode, then:"
+    echo "    bluetoothctl pair $mac && bluetoothctl trust $mac && bluetoothctl connect $mac"
+    echo "  cmfd will keep searching for OBD Bluetooth until the link is up."
+  fi
+}
+
 MODE="${1:-drive}"
 if [[ "${1:-}" == "capture" || "${1:-}" == "glass" || "${1:-}" == "drive" || "${1:-}" == "build" ]]; then
   shift || true
@@ -86,6 +110,7 @@ case "$MODE" in
   glass)
     build_release
     unset MFD_OBD_CAPTURE || true
+    ensure_bt_obd
     print_env
     echo "cmfd: glass only (live if OBD env set) → $CMFD_BIN"
     exec "$CMFD_BIN" "$@"
@@ -110,6 +135,7 @@ case "$MODE" in
           ;;
       esac
     done
+    ensure_bt_obd
     print_env
     echo "cmfd: headless crush capture → $CAP  (${SECS}s)"
     echo "cmfd: files: frames.ndjson  signals.csv  meta.toml  session.json"
@@ -134,11 +160,13 @@ case "$MODE" in
     mkdir -p "$CAP"
     export MFD_OBD_CAPTURE="$CAP"
     export MFD_OBD_CRUSH=1
+    ensure_bt_obd
     print_env
     echo "cmfd: LIVE DRIVE"
     echo "  glass:   $CMFD_BIN"
     echo "  capture: $CAP"
     echo "  crush:   Mode 01 discover + multi-module UDS + continuous poll"
+    echo "  BT:      keeps searching / reconnecting until OBD is up"
     echo "  note:    one BT adapter — capture is inside cmfd (not a second process)"
     echo "  quit:    Esc  →  capture files finalize on exit"
     echo ""
