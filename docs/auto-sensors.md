@@ -1,5 +1,17 @@
 # Auto sensors — camera, OBD, range
 
+**Hardware product target** (4×4 panel, physical OSB, vehicle-first attitude): see [`hardware.md`](hardware.md) and Issue [#71](https://github.com/theesfeld/mfd/issues/71).
+
+## Attitude / heading source order
+
+1. **Vehicle OBD / CAN / UDS** (preferred — dash already shows angles/heading in mode)
+2. Host smoothing / last-good
+3. On-MFD gyro / IMU (fallback only)
+4. On-MFD compass (fallback only)
+5. Demo synthetic motion
+
+Mode 01 does not provide pitch/roll/heading. Discover DIDs with `mfd-obd-capture --uds` on the truck.
+
 ## Camera / FLIR
 
 | Env | Meaning |

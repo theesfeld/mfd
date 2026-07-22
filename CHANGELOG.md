@@ -4,6 +4,7 @@
 
 ### Changed
 
+- **Hardware target docs:** physical ~4×4 MFD + OSB; attitude/heading from **vehicle OBD/CAN/UDS first**; on-box gyro/compass fallback only. `docs/hardware.md`. Refs #71.
 - **Native OBD** (`mfd::obd`): Bluetooth SPP + serial ELM, J1979, UDS 0x10/0x22/0x3E (0x27 gated), ISO-TP helpers, capture/replay. Drops path dep on obdtui. Tool: `mfd-obd-capture`. Refs #68.
 - **ATT** sphere: limb shading, bank pointer, pitch ladder, **compass marks on the horizon** (N/NE/E…). **MAP** demo scrolls world under heading-up ownship. **Tape gauges** use filled bars (F-16 FUEL language — keep tapes). Refs #67.
 
