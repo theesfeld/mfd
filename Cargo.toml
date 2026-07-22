@@ -37,13 +37,16 @@ path = "src/bin/bake-font-atlas.rs"
 required-features = ["bake_font"]
 
 [features]
-default = []
+default = ["obd"]
 ## Host-only: regenerate `src/font_atlas_data.rs` from B612 TTF.
 bake_font = ["dep:fontdue"]
+## Live OBD-II via path dep on theesfeld/obdtui `obd-io` crate.
+obd = ["dep:obd-io"]
 
 [dependencies]
 libc = "0.2"
 fontdue = { version = "0.9", optional = true }
+obd-io = { path = "../obdtui/crates/obd-io", optional = true }
 
 [build-dependencies]
 cc = "1"

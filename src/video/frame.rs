@@ -1,16 +1,4 @@
-//! Optional **sensor glass** feed for auto FLIR / forward-cam pages.
-//!
-//! # Sources (priority)
-//! 1. `MFD_FLIR_PATH` — path to a **P5** (binary PGM) greyscale still  
-//! 2. Synthetic FLIR-like noise (always available)
-//!
-//! # Real camera / LIDAR later
-//! - USB / V4L2: pipe greyscale frames into PGM path or implement `VideoSource`
-//! - Collision / front cam: same path; false-color on glass is a palette choice
-//! - True LIDAR point cloud is a different widget (range rings + range image)
-//!
-//! This module stays dependency-free (no v4l2 crate). Host can refresh a PGM
-//! file from `ffmpeg`/`v4l2-ctl` if desired.
+//! Greyscale frames + FLIR blit.
 
 use crate::geom::Rect;
 use crate::widget::video_frame;

@@ -3,6 +3,7 @@
 mod bezel;
 mod extra;
 mod label;
+mod range_sensor;
 mod round_gauge;
 mod softkeys;
 mod status;
@@ -15,6 +16,7 @@ pub use extra::{
     video_frame,
 };
 pub use label::{label, label_centered};
+pub use range_sensor::{range_display, RangeSnapshot};
 pub use round_gauge::{round_gauge, RoundGaugeOpts};
 pub use softkeys::{softkey_row, SoftkeyLayout};
 pub use status::{status_grid, tire_grid, value_readout, StatusItem, TireReading};

@@ -49,13 +49,15 @@ pub use term::{
     cell_pixel_size_device, display_ppi, display_ppi_info, mfd_face_inches, physical_mfd_layout,
     pixel_space, PhysicalFace, PixelSpace, PpiSource, PxSpaceSource,
 };
+#[cfg(target_os = "linux")]
+pub use video::V4l2Source;
 pub use video::{blit_grey_flir, GreyFrame};
 pub use widget::{
     bearing_pointer, bezel_frame, bscope_grid, caution_box, content_after_osb, crosshair,
     horizon_cue, label, label_centered, list_menu, numeric_readout, osb_chrome, progress_strip,
-    range_rings, round_gauge, softkey_row, station_grid, status_grid, tape_gauge, tire_grid,
-    track_gate, value_readout, video_frame, RoundGaugeOpts, SoftkeyLayout, StatusItem, TapeOpts,
-    TapeOrientation, TireReading,
+    range_display, range_rings, round_gauge, softkey_row, station_grid, status_grid, tape_gauge,
+    tire_grid, track_gate, value_readout, video_frame, RangeSnapshot, RoundGaugeOpts,
+    SoftkeyLayout, StatusItem, TapeOpts, TapeOrientation, TireReading,
 };
 
 /// Packed color `0xAARRGGBB`.

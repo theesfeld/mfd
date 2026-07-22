@@ -37,11 +37,12 @@ fn main() -> io::Result<()> {
         eprintln!("error: mfd-demo requires pure-asm libmfd (x86_64)");
         std::process::exit(1);
     }
-    eprintln!("loaded libmfd {ver} · MLU CMFD 4x4 · jet + auto vehicle pages");
+    eprintln!("loaded libmfd {ver} · MLU CMFD 4x4 · jet + auto");
     eprintln!("Tab jet/auto · c color · g widget-QA · Esc quit");
-    eprintln!("JET: OSB 12/13/14 format select · active again = menu · m = menu");
-    eprintln!("AUTO: top CLST/FUEL/TEMP/DRV/LITE · right TPM/BODY/CLIM/FLIR/OBD");
-    eprintln!("FLIR: MFD_FLIR_PATH=/path/to/grey.pgm  (else synthetic)");
+    eprintln!("JET: OSB 12/13/14 format select · m = Master Menu");
+    eprintln!("AUTO: top CLST…LITE · right TPM/BODY/CLIM/FLIR/RNG · left OBD/SET");
+    eprintln!("CAM: MFD_CAMERA=/dev/video0|auto  FLIR: MFD_FLIR_PATH=still.pgm");
+    eprintln!("OBD: MFD_OBD_PORT=/dev/ttyUSB0  or  MFD_OBD_REPLAY=capture.jsonl");
 
     install_sigint();
     // 30 Hz default keeps Kitty present from queuing into multi-second lag.
@@ -110,9 +111,33 @@ fn main() -> io::Result<()> {
     let mut color_mode = ColorMode::ColorMfd;
     let mut osb_tick: u32 = 0;
 
+    #[cfg(feature = "obd")]
+    let obd_feed = auto::obd_feed::ObdFeed::try_start_from_env();
+    #[cfg(feature = "obd")]
+    if let Some(ref f) = obd_feed {
+        eprintln!("OBD feed: {}", f.status_line());
+    } else {
+        eprintln!("OBD feed: demo (set MFD_OBD_PORT or MFD_OBD_REPLAY for live)");
+    }
+    #[cfg(not(feature = "obd"))]
+    eprintln!("OBD feed: disabled (build with --features obd)");
+
+    #[cfg(target_os = "linux")]
+    let mut camera = {
+        use mfd::V4l2Source;
+        let cam = V4l2Source::auto_detect().or_else(V4l2Source::from_env);
+        if let Some(ref c) = cam {
+            eprintln!("camera: {}", c.device.display());
+        } else {
+            eprintln!("camera: none (MFD_CAMERA=/dev/video0 or auto)");
+        }
+        cam
+    };
+
     enter_fullscreen()?;
     let t0 = Instant::now();
     let mut keybuf = Vec::with_capacity(32);
+    let mut frame_i = 0u32;
 
     while RUNNING.load(Ordering::Relaxed) {
         keybuf.clear();
@@ -190,8 +215,9 @@ fn main() -> io::Result<()> {
                             auto_page = p;
                         } else if let Some(p) = AutoPage::from_right_osb(osb) {
                             auto_page = p;
+                        } else if let Some(p) = AutoPage::from_left_osb(osb) {
+                            auto_page = p;
                         } else {
-                            // Page-local OSBs
                             match (auto_page, osb) {
                                 (AutoPage::Cluster | AutoPage::Setup, 11 | 15) => {
                                     vehicle.speed_unit = vehicle.speed_unit.cycle();
@@ -201,9 +227,9 @@ fn main() -> io::Result<()> {
                                 (AutoPage::Drive, 13) => vehicle.gear = GearSelect::Neutral,
                                 (AutoPage::Drive, 14) => vehicle.gear = GearSelect::Drive,
                                 (AutoPage::Drive, 15) => vehicle.gear = GearSelect::Manual,
-                                (AutoPage::Drive, 16) => vehicle.drive = DriveMode::FourLow,
+                                (AutoPage::Drive, 16) => vehicle.drive = DriveMode::TwoHigh,
                                 (AutoPage::Drive, 17) => vehicle.drive = DriveMode::FourHigh,
-                                (AutoPage::Drive, 18) => vehicle.drive = DriveMode::TwoHigh,
+                                (AutoPage::Drive, 18) => vehicle.drive = DriveMode::FourLow,
                                 (AutoPage::Lights, 11) => {
                                     vehicle.light_interior = !vehicle.light_interior
                                 }
@@ -213,18 +239,12 @@ fn main() -> io::Result<()> {
                                 (AutoPage::Lights, 13) => vehicle.light_fog = !vehicle.light_fog,
                                 (AutoPage::Lights, 14) => vehicle.light_high = !vehicle.light_high,
                                 (AutoPage::Lights, 15) => vehicle.light_low = !vehicle.light_low,
-                                (AutoPage::Clim, 16) => {
-                                    vehicle.hvac_fan = (vehicle.hvac_fan - 0.1).max(0.0)
-                                }
+                                (AutoPage::Clim, 16) => vehicle.hvac_ac = !vehicle.hvac_ac,
                                 (AutoPage::Clim, 17) => {
                                     vehicle.hvac_fan = (vehicle.hvac_fan + 0.1).min(1.0)
                                 }
                                 (AutoPage::Clim, 18) => {
                                     vehicle.hvac_defrost = !vehicle.hvac_defrost
-                                }
-                                (AutoPage::Clim, 20) => vehicle.hvac_ac = !vehicle.hvac_ac,
-                                (AutoPage::Setup, 10) | (_, 10) if auto_page == AutoPage::Obd => {
-                                    auto_page = AutoPage::Setup
                                 }
                                 _ => {}
                             }
@@ -235,21 +255,49 @@ fn main() -> io::Result<()> {
         }
 
         let t = t0.elapsed().as_secs_f32();
-        // Live demo motion; keep operator gear/drive/lights toggles.
-        let mut live = auto::demo_vehicle(t);
-        live.speed_unit = vehicle.speed_unit;
-        live.gear = vehicle.gear;
-        live.gear_num = vehicle.gear_num;
-        live.drive = vehicle.drive;
-        live.light_low = vehicle.light_low;
-        live.light_high = vehicle.light_high;
-        live.light_drive = vehicle.light_drive;
-        live.light_fog = vehicle.light_fog;
-        live.light_interior = vehicle.light_interior;
-        live.hvac_ac = vehicle.hvac_ac;
-        live.hvac_defrost = vehicle.hvac_defrost;
-        live.hvac_fan = vehicle.hvac_fan;
-        vehicle = live;
+        frame_i = frame_i.wrapping_add(1);
+
+        // Vehicle: OBD live if available, else animated demo; keep operator toggles.
+        #[cfg(feature = "obd")]
+        let use_obd = obd_feed.is_some();
+        #[cfg(not(feature = "obd"))]
+        let use_obd = false;
+
+        if use_obd {
+            #[cfg(feature = "obd")]
+            if let Some(ref feed) = obd_feed {
+                feed.apply_to(&mut vehicle);
+            }
+        } else {
+            let mut live = auto::demo_vehicle(t);
+            live.speed_unit = vehicle.speed_unit;
+            live.gear = vehicle.gear;
+            live.gear_num = vehicle.gear_num;
+            live.drive = vehicle.drive;
+            live.light_low = vehicle.light_low;
+            live.light_high = vehicle.light_high;
+            live.light_drive = vehicle.light_drive;
+            live.light_fog = vehicle.light_fog;
+            live.light_interior = vehicle.light_interior;
+            live.hvac_ac = vehicle.hvac_ac;
+            live.hvac_defrost = vehicle.hvac_defrost;
+            live.hvac_fan = vehicle.hvac_fan;
+            vehicle = live;
+        }
+
+        // Camera: grab every few frames to keep present snappy
+        #[cfg(target_os = "linux")]
+        let cam_frame = if matches!(domain, Domain::Auto) && matches!(auto_page, AutoPage::Flir) {
+            if frame_i % 3 == 0 {
+                camera.as_mut().and_then(|c| c.grab().cloned())
+            } else {
+                camera.as_ref().and_then(|c| c.last.clone())
+            }
+        } else {
+            None
+        };
+        #[cfg(not(target_os = "linux"))]
+        let cam_frame: Option<mfd::GreyFrame> = None;
 
         let pal = Palette::new(color_mode);
         let mut page = Page::new(&mut panel);
@@ -260,7 +308,15 @@ fn main() -> io::Result<()> {
                 jet::draw_format_sel(&mut page, jet_fmt, &pal, &bezel, t, Some(&fmt_sel))
             }
             Domain::Auto => {
-                auto::draw_auto(&mut page, auto_page, &pal, &bezel, &vehicle, t);
+                auto::draw_auto_with_video(
+                    &mut page,
+                    auto_page,
+                    &pal,
+                    &bezel,
+                    &vehicle,
+                    t,
+                    cam_frame.as_ref(),
+                );
             }
         }
 

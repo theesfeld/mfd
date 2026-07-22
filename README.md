@@ -46,7 +46,8 @@ Default demo: **FCR** on format slot OSB14 (MLU M1 CMFD model), **30 Hz**, squar
 | **`c`** | Color mode (mono / MLU color / high-vis) |
 
 **Auto (Tab):** CLUSTER · FUEL · TEMPS · DRIVE · LIGHTS · TPM · BODY · CLIMATE · **FLIR** · OBD · SETUP.  
-FLIR still: `MFD_FLIR_PATH=grey.pgm`.  
+FLIR: `MFD_CAMERA=/dev/video0` or `auto` · still `MFD_FLIR_PATH=grey.pgm` · **RANGE** page (right OSB 10).  
+OBD live: `MFD_OBD_PORT=/dev/ttyUSB0` or `MFD_OBD_REPLAY=…` (feature `obd`, uses `../obdtui/crates/obd-io`).  
 
 Primary manual for CMFD behaviour: **MLU M1 Pilot’s Guide** (`docs/246416220-…pdf`). See `docs/reference/mlu-m1-cmfd.md`.  
 `[` `]` change **real brightness** (scales RGB after draw).

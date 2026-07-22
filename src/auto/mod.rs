@@ -1,20 +1,21 @@
 //! Automotive **page layouts** — same bezel / OSB model as jet, vehicle data.
 //!
+//! Optional live OBD: feature `obd` + `MFD_OBD_PORT` / `MFD_OBD_REPLAY` (see `obd_feed`).
+//!
 //! # Widget mapping (MFD equivalents)
 //! | Vehicle data | MFD widget |
 //! |--------------|------------|
-//! | Fuel, oil, temps, battery, flow | [`tape_gauge`] vertical/horizontal |
-//! | Engine RPM | [`round_gauge`] (tach) |
-//! | Speed | large [`value_readout`] / numeric |
-//! | Throttle % | [`progress_strip`] or tape |
-//! | Gear / 4WD | [`status_grid`] + big label |
-//! | Lights, doors, belts | [`status_grid`] |
-//! | TPM | [`tire_grid`] |
-//! | HVAC | tapes + list |
-//! | Forward sensor | [`video_frame`] + greyscale blit (FLIR page) |
-//!
-//! Tape gauges are standard instrument language (jet fuel/oil tapes); they map
-//! cleanly to continuous 0..1 vehicle channels. Discrete systems use status cells.
+//! | Fuel, oil, temps, battery, flow | tape_gauge |
+//! | Engine RPM | round_gauge |
+//! | Speed | value_readout |
+//! | Throttle % | progress_strip |
+//! | Gear / 4WD / lights / doors | status_grid |
+//! | TPM | tire_grid |
+//! | Forward camera / FLIR | greyscale blit + TGP overlays |
+//! | Collision / park range | range_display |
+
+#[cfg(feature = "obd")]
+pub mod obd_feed;
 
 use crate::bezel::BezelState;
 use crate::geom::Rect;
@@ -23,8 +24,9 @@ use crate::palette::Palette;
 use crate::video::{blit_grey_flir, GreyFrame};
 use crate::widget::{
     caution_box, content_after_osb, crosshair, label, list_menu, numeric_readout, osb_chrome,
-    progress_strip, round_gauge, status_grid, tape_gauge, tire_grid, track_gate, value_readout,
-    RoundGaugeOpts, StatusItem, TapeOpts, TapeOrientation, TireReading,
+    progress_strip, range_display, round_gauge, status_grid, tape_gauge, tire_grid, track_gate,
+    value_readout, RangeSnapshot, RoundGaugeOpts, StatusItem, TapeOpts, TapeOrientation,
+    TireReading,
 };
 use crate::Surface;
 
@@ -335,6 +337,8 @@ pub enum AutoPage {
     Body,
     Clim,
     Flir,
+    /// Forward/rear parking & collision ranges (sensor arcs).
+    Collision,
     Obd,
     Setup,
 }
@@ -350,6 +354,7 @@ impl AutoPage {
         AutoPage::Body,
         AutoPage::Clim,
         AutoPage::Flir,
+        AutoPage::Collision,
         AutoPage::Obd,
         AutoPage::Setup,
     ];
@@ -365,6 +370,7 @@ impl AutoPage {
             AutoPage::Body => "BODY",
             AutoPage::Clim => "CLIM",
             AutoPage::Flir => "FLIR",
+            AutoPage::Collision => "RNG",
             AutoPage::Obd => "OBD",
             AutoPage::Setup => "SET",
         }
@@ -381,6 +387,7 @@ impl AutoPage {
             AutoPage::Body => "BODY",
             AutoPage::Clim => "CLIMATE",
             AutoPage::Flir => "FLIR / CAM",
+            AutoPage::Collision => "RANGE",
             AutoPage::Obd => "OBD",
             AutoPage::Setup => "SETUP",
         }
@@ -405,7 +412,16 @@ impl AutoPage {
             7 => Some(AutoPage::Body),
             8 => Some(AutoPage::Clim),
             9 => Some(AutoPage::Flir),
-            10 => Some(AutoPage::Obd),
+            10 => Some(AutoPage::Collision),
+            _ => None,
+        }
+    }
+
+    /// Left OSB 16–20 (bottom→top in jet map is reverse; our chrome left[0]=OSB20).
+    pub fn from_left_osb(osb: u8) -> Option<AutoPage> {
+        match osb {
+            20 => Some(AutoPage::Obd),
+            19 => Some(AutoPage::Setup),
             _ => None,
         }
     }
@@ -415,7 +431,7 @@ type Osb5 = [&'static str; 5];
 
 fn legends(page: AutoPage, v: &VehicleSnapshot) -> (Osb5, Osb5, Osb5, Osb5) {
     let top = ["CLST", "FUEL", "TEMP", "DRV", "LITE"];
-    let right = ["TPM", "BODY", "CLIM", "FLIR", "OBD"];
+    let right = ["TPM", "BODY", "CLIM", "FLIR", "RNG"];
     // Bottom: context for page
     let bottom: Osb5 = match page {
         AutoPage::Cluster => ["UNIT", v.speed_unit.name(), "", "SET", "HOME"],
@@ -428,14 +444,16 @@ fn legends(page: AutoPage, v: &VehicleSnapshot) -> (Osb5, Osb5, Osb5, Osb5) {
         ],
         AutoPage::Lights => ["LO", "HI", "FOG", "DRL", "INT"],
         AutoPage::Flir => ["CAM", "WHOT", "GHOT", "GATE", "SET"],
+        AutoPage::Collision => ["F", "FL", "FR", "R", "RST"],
         AutoPage::Setup => ["UNIT", "OBD", "CAN", "BRT", "HOME"],
         _ => ["P", "R", "N", "D", "M"],
     };
+    // left[0]=OSB20 … left[4]=OSB16
     let left: Osb5 = match page {
-        AutoPage::Drive => ["2H", "4H", "4L", "SET", "CLST"],
-        AutoPage::Tpm => ["PSI", "kPa", "BAR", "RST", "CLST"],
-        AutoPage::Clim => ["AC", "HEAT", "DEF", "FAN+", "FAN-"],
-        _ => ["2H", "4H", "4L", "SET", "HOME"],
+        AutoPage::Drive => ["OBD", "SET", "4L", "4H", "2H"],
+        AutoPage::Tpm => ["OBD", "SET", "BAR", "kPa", "PSI"],
+        AutoPage::Clim => ["OBD", "SET", "DEF", "FAN+", "AC"],
+        _ => ["OBD", "SET", "4L", "4H", "2H"],
     };
     (top, right, bottom, left)
 }
@@ -513,6 +531,19 @@ pub fn draw_auto(
     bezel: &BezelState,
     v: &VehicleSnapshot,
     t: f32,
+) {
+    draw_auto_with_video(page, which, pal, bezel, v, t, None);
+}
+
+/// Draw auto page; optional live greyscale camera frame for FLIR.
+pub fn draw_auto_with_video(
+    page: &mut Page,
+    which: AutoPage,
+    pal: &Palette,
+    bezel: &BezelState,
+    v: &VehicleSnapshot,
+    t: f32,
+    cam_frame: Option<&GreyFrame>,
 ) {
     page.clear();
     page.surface.clear(pal.glass);
@@ -886,12 +917,17 @@ pub fn draw_auto(
             );
         }
         AutoPage::Flir => {
-            // Sensor glass — same language as jet TGP/FLIR.
             let frame = c.inset(c.w / 14);
             let fw = (frame.w as u32).clamp(80, 320);
             let fh_px = (frame.h as u32).clamp(60, 240);
-            let grey = GreyFrame::resolve(t, fw, fh_px);
-            blit_grey_flir(page.surface, frame, &grey, pal.primary, pal.structure);
+            let owned;
+            let grey = if let Some(f) = cam_frame {
+                f
+            } else {
+                owned = GreyFrame::resolve(t, fw, fh_px);
+                &owned
+            };
+            blit_grey_flir(page.surface, frame, grey, pal.primary, pal.structure);
             let (cx, cy) = frame.center();
             crosshair(page.surface, cx, cy, 22, 6, pal.dim);
             track_gate(
@@ -909,25 +945,41 @@ pub fn draw_auto(
                 pal.readout,
                 fh * 0.75,
             );
+            let src = if cam_frame.is_some() {
+                "SRC  CAM"
+            } else if std::env::var_os("MFD_FLIR_PATH").is_some() {
+                "SRC  FILE"
+            } else {
+                "SRC  SYN"
+            };
             label(
                 page.surface,
                 frame.x as f32 + 4.0,
                 frame.bottom() as f32 - fh,
-                if std::env::var_os("MFD_FLIR_PATH").is_some() {
-                    "SRC  FILE"
-                } else {
-                    "SRC  SYN"
-                },
+                src,
                 pal.dim,
                 fh * 0.7,
             );
+        }
+        AutoPage::Collision => {
+            let rng = RangeSnapshot::from_env_or_synthetic(t);
+            range_display(
+                page.surface,
+                c.inset(4),
+                &rng,
+                pal.structure,
+                pal.primary,
+                pal.caution,
+                pal.warning,
+                pal.readout,
+            );
             label(
                 page.surface,
-                frame.right() as f32 - fh * 5.0,
-                frame.bottom() as f32 - fh,
-                "CAM/LIDAR",
+                c.x as f32 + 4.0,
+                c.bottom() as f32 - fh,
+                "PARK/COLLISION  ·  MFD_RANGE=m",
                 pal.dim,
-                fh * 0.7,
+                fh * 0.65,
             );
         }
         AutoPage::Obd => {
@@ -1002,7 +1054,7 @@ pub fn draw_auto_obd(
     v.throttle = obd.throttle;
     v.load = obd.load;
     v.dtc_count = obd.dtc_count;
-    draw_auto(page, which, pal, bezel, &v, t);
+    draw_auto_with_video(page, which, pal, bezel, &v, t, None);
 }
 
 pub fn rpm_norm(rpm: f32, redline: f32) -> f32 {
