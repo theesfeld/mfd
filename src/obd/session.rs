@@ -10,8 +10,8 @@ use crate::obd::replay::ReplayTransport;
 #[cfg(target_os = "linux")]
 use crate::obd::transport::BtSppTransport;
 use crate::obd::transport::{
-    bluez_power_on, discover_obd_macs, normalize_mac, rfcomm_channel_candidates, SerialTransport,
-    Transport,
+    bluez_is_known, bluez_power_on, bluez_prepare_link, bluez_scan_brief, discover_obd_macs,
+    normalize_mac, rfcomm_channel_candidates, SerialTransport, Transport,
 };
 use crate::obd::uds;
 use std::path::Path;
@@ -184,7 +184,8 @@ impl Session {
             }
         }
 
-        // ── Bluetooth resilient path ──────────────────────────────────────
+        // ── Bluetooth resilient path (cmfd owns the entire link) ──────────
+        // Operator does not run bluetoothctl. We power, connect, RFCOMM, ELM.
         bluez_power_on();
         let preferred = opts.bt_mac.as_deref().and_then(normalize_mac);
         let channels = rfcomm_channel_candidates(opts.bt_channel);
@@ -196,20 +197,23 @@ impl Session {
                 return Err(Error::Adapter("stopped while connecting".into()));
             }
             attempt = attempt.wrapping_add(1);
+
+            // Periodic inquiry when preferred is unknown or many failures.
+            if attempt % 4 == 0 {
+                on_status("BT scan …");
+                bluez_scan_brief(4);
+            }
+
             let macs = discover_obd_macs(preferred.as_deref());
             if macs.is_empty() {
-                on_status("SEARCH no OBD MAC — set MFD_OBD_BT or pair dongle");
-                if attempt.saturating_sub(last_hint) >= 5 {
+                on_status("SEARCH no OBD device yet");
+                if attempt.saturating_sub(last_hint) >= 6 {
                     last_hint = attempt;
                     eprintln!(
-                        "mfd obd: no Bluetooth OBD found. Pair the dongle:\n  \
-                         bluetoothctl\n    \
-                         power on\n    \
-                         scan on   # put dongle in pairing mode if needed\n    \
-                         pair AA:BB:CC:DD:EE:FF\n    \
-                         trust AA:BB:CC:DD:EE:FF\n    \
-                         connect AA:BB:CC:DD:EE:FF\n  \
-                         then: export MFD_OBD_BT=AA:BB:CC:DD:EE:FF"
+                        "mfd obd: still hunting Bluetooth OBD (cmfd owns connect).\n  \
+                         Power the dongle on the OBD port (truck RUN if needed).\n  \
+                         First-time only: put dongle in pairing mode; cmfd will scan.\n  \
+                         Set MFD_OBD_BT if the MAC is not the truck default."
                     );
                 }
                 sleep_backoff(attempt, stop);
@@ -221,11 +225,20 @@ impl Session {
                 if stop.load(Ordering::Relaxed) {
                     return Err(Error::Adapter("stopped while connecting".into()));
                 }
+                // BlueZ ACL first (full prepare), then RFCOMM channels.
+                on_status(&format!("BT link {mac}"));
+                let linked = bluez_prepare_link(mac, Duration::from_secs(8));
+                if !linked {
+                    last_err = format!("BlueZ not connected to {mac} (dongle off/out of range?)");
+                    on_status(&last_err);
+                    // Still try RFCOMM — some stacks allow it without "Connected: yes".
+                }
+
                 for &ch in &channels {
                     if stop.load(Ordering::Relaxed) {
                         return Err(Error::Adapter("stopped while connecting".into()));
                     }
-                    on_status(&format!("BT {mac} ch{ch} try {attempt}"));
+                    on_status(&format!("BT {mac} RFCOMM ch{ch} try {attempt}"));
                     match Self::connect(ConnectOpts {
                         bt_mac: Some(mac.clone()),
                         bt_channel: ch,
@@ -233,29 +246,29 @@ impl Session {
                         ..Default::default()
                     }) {
                         Ok(s) => {
-                            eprintln!("mfd obd: connected {mac} RFCOMM ch{ch}");
+                            eprintln!("mfd obd: LIVE {mac} RFCOMM ch{ch} (cmfd-owned link)");
                             return Ok(s);
                         }
                         Err(e) => {
                             last_err = e.to_string();
-                            // Next channel / MAC quickly; no long sleep inside matrix.
                         }
                     }
                 }
             }
 
             on_status(&format!("SEARCH fail: {last_err}"));
-            if attempt.saturating_sub(last_hint) >= 8 {
+            if attempt.saturating_sub(last_hint) >= 6 {
                 last_hint = attempt;
-                let pref = preferred.as_deref().unwrap_or("AA:BB:CC:DD:EE:FF");
+                let pref = preferred.as_deref().unwrap_or("—");
+                let known = preferred
+                    .as_ref()
+                    .map(|m| bluez_is_known(m))
+                    .unwrap_or(false);
                 eprintln!(
-                    "mfd obd: still searching for OBD Bluetooth (last: {last_err}).\n  \
-                     Preferred MAC: {pref}\n  \
-                     Tried channels: {channels:?}\n  \
-                     Candidates: {macs:?}\n  \
-                     If unpaired: put dongle in pairing mode, then:\n    \
-                     bluetoothctl pair {pref} && bluetoothctl trust {pref} && bluetoothctl connect {pref}\n  \
-                     Only one RFCOMM client at a time (close other OBD apps)."
+                    "mfd obd: still searching (cmfd owns BT — do not run bluetoothctl).\n  \
+                     MAC: {pref} (known/paired: {known})\n  \
+                     Last: {last_err}\n  \
+                     Check: dongle powered, truck RUN, only one app using the adapter."
                 );
             }
             sleep_backoff(attempt, stop);
